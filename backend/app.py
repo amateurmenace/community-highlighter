@@ -92,6 +92,13 @@ else:
     ytt_api = YouTubeTranscriptApi()
     PROXY_ENABLED = False
 
+# Cloud deployment mode - disables video download features (yt-dlp blocked by YouTube)
+# Set CLOUD_MODE=true in Render to enable this
+CLOUD_MODE = os.getenv("CLOUD_MODE", "false").lower() == "true"
+if CLOUD_MODE:
+    print("[!] CLOUD_MODE enabled - video download/clip features disabled")
+    print("    (Transcripts, AI analysis, and all analytics still work!)")
+
 
 app = FastAPI()
 app.add_middleware(
@@ -718,12 +725,22 @@ async def health_check():
     """Health check endpoint for deployment monitoring"""
     return {
         "status": "healthy",
-        "version": "5.0",
+        "version": "5.5",
+        "cloud_mode": CLOUD_MODE,
+        "proxy_enabled": PROXY_ENABLED,
         "features": {
+            "transcripts": True,
             "ai_assistant": bool(OPENAI_API_KEY),
-            "knowledge_base": True,
+            "ai_summaries": bool(OPENAI_API_KEY),
+            "entity_extraction": bool(OPENAI_API_KEY),
+            "word_frequency": True,
+            "sentiment_analysis": True,
+            "knowledge_base": CHROMADB_AVAILABLE,
+            "video_clips": not CLOUD_MODE,
+            "video_download": not CLOUD_MODE,
             "live_mode": False
-        }
+        },
+        "notes": "Video download features disabled in cloud mode (YouTube blocks cloud IPs)" if CLOUD_MODE else None
     }
 
 
@@ -2004,6 +2021,14 @@ def simple_job(job_id, vid, clips, format_type="combined"):
 
 @app.post("/api/render_clips")
 async def render_clips(req: Request):
+    # Disable video downloads on cloud (YouTube blocks yt-dlp from cloud IPs)
+    if CLOUD_MODE:
+        return {
+            "error": "Video clip download is not available in cloud mode",
+            "message": "YouTube blocks video downloads from cloud servers. All transcript analysis features work normally. For clip downloads, run the app locally.",
+            "jobId": None
+        }
+    
     data = await req.json()
     vid = data.get("videoId", "")
     clips = data.get("clips", [])
@@ -2025,6 +2050,9 @@ async def job_status(jobId: str):
 
 @app.post("/api/download_mp4")
 async def download_mp4(req: Request):
+    if CLOUD_MODE:
+        raise HTTPException(503, "Video download not available in cloud mode. YouTube blocks downloads from cloud servers.")
+    
     data = await req.json()
     vid = data.get("videoId", "")
 
@@ -3419,6 +3447,9 @@ async def get_conversation_starters():
 @app.post("/api/clip/preview")
 async def get_clip_preview(req: Request):
     """Get preview data for a clip (thumbnail and text snippet)"""
+    if CLOUD_MODE:
+        return {"error": "Clip preview not available in cloud mode", "frames": [], "transcript_snippet": ""}
+    
     data = await req.json()
     video_id = data.get("videoId")
     start_time = data.get("startTime", 0)
