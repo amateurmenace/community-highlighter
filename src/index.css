@@ -3774,3 +3774,181 @@ footer button:hover {
     max-height: 70vh;
   }
 }
+/* v5.7: New clickable step card styles */
+/* Add these styles to your existing CSS file */
+
+.step-clickable {
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 2px solid transparent;
+}
+
+.step-clickable:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(30, 127, 99, 0.2);
+  border-color: var(--accent);
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+}
+
+.step-clickable:active {
+  transform: translateY(0);
+}
+
+.step-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+
+.step-subtitle {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.step-clickable:hover .step-title {
+  color: var(--accent);
+}
+
+/* Make the steps have more vertical space for the new content */
+.howto .step {
+  padding: 16px;
+  min-height: 80px;
+  align-items: flex-start;
+}
+
+.howto .step .num {
+  margin-top: 4px;
+}
+
+/* Full-width investigate modal adjustments */
+.investigate-modal-overlay {
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Investigate button styles */
+.btn-investigate {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.btn-investigate:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+/* v5.7: Sticky How-To Cards with Compact Mode */
+/* Add these styles to your existing CSS file */
+
+.how-to-permanent {
+  /* Base styles - sticky behavior is set inline */
+}
+
+.howto {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: white;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  flex: 1;
+  min-width: 200px;
+  max-width: 300px;
+}
+
+.step-clickable {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.step-clickable:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border-color: currentColor;
+}
+
+.step-clickable:active {
+  transform: translateY(0);
+}
+
+.step .num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: white;
+  font-weight: 700;
+  flex-shrink: 0;
+  transition: all 0.3s ease;
+}
+
+.step-subtitle {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.4;
+  transition: opacity 0.3s ease, max-height 0.3s ease;
+}
+
+/* Colors for each step */
+.step:nth-child(1) .num { background: #059669; }
+.step:nth-child(2) .num { background: #0891b2; }
+.step:nth-child(3) .num { background: #7c3aed; }
+.step:nth-child(4) .num { background: #db2777; }
+
+.step:nth-child(1):hover { border-color: #059669; }
+.step:nth-child(2):hover { border-color: #0891b2; }
+.step:nth-child(3):hover { border-color: #7c3aed; }
+.step:nth-child(4):hover { border-color: #db2777; }
+
+/* Responsive - stack on mobile */
+@media (max-width: 768px) {
+  .howto {
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  .step {
+    width: 100%;
+    max-width: 400px;
+  }
+}
+
+/* Animation for transition between compact and expanded */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 100px;
+  }
+}
+
+.step-subtitle {
+  animation: slideUp 0.3s ease;
+}

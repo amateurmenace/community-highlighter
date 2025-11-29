@@ -1,4 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+
+// v5.6: Desktop App Banner for cloud mode
+import { DesktopAppBanner, useCloudMode } from './DesktopAppBanner';
 import {
   apiTranscript, apiWordfreq, apiSummaryAI, apiTranslate,
   apiRenderJob, apiJobStatus, apiDownloadMp4, apiMetadata, apiHighlightReel,
@@ -9,8 +12,6 @@ import {
   apiClipPreview, apiStartLiveMonitoring,
   apiStoreTranscript
 } from "./api";
-
-import { DesktopAppBanner, DesktopAppInlinePrompt, useCloudMode } from './components/DesktopAppBanner';
 
 // v5.2: Use relative URLs for deployment compatibility
 const BACKEND_URL = "";
@@ -41,6 +42,14 @@ const cleanHtmlEntities = (text) => {
   cleaned = cleaned.replace(/&amp;+/g, '&');
   cleaned = cleaned.replace(/&nbsp;+/g, ' ');
   return cleaned.trim();
+};
+
+// v5.6: Replace Brooklyn with Brookline (common transcription error)
+const fixBrooklyn = (text) => {
+  if (!text) return text;
+  return text
+    .replace(/Brooklyn/gi, 'Brookline')
+    .replace(/BROOKLYN/g, 'BROOKLINE');
 };
 
 const padTime = (x) => {
@@ -105,69 +114,181 @@ function useDebounce(value, delay = 220) {
   return v;
 }
 
-function HowToGuide({ t }) {
-  const [isPopupOpen, setIsPopupOpen] = useState(false);
+function HowToGuide({ onOpenAssistant }) {
+  const [isCompact, setIsCompact] = useState(false);
+  
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsCompact(window.scrollY > 150);
+    };
+    
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToElement = (id) => {
+    const element = document.getElementById(id);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      element.style.transition = 'box-shadow 0.3s';
+      element.style.boxShadow = '0 0 20px rgba(30, 127, 99, 0.5)';
+      setTimeout(() => {
+        element.style.boxShadow = 'none';
+      }, 1500);
+    }
+  };
+
+  const stepColors = ['#059669', '#0891b2', '#7c3aed', '#db2777'];
 
   return (
-    <>
-    <DesktopAppBanner />
-      {isPopupOpen && (
-        <div className="entity-popup-overlay" onClick={() => setIsPopupOpen(false)}>
-          <div className="entity-popup-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', padding: '24px' }}>
-            <div className="entity-popup-header">
-              <h3>Best Practices for YouTube Links</h3>
-              <button className="btn-close-popup" onClick={() => setIsPopupOpen(false)}>âœ•</button>
-            </div>
-            <div className="entity-popup-content" style={{ fontSize: '15px', lineHeight: '1.6' }}>
-              <p>To ensure the app works correctly, it's best to use the main URL from your browser's address bar.</p>
-
-              <h4 style={{ marginTop: '16px', marginBottom: '8px' }}>Good Format (Use This):</h4>
-              <p>Copy the URL directly from the top of your browser.</p>
-              <code className="code-example">https://www.youtube.com/watch?v=JQOVeVJU7Ds</code>
-              <p style={{ marginTop: '4px' }}>Timestamped links also work:</p>
-              <code className="code-example">https://www.youtube.com/watch?v=JQOVeVJU7Ds&t=12049s</code>
-
-              <h4 style={{ marginTop: '16px', marginBottom: '8px' }}>Formats to Avoid (May Not Work):</h4>
-              <p>Avoid using the "Share" button links, as they can sometimes fail.</p>
-              <p><strong>Avoid "Live" links:</strong></p>
-              <code className="code-example" style={{ textDecoration: 'line-through' }}>https://www.youtube.com/live/JQOVeVJU7Ds?si=...</code>
-              <p><strong>Avoid "Short" links:</strong></p>
-              <code className="code-example" style={{ textDecoration: 'line-through' }}>https://youtu.be/JQOVeVJU7Ds</code>
-
-              <h4 style={{ marginTop: '16px', marginBottom: '8px' }}>How to Fix a Link:</h4>
-              <p>If you have a "live" or "youtu.be" link, you just need the 11-character Video ID.</p>
-              <p>From <code className="code-example">/live/JQOVeVJU7Ds</code> or <code className="code-example">/youtu.be/JQOVeVJU7Ds</code>, copy the ID: <code className="code-example">JQOVeVJU7Ds</code></p>
-              <p>Then, paste it into this format:</p>
-              <code className="code-example">https://www.youtube.com/watch?v=JQOVeVJU7Ds</code>
-            </div>
-            <div className="entity-popup-actions" style={{ marginTop: '16px' }}>
-              <button className="btn btn-primary" onClick={() => setIsPopupOpen(false)}>Got it</button>
-            </div>
+    <section 
+      className="how-to-permanent"
+      style={{
+        position: 'sticky',
+        top: '0',
+        zIndex: 100,
+        background: 'white',
+        padding: isCompact ? '8px 0' : '16px 0',
+        transition: 'all 0.3s ease',
+        boxShadow: isCompact ? '0 2px 8px rgba(0,0,0,0.1)' : 'none',
+        borderBottom: isCompact ? '2px solid #e2e8f0' : 'none'
+      }}
+    >
+      <div className="howto" style={{ 
+        gap: isCompact ? '8px' : '12px',
+        transition: 'all 0.3s ease'
+      }}>
+        <div 
+          className="step step-clickable" 
+          onClick={() => scrollToElement('url-input-section')}
+          style={{ 
+            cursor: 'pointer',
+            padding: isCompact ? '8px 12px' : '16px',
+            minHeight: isCompact ? 'auto' : '80px',
+            transition: 'all 0.3s ease'
+          }}
+        >
+          <div className="num" style={{ 
+            background: stepColors[0],
+            fontSize: isCompact ? '14px' : '18px',
+            width: isCompact ? '28px' : '36px',
+            height: isCompact ? '28px' : '36px',
+            transition: 'all 0.3s ease'
+          }}>1</div>
+          <div>
+            <div style={{ 
+              fontSize: isCompact ? '14px' : '18px', 
+              fontWeight: '800',
+              color: stepColors[0],
+              transition: 'all 0.3s ease'
+            }}>Add a Meeting</div>
+            {!isCompact && (
+              <div className="step-subtitle" style={{ marginTop: '4px' }}>
+                Paste a link to any YouTube video below
+              </div>
+            )}
           </div>
         </div>
-      )}
 
-      <section className="how-to-permanent">
-        <div className="howto">
-          <div className="step">
-            <div className="num">1</div>
-            <div>{t.step1}</div>
-          </div>
-          <div className="step">
-            <div className="num">2</div>
-            <div>{t.step2}</div>
-          </div>
-          <div className="step">
-            <div className="num">3</div>
-            <div>{t.step3}</div>
-          </div>
-          <div className="step">
-            <div className="num">4</div>
-            <div>{t.step4}</div>
+        <div 
+          className="step step-clickable" 
+          onClick={() => scrollToElement('search-section')}
+          style={{ 
+            cursor: 'pointer',
+            padding: isCompact ? '8px 12px' : '16px',
+            minHeight: isCompact ? 'auto' : '80px',
+            transition: 'all 0.3s ease'
+          }}
+        >
+          <div className="num" style={{ 
+            background: stepColors[1],
+            fontSize: isCompact ? '14px' : '18px',
+            width: isCompact ? '28px' : '36px',
+            height: isCompact ? '28px' : '36px',
+            transition: 'all 0.3s ease'
+          }}>2</div>
+          <div>
+            <div style={{ 
+              fontSize: isCompact ? '14px' : '18px', 
+              fontWeight: '800',
+              color: stepColors[1],
+              transition: 'all 0.3s ease'
+            }}>Search a Meeting</div>
+            {!isCompact && (
+              <div className="step-subtitle" style={{ marginTop: '4px' }}>
+                Use the search bar or word cloud to find anything anywhere at anytime
+              </div>
+            )}
           </div>
         </div>
-      </section>
-    </>
+
+        <div 
+          className="step step-clickable" 
+          onClick={() => {
+            if (onOpenAssistant) onOpenAssistant();
+          }}
+          style={{ 
+            cursor: 'pointer',
+            padding: isCompact ? '8px 12px' : '16px',
+            minHeight: isCompact ? 'auto' : '80px',
+            transition: 'all 0.3s ease'
+          }}
+        >
+          <div className="num" style={{ 
+            background: stepColors[2],
+            fontSize: isCompact ? '14px' : '18px',
+            width: isCompact ? '28px' : '36px',
+            height: isCompact ? '28px' : '36px',
+            transition: 'all 0.3s ease'
+          }}>3</div>
+          <div>
+            <div style={{ 
+              fontSize: isCompact ? '14px' : '18px', 
+              fontWeight: '800',
+              color: stepColors[2],
+              transition: 'all 0.3s ease'
+            }}>Talk to a Meeting</div>
+            {!isCompact && (
+              <div className="step-subtitle" style={{ marginTop: '4px' }}>
+                An AI Agent will embed in the meeting and answer your questions
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div 
+          className="step step-clickable" 
+          onClick={() => scrollToElement('analytics-section')}
+          style={{ 
+            cursor: 'pointer',
+            padding: isCompact ? '8px 12px' : '16px',
+            minHeight: isCompact ? 'auto' : '80px',
+            transition: 'all 0.3s ease'
+          }}
+        >
+          <div className="num" style={{ 
+            background: stepColors[3],
+            fontSize: isCompact ? '14px' : '18px',
+            width: isCompact ? '28px' : '36px',
+            height: isCompact ? '28px' : '36px',
+            transition: 'all 0.3s ease'
+          }}>4</div>
+          <div>
+            <div style={{ 
+              fontSize: isCompact ? '14px' : '18px', 
+              fontWeight: '800',
+              color: stepColors[3],
+              transition: 'all 0.3s ease'
+            }}>Analyze a Meeting</div>
+            {!isCompact && (
+              <div className="step-subtitle" style={{ marginTop: '4px' }}>
+                Use the data visualizations to make quick sense of long meetings, and even suggest your own!
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -607,8 +728,7 @@ function MentionedEntitiesCard({ entities, isLoading }) {
                   title={isPlace ? 'Click to view on map' : 'Click to view on Wikipedia'}
                 >
                   <span className="entity-name">
-
-                    {entity.text}
+                    {fixBrooklyn(entity.text)}
                   </span>
                   <span className="entity-count" title={entity.type}>
                     {entity.count}
@@ -2484,23 +2604,13 @@ function KnowledgeBase({ currentVideoId, onSelectMeeting }) {
 }
 
 export default function App() {
+  // v5.6: Cloud mode detection
   const { isCloudMode } = useCloudMode();
-
-  return (
-    <div className="app">
-      {/* Desktop download banner at top */}
-      <DesktopAppBanner />
-
-      {/* ... rest of your app ... */}
-
-      {/* Where you have clip download buttons: */}
-      {isCloudMode ? (
-        <DesktopAppInlinePrompt feature="Video clip downloads" />
-      ) : (
-        <YourClipDownloadComponent />
-      )}
-    </div>
-  );
+  
+  // v5.6: Word Investigate modal state
+  const [investigateWord, setInvestigateWord] = useState(null);
+  const [investigateViewMode, setInvestigateViewMode] = useState('news');
+  
   const [url, setUrl] = useState("");
   const [videoId, setVideoId] = useState("");
   const [liveUrl, setLiveUrl] = useState("");
@@ -3120,6 +3230,188 @@ export default function App() {
 
   return (
     <>
+      {/* v5.7: Full-width Investigate Modal */}
+      {investigateWord && (
+        <div 
+          className="investigate-modal-overlay"
+          onClick={() => setInvestigateWord(null)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.7)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px'
+          }}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'white',
+              borderRadius: '16px',
+              width: '95%',
+              maxWidth: '1400px',
+              maxHeight: '90vh',
+              overflow: 'hidden',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
+          >
+            {/* Header */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '20px 24px',
+              borderBottom: '2px solid #e2e8f0',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+            }}>
+              <h2 style={{ margin: 0, color: 'white', fontSize: '24px' }}>
+                🔍 Investigate: "{investigateWord.text}"
+              </h2>
+              <button 
+                onClick={() => setInvestigateWord(null)}
+                style={{
+                  background: 'rgba(255,255,255,0.2)',
+                  border: 'none',
+                  color: 'white',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  padding: '8px 12px',
+                  borderRadius: '8px'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div style={{
+              display: 'flex',
+              gap: '8px',
+              padding: '16px 24px',
+              background: '#f8fafc',
+              borderBottom: '1px solid #e2e8f0'
+            }}>
+              <button
+                onClick={() => setInvestigateViewMode('news')}
+                style={{
+                  padding: '12px 24px',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '15px',
+                  fontWeight: '600',
+                  background: investigateViewMode === 'news' ? '#667eea' : '#e2e8f0',
+                  color: investigateViewMode === 'news' ? 'white' : '#64748b'
+                }}
+              >
+                📰 Google News
+              </button>
+              <button
+                onClick={() => setInvestigateViewMode('maps')}
+                style={{
+                  padding: '12px 24px',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '15px',
+                  fontWeight: '600',
+                  background: investigateViewMode === 'maps' ? '#667eea' : '#e2e8f0',
+                  color: investigateViewMode === 'maps' ? 'white' : '#64748b'
+                }}
+              >
+                🗺️ Google Maps
+              </button>
+              <button
+                onClick={() => setInvestigateViewMode('wikipedia')}
+                style={{
+                  padding: '12px 24px',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '15px',
+                  fontWeight: '600',
+                  background: investigateViewMode === 'wikipedia' ? '#667eea' : '#e2e8f0',
+                  color: investigateViewMode === 'wikipedia' ? 'white' : '#64748b'
+                }}
+              >
+                📚 Wikipedia
+              </button>
+            </div>
+
+            {/* Content */}
+            <div style={{ flex: 1, minHeight: '500px' }}>
+              {investigateViewMode === 'news' && (
+                <iframe
+                  src={`https://www.google.com/search?q=${encodeURIComponent(investigateWord.text)}&tbm=nws&igu=1`}
+                  title={`News - ${investigateWord.text}`}
+                  style={{ width: '100%', height: '500px', border: 'none' }}
+                  sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                />
+              )}
+              {investigateViewMode === 'maps' && (
+                <iframe
+                  src={`https://www.google.com/maps/embed/v1/place?key=AIzaSyBFw0Qbyq9zTFTd-tUY6dZWTgaQzuU17R8&q=${encodeURIComponent(investigateWord.text)}`}
+                  title={`Map - ${investigateWord.text}`}
+                  style={{ width: '100%', height: '500px', border: 'none' }}
+                  allow="geolocation"
+                />
+              )}
+              {investigateViewMode === 'wikipedia' && (
+                <iframe
+                  src={`https://en.wikipedia.org/wiki/${encodeURIComponent(investigateWord.text)}`}
+                  title={`Wikipedia - ${investigateWord.text}`}
+                  style={{ width: '100%', height: '500px', border: 'none' }}
+                  sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                />
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '12px',
+              padding: '16px 24px',
+              borderTop: '1px solid #e2e8f0',
+              background: '#f8fafc'
+            }}>
+              <a
+                href={
+                  investigateViewMode === 'maps'
+                    ? `https://www.google.com/maps/search/${encodeURIComponent(investigateWord.text)}`
+                    : investigateViewMode === 'news'
+                      ? `https://www.google.com/search?q=${encodeURIComponent(investigateWord.text)}&tbm=nws`
+                      : `https://en.wikipedia.org/wiki/${encodeURIComponent(investigateWord.text)}`
+                }
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-primary"
+                style={{ textDecoration: 'none' }}
+              >
+                Open in New Tab ↗
+              </a>
+              <button 
+                className="btn btn-ghost" 
+                onClick={() => setInvestigateWord(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* v5.6: Desktop download banner - only shows in cloud mode */}
+      <DesktopAppBanner />
+      
       <header className="animate-fadeIn">
         <div className="container">
           <div className="wrap">
@@ -3178,7 +3470,7 @@ export default function App() {
         )}
 
         <section className="card section animate-fadeIn">
-          <HowToGuide t={t} />
+          <HowToGuide onOpenAssistant={() => setShowAssistant(true)} />
 
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: '20px' }}>
             <input
@@ -3406,7 +3698,7 @@ export default function App() {
                   </div>
                 )}
 
-                <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: !query && !matches.length && videoId ? '12px' : '0' }}>
+                <div id="search-section" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: !query && !matches.length && videoId ? '12px' : '0' }}>
                   <input
                     className="input"
                     placeholder={t.search}
@@ -3414,8 +3706,40 @@ export default function App() {
                     onChange={e => setQuery(e.target.value)}
                     disabled={!videoId}
                   />
-
                 </div>
+
+                {/* v5.7: Investigate button appears when searching */}
+                {query && videoId && (
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '12px', 
+                    marginTop: '12px',
+                    padding: '12px 16px',
+                    background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
+                    borderRadius: '8px',
+                    border: '1px solid #bae6fd'
+                  }}>
+                    <span style={{ fontSize: '14px', color: '#0369a1' }}>
+                      Searching for: <strong>"{fixBrooklyn(query)}"</strong>
+                    </span>
+                    <button
+                      className="btn btn-accent"
+                      onClick={() => {
+                        setInvestigateWord({ text: fixBrooklyn(query) });
+                        setInvestigateViewMode('news');
+                      }}
+                      style={{ 
+                        marginLeft: 'auto',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      🔍 Investigate
+                    </button>
+                  </div>
+                )}
 
 
                 {hits.length > 0 && matches.length > 0 && (
@@ -3487,12 +3811,15 @@ export default function App() {
                             style={{
                               color: colors[colorIndex],
                               animationDelay: `${i * 0.1}s`,
-                              fontWeight: ratio > 0.5 ? '900' : ratio > 0.3 ? '700' : ratio > 0.15 ? '500' : '400'
+                              fontWeight: ratio > 0.5 ? '900' : ratio > 0.3 ? '700' : ratio > 0.15 ? '500' : '400',
+                              cursor: 'pointer'
                             }}
-                            title={`Count: ${w.count}`}
-                            onClick={() => setQuery(w.text)}
+                            title={`Click to search "${fixBrooklyn(w.text)}" (Count: ${w.count})`}
+                            onClick={() => {
+                              setQuery(fixBrooklyn(w.text));
+                            }}
                           >
-                            {w.text}
+                            {fixBrooklyn(w.text)}
                           </span>
                         );
                       })}
@@ -3737,7 +4064,7 @@ export default function App() {
         </div>
 
         {fullText && sents.length > 0 && (
-          <section className="full-width-viz card section animate-slideUp" style={{ marginTop: 16 }}>
+          <section id="analytics-section" className="full-width-viz card section animate-slideUp" style={{ marginTop: 16 }}>
             <h2 className="section-title">
               Meeting Analytics
             </h2>

@@ -45,6 +45,18 @@ except ImportError:
 # Live Chat Support - disabled in v5.2
 LIVE_CHAT_AVAILABLE = False
 
+
+def fix_brooklyn(text):
+    """Replace Brooklyn with Brookline (common transcription error)"""
+    if not text:
+        return text
+    import re
+    text = re.sub(r'\bBrooklyn\b', 'Brookline', text)
+    text = re.sub(r'\bBROOKLYN\b', 'BROOKLINE', text)
+    text = re.sub(r'\bbrooklyn\b', 'brookline', text)
+    return text
+
+
 # AI Optimization Support (optional)
 try:
     from ai_cache import cached_ai_analysis, get_cache_stats, clear_cache
@@ -1095,7 +1107,7 @@ async def wordfreq(req: Request):
     word_counts = Counter(w for w in words if w not in stop_words)
 
     top_words = [
-        {"text": word, "count": count} for word, count in word_counts.most_common(50)
+        {"text": fix_brooklyn(word), "count": count} for word, count in word_counts.most_common(50)
     ]
 
     return {"words": top_words}
