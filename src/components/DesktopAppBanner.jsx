@@ -38,7 +38,8 @@ export function useCloudMode() {
 export function DesktopAppBanner({ onDismiss }) {
   const [isCloudMode, setIsCloudMode] = useState(false);
   const [dismissed, setDismissed] = useState(false);
-  const downloadUrl = 'https://github.com/amateurmenace/community-highlighter/releases';
+  const downloadUrl = 'https://github.com/amateurmenace/community-highlighter/releases/latest';
+
   
   useEffect(() => {
     // Check if running in cloud mode
