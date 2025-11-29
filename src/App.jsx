@@ -4062,25 +4062,25 @@ export default function App() {
                 {/* Cloud mode warning for video features */}
                 {isCloudMode && (
                   <div style={{
-                    background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
-                    border: '2px solid #f59e0b',
+                    background: '#f5f0e6',
+                    border: '2px solid #1e7f63',
                     borderRadius: '12px',
                     padding: '16px',
                     marginBottom: '16px',
                     textAlign: 'center',
                   }}>
                     <div style={{ fontSize: '28px', marginBottom: '8px' }}>🎬</div>
-                    <div style={{ fontWeight: '700', color: '#92400e', marginBottom: '6px', fontSize: '16px' }}>
+                    <div style={{ fontWeight: '700', color: '#1e7f63', marginBottom: '6px', fontSize: '16px' }}>
                       Video Features Require Desktop App
                     </div>
-                    <div style={{ color: '#b45309', fontSize: '14px', marginBottom: '12px', lineHeight: '1.4' }}>
+                    <div style={{ color: '#4a4a4a', fontSize: '14px', marginBottom: '12px', lineHeight: '1.4' }}>
                       YouTube blocks video downloads from cloud servers.<br/>
                       Download the free desktop app for full video editing!
                     </div>
                     <button 
-                      onClick={() => window.open('https://github.com/amateurmenace/community-highlighter/releases', '_blank')}
+                      onClick={() => window.open('https://github.com/amateurmenace/community-highlighter/releases/latest', '_blank')}
                       style={{
-                        background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                        background: '#1e7f63',
                         color: 'white',
                         border: 'none',
                         padding: '12px 24px',
@@ -4088,7 +4088,7 @@ export default function App() {
                         fontWeight: '700',
                         cursor: 'pointer',
                         fontSize: '15px',
-                        boxShadow: '0 2px 8px rgba(245, 158, 11, 0.4)',
+                        boxShadow: '0 2px 8px rgba(30, 127, 99, 0.3)',
                       }}
                     >
                       ⬇️ Download Desktop App
