@@ -127,44 +127,82 @@ app.add_middleware(
 # Check multiple possible locations for dist folder
 def find_dist_dir():
     """Find the dist directory in various possible locations"""
+    # Get the directory containing this script
+    script_dir = BASE_DIR
+    
     candidates = [
-        os.path.join(BASE_DIR, "dist"),                    # Same dir as app.py
-        os.path.join(os.path.dirname(BASE_DIR), "dist"),   # Parent dir
-        os.path.abspath("dist"),                            # Current working dir
-        os.path.join(BASE_DIR, "..", "dist"),              # Relative parent
+        os.path.join(script_dir, "dist"),                    # Same dir as app.py (backend/dist)
+        os.path.join(os.path.dirname(script_dir), "dist"),   # Parent dir (community-highlighter-V21/dist)
+        os.path.abspath("dist"),                              # Current working dir
+        os.path.join(script_dir, "..", "dist"),              # Relative parent
     ]
+    
+    print(f"[DEBUG] Script directory: {script_dir}")
+    print(f"[DEBUG] Searching for dist folder in:")
+    
     for candidate in candidates:
-        if os.path.exists(candidate) and os.path.exists(os.path.join(candidate, "assets")):
-            return os.path.abspath(candidate)
+        abs_candidate = os.path.abspath(candidate)
+        exists = os.path.exists(abs_candidate)
+        has_assets = os.path.exists(os.path.join(abs_candidate, "assets")) if exists else False
+        print(f"  - {abs_candidate} (exists={exists}, has_assets={has_assets})")
+        
+        if exists and has_assets:
+            # List the assets to verify
+            assets_dir = os.path.join(abs_candidate, "assets")
+            try:
+                files = os.listdir(assets_dir)
+                print(f"    Found {len(files)} files in assets/")
+                for f in files[:5]:  # Show first 5
+                    print(f"      - {f}")
+                if len(files) > 5:
+                    print(f"      ... and {len(files) - 5} more")
+            except Exception as e:
+                print(f"    Error listing assets: {e}")
+            return abs_candidate
+    
     return None
 
 DIST_DIR = find_dist_dir()
 
 if DIST_DIR:
-    print(f"[OK] Serving static files from: {DIST_DIR}")
+    print(f"[OK] Using dist folder: {DIST_DIR}")
     DIST_ASSETS_DIR = os.path.join(DIST_DIR, "assets")
-    app.mount("/assets", StaticFiles(directory=DIST_ASSETS_DIR), name="assets")
     
-    @app.get("/")
-    async def serve_react_app():
-        return FileResponse(os.path.join(DIST_DIR, "index.html"))
+    # Mount assets FIRST
+    try:
+        # List what files exist in assets
+        print(f"[DEBUG] Assets directory: {DIST_ASSETS_DIR}")
+        if os.path.exists(DIST_ASSETS_DIR):
+            asset_files = os.listdir(DIST_ASSETS_DIR)
+            print(f"[DEBUG] Found {len(asset_files)} asset files:")
+            for f in sorted(asset_files)[:10]:
+                fpath = os.path.join(DIST_ASSETS_DIR, f)
+                fsize = os.path.getsize(fpath) if os.path.isfile(fpath) else 0
+                print(f"        - {f} ({fsize:,} bytes)")
+            if len(asset_files) > 10:
+                print(f"        ... and {len(asset_files) - 10} more files")
+        else:
+            print(f"[ERROR] Assets directory does not exist!")
+        
+        app.mount("/assets", StaticFiles(directory=DIST_ASSETS_DIR), name="assets")
+        print(f"[OK] Mounted /assets -> {DIST_ASSETS_DIR}")
+    except Exception as e:
+        print(f"[ERROR] Failed to mount assets: {e}")
+        import traceback
+        traceback.print_exc()
     
-    @app.get("/{full_path:path}")
-    async def serve_react_app_catchall(full_path: str):
-        # Check if it's an API route
-        if full_path.startswith("api/"):
-            raise HTTPException(404, "API endpoint not found")
-        
-        # Check if it's a static file (logo, favicon, etc.)
-        static_path = os.path.join(DIST_DIR, full_path)
-        if os.path.isfile(static_path):
-            return FileResponse(static_path)
-        
-        # Otherwise serve the React app
-        return FileResponse(os.path.join(DIST_DIR, "index.html"))
+    # Also mount the whole dist folder for other static files (favicon, etc.)
+    try:
+        app.mount("/static", StaticFiles(directory=DIST_DIR), name="static")
+        print(f"[OK] Mounted /static -> {DIST_DIR}")
+    except Exception as e:
+        print(f"[ERROR] Failed to mount static: {e}")
+    
+    print("[OK] React catch-all routes will be registered at end of file")
 else:
     print("[!] No dist folder found - frontend not available")
-    print("    Run 'npm run build' to build the frontend")
+    print("[!] Make sure to run 'npm run build' from the project root")
+    print(f"[!] BASE_DIR is: {BASE_DIR}")
 
 FILES_DIR = os.path.join(BASE_DIR, "cache")
 os.makedirs(FILES_DIR, exist_ok=True)
@@ -748,10 +786,17 @@ def get_video_id(url):
 
 
 @app.get("/")
-def root():
+async def root():
+    """Serve React app at root"""
+    if DIST_DIR:
+        index_path = os.path.join(DIST_DIR, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+    # Fallback to API info if no frontend
     return {
         "message": "Community Highlighter API v5.0 - Enhanced AI Assistant",
         "status": "running",
+        "note": "No frontend dist folder found"
     }
 
 
@@ -1966,30 +2011,186 @@ async def get_meeting_efficiency(req: Request):
 # Video processing endpoints
 
 
-def simple_job(job_id, vid, clips, format_type="combined"):
-    """Process video clips"""
+
+def get_caption_for_timestamp(transcript, start_time, end_time):
+    """Find transcript text for a given time range"""
+    captions = []
+    for seg in transcript:
+        seg_start = seg.get("start", 0)
+        seg_end = seg_start + seg.get("duration", 0)
+        # Check if segment overlaps with our time range
+        if seg_start < end_time and seg_end > start_time:
+            text = seg.get("text", "").strip()
+            if text:
+                captions.append(text)
+    return " ".join(captions)[:200]  # Limit length
+
+
+def create_caption_filter(text, style="bottom", video_height=1080):
+    """Create FFmpeg drawtext filter for captions"""
+    # Escape special characters for FFmpeg
+    escaped_text = text.replace("'", "'\''").replace(":", "\:")
+    
+    # Position based on style
+    if style == "center":
+        y_pos = "(h-text_h)/2"
+    elif style == "top":
+        y_pos = "50"
+    else:  # bottom
+        y_pos = "h-text_h-50"
+    
+    return f"drawtext=text='{escaped_text}':fontsize=48:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y={y_pos}:font=Arial"
+
+
+def simple_job_with_captions(job_id, vid, clips, format_type="combined", options=None):
+    """Process video clips with optional caption burning"""
+    if options is None:
+        options = {}
+    
+    add_captions = options.get("add_captions", False)
+    caption_style = options.get("caption_style", "bottom")
+    transcript = options.get("transcript", [])
+    
+    print(f"[simple_job_with_captions] Starting: {len(clips)} clips, captions={add_captions}")
+    
+    # If no captions needed, use the regular simple_job
+    if not add_captions:
+        return simple_job(job_id, vid, clips, format_type)
+    
     job = JOBS[job_id]
     job["status"] = "running"
     job["percent"] = 5
     job["message"] = "Downloading video..."
 
     work = tempfile.mkdtemp()
+    
+    try:
+        video_file = os.path.join(work, "video.mp4")
+        
+        # Check cache first
+        cached_video = os.path.join(FILES_DIR, f"{vid}.mp4")
+        if os.path.exists(cached_video):
+            video_file = cached_video
+        else:
+            cmd = ["yt-dlp", "-f", "best[ext=mp4]/best", "--no-playlist", "-o", video_file,
+                   f"https://www.youtube.com/watch?v={vid}"]
+            subprocess.run(cmd, capture_output=True, timeout=600)
+        
+        if not os.path.exists(video_file):
+            raise Exception("Failed to download video")
+        
+        job["percent"] = 30
+        job["message"] = f"Processing {len(clips)} clips with captions..."
+        
+        output = os.path.join(FILES_DIR, f"captioned_{job_id[:8]}.mp4")
+        
+        # Process each clip with its caption
+        clip_files = []
+        for i, clip in enumerate(clips[:10]):
+            job["percent"] = 30 + int(50 * i / len(clips))
+            
+            start = clip.get("start", 0)
+            end = clip.get("end", start + 10)
+            duration = end - start
+            
+            # Get caption text for this clip
+            caption_text = clip.get("label", "") or get_caption_for_timestamp(transcript, start, end)
+            
+            clip_file = os.path.join(work, f"clip_{i:03d}.mp4")
+            
+            if caption_text:
+                # Create clip with burned-in caption
+                caption_filter = create_caption_filter(caption_text, caption_style)
+                cmd = [
+                    "ffmpeg", "-i", video_file,
+                    "-ss", str(start), "-t", str(duration),
+                    "-vf", caption_filter,
+                    "-c:v", "libx264", "-preset", "fast", "-c:a", "aac",
+                    clip_file, "-y"
+                ]
+            else:
+                # No caption, just cut
+                cmd = [
+                    "ffmpeg", "-i", video_file,
+                    "-ss", str(start), "-t", str(duration),
+                    "-c:v", "libx264", "-preset", "fast", "-c:a", "aac",
+                    clip_file, "-y"
+                ]
+            
+            subprocess.run(cmd, capture_output=True)
+            
+            if os.path.exists(clip_file):
+                clip_files.append(clip_file)
+        
+        # Concatenate all clips
+        if clip_files:
+            concat_file = os.path.join(work, "concat.txt")
+            with open(concat_file, "w") as f:
+                for cf in clip_files:
+                    f.write(f"file '{cf}'\n")
+            
+            cmd = ["ffmpeg", "-f", "concat", "-safe", "0", "-i", concat_file,
+                   "-c", "copy", output, "-y"]
+            subprocess.run(cmd, capture_output=True)
+        
+        if os.path.exists(output):
+            file_size = os.path.getsize(output)
+            job["status"] = "done"
+            job["message"] = "Ready to download!"
+            job["file"] = f"/files/{os.path.basename(output)}"
+            job["percent"] = 100
+            print(f"[simple_job_with_captions] SUCCESS: {output}")
+        else:
+            raise Exception("Failed to create output")
+            
+    except Exception as e:
+        print(f"[simple_job_with_captions] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        job["status"] = "error"
+        job["message"] = str(e)[:200]
+    finally:
+        if work != FILES_DIR:
+            shutil.rmtree(work, ignore_errors=True)
+
+
+def simple_job(job_id, vid, clips, format_type="combined"):
+    """Process video clips into various output formats"""
+    job = JOBS[job_id]
+    job["status"] = "running"
+    job["percent"] = 5
+    job["message"] = "Downloading video from YouTube..."
+
+    work = tempfile.mkdtemp()
+    print(f"[simple_job] Starting job {job_id}: {len(clips)} clips, format={format_type}")
 
     try:
         video_file = os.path.join(work, "video.mp4")
-        cmd = [
-            "yt-dlp",
-            "-f",
-            "best[ext=mp4]",
-            "-o",
-            video_file,
-            f"https://www.youtube.com/watch?v={vid}",
-        ]
-        subprocess.run(cmd, capture_output=True)
+        
+        # Check if we already have the video cached
+        cached_video = os.path.join(FILES_DIR, f"{vid}.mp4")
+        if os.path.exists(cached_video):
+            print(f"[simple_job] Using cached video: {cached_video}")
+            video_file = cached_video
+        else:
+            cmd = [
+                "yt-dlp",
+                "-f", "best[ext=mp4]/best",
+                "--no-playlist",
+                "-o", video_file,
+                f"https://www.youtube.com/watch?v={vid}",
+            ]
+            print(f"[simple_job] Downloading: {' '.join(cmd)}")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            
+            if result.returncode != 0:
+                print(f"[simple_job] yt-dlp error: {result.stderr}")
+                raise Exception(f"Failed to download video: {result.stderr[:200]}")
 
         if not os.path.exists(video_file):
-            raise Exception("Failed to download video")
-
+            raise Exception("Video file not found after download")
+        
+        print(f"[simple_job] Video ready: {video_file}")
         job["percent"] = 30
         job["message"] = f"Processing {len(clips)} clips..."
 
@@ -2041,6 +2242,8 @@ def simple_job(job_id, vid, clips, format_type="combined"):
 
             if selected_clips:
                 start = selected_clips[0].get("start", 0)
+                # Center-crop to 9:16 instead of letterboxing
+                # This scales up and crops from center to fill the full 9:16 frame
                 cmd = [
                     "ffmpeg",
                     "-i",
@@ -2050,7 +2253,7 @@ def simple_job(job_id, vid, clips, format_type="combined"):
                     "-t",
                     "60",
                     "-vf",
-                    "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
+                    "scale=1920:1080,crop=607:1080:656:0,scale=1080:1920",
                     "-c:v",
                     "libx264",
                     "-preset",
@@ -2060,7 +2263,10 @@ def simple_job(job_id, vid, clips, format_type="combined"):
                     output,
                     "-y",
                 ]
-                subprocess.run(cmd, capture_output=True)
+                print(f"[simple_job] Creating 9:16 center-cropped social reel")
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    print(f"[simple_job] FFmpeg social error: {result.stderr[:500]}")
 
         else:
             output = os.path.join(FILES_DIR, f"highlight_{job_id[:8]}.mp4")
@@ -2107,29 +2313,42 @@ def simple_job(job_id, vid, clips, format_type="combined"):
                 subprocess.run(cmd, capture_output=True)
 
         if os.path.exists(output):
+            file_size = os.path.getsize(output)
+            print(f"[simple_job] SUCCESS! Output: {output} ({file_size / 1024 / 1024:.1f} MB)")
             job["status"] = "done"
             job["message"] = "Ready to download!"
             job["file"] = f"/files/{os.path.basename(output)}"
             job["zip"] = f"/files/{os.path.basename(output)}"
             job["percent"] = 100
+            job["fileSize"] = file_size
         else:
-            raise Exception("Failed to create output")
+            print(f"[simple_job] ERROR: Output file not found: {output}")
+            raise Exception("Failed to create output file")
 
+    except subprocess.TimeoutExpired as e:
+        print(f"[simple_job] TIMEOUT: {e}")
+        job["status"] = "error"
+        job["message"] = "Video processing timed out"
     except Exception as e:
+        print(f"[simple_job] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
         job["status"] = "error"
         job["message"] = str(e)[:200]
-        print(f"Job error: {e}")
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        # Clean up temp directory but keep output
+        if work and os.path.exists(work) and work != FILES_DIR:
+            shutil.rmtree(work, ignore_errors=True)
+        print(f"[simple_job] Job {job_id} final status: {job.get('status')}")
 
 
 @app.post("/api/render_clips")
 async def render_clips(req: Request):
-    # Disable video downloads on cloud (YouTube blocks yt-dlp from cloud IPs)
+    """Render video clips in various formats with optional captions"""
     if CLOUD_MODE:
         return {
             "error": "Video clip download is not available in cloud mode",
-            "message": "YouTube blocks video downloads from cloud servers. All transcript analysis features work normally. For clip downloads, run the app locally.",
+            "message": "YouTube blocks video downloads from cloud servers. Run the desktop app for this feature.",
             "jobId": None
         }
     
@@ -2137,64 +2356,227 @@ async def render_clips(req: Request):
     vid = data.get("videoId", "")
     clips = data.get("clips", [])
     format_type = data.get("format", "combined")
+    title = data.get("title", "Highlight Reel")
+    add_captions = data.get("addCaptions", False)
+    caption_style = data.get("captionStyle", "bottom")
+    transcript = data.get("transcript", [])
+    
+    if not vid:
+        return {"error": "No video ID provided", "jobId": None}
+    
+    if not clips:
+        return {"error": "No clips provided", "jobId": None}
+    
+    print(f"[render_clips] Starting job: {len(clips)} clips, format={format_type}, captions={add_captions}")
 
     job_id = str(uuid.uuid4())
-    JOBS[job_id] = {"status": "queued", "percent": 0, "message": "Starting..."}
+    JOBS[job_id] = {
+        "status": "queued", 
+        "percent": 0, 
+        "message": f"Starting {format_type} render with {len(clips)} clips..."
+    }
+
+    # Pass caption options to simple_job
+    job_options = {
+        "add_captions": add_captions,
+        "caption_style": caption_style,
+        "transcript": transcript,
+        "title": title
+    }
 
     threading.Thread(
-        target=simple_job, args=(job_id, vid, clips, format_type), daemon=True
+        target=simple_job_with_captions, args=(job_id, vid, clips, format_type, job_options), daemon=True
     ).start()
-    return {"jobId": job_id}
+    return {"jobId": job_id, "format": format_type, "clipCount": len(clips), "captions": add_captions}
 
 
 @app.get("/api/job_status")
-async def job_status(jobId: str):
-    return JOBS.get(jobId, {"status": "error", "message": "Unknown job"})
+async def job_status(jobId: str = None):
+    """Get job status - supports both query param and listing all jobs"""
+    print(f"[job_status] Checking job: {jobId}, Available jobs: {list(JOBS.keys())}")
+    if not jobId:
+        return {"jobs": list(JOBS.keys()), "count": len(JOBS)}
+    result = JOBS.get(jobId, {"status": "error", "message": f"Unknown job: {jobId}"})
+    print(f"[job_status] Result for {jobId}: {result}")
+    return result
+
+
+@app.get("/api/job/{job_id}")
+async def job_status_by_path(job_id: str):
+    """Alternative endpoint with path parameter"""
+    print(f"[job_status_by_path] Checking job: {job_id}")
+    return JOBS.get(job_id, {"status": "error", "message": f"Unknown job: {job_id}"})
 
 
 @app.post("/api/download_mp4")
 async def download_mp4(req: Request):
+    """Download full video from YouTube"""
     if CLOUD_MODE:
-        raise HTTPException(503, "Video download not available in cloud mode. YouTube blocks downloads from cloud servers.")
+        return {
+            "error": "Video download not available in cloud mode",
+            "message": "YouTube blocks downloads from cloud servers. Run the desktop app for this feature."
+        }
     
     data = await req.json()
     vid = data.get("videoId", "")
-
+    
+    if not vid:
+        return {"error": "No video ID provided"}
+    
+    print(f"[download_mp4] Starting download for video: {vid}")
+    
     output = os.path.join(FILES_DIR, f"{vid}.mp4")
-    if not os.path.exists(output):
+    
+    # Check if already downloaded
+    if os.path.exists(output):
+        print(f"[download_mp4] Video already exists: {output}")
+        return {"file": f"/files/{os.path.basename(output)}", "cached": True}
+    
+    # Download with yt-dlp
+    try:
         cmd = [
             "yt-dlp",
-            "-f",
-            "best",
-            "-o",
-            output,
+            "-f", "best[ext=mp4]/best",
+            "--no-playlist",
+            "-o", output,
             f"https://www.youtube.com/watch?v={vid}",
         ]
-        subprocess.run(cmd, capture_output=True)
+        print(f"[download_mp4] Running: {' '.join(cmd)}")
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        
+        if result.returncode != 0:
+            print(f"[download_mp4] yt-dlp error: {result.stderr}")
+            return {"error": f"Download failed: {result.stderr[:200]}"}
+        
+        if os.path.exists(output):
+            file_size = os.path.getsize(output)
+            print(f"[download_mp4] Success! File size: {file_size / 1024 / 1024:.1f} MB")
+            return {"file": f"/files/{os.path.basename(output)}", "size": file_size}
+        else:
+            return {"error": "Download completed but file not found"}
+            
+    except subprocess.TimeoutExpired:
+        return {"error": "Download timed out after 10 minutes"}
+    except Exception as e:
+        print(f"[download_mp4] Exception: {e}")
+        return {"error": str(e)}
 
-    if os.path.exists(output):
-        return {"file": f"/files/{os.path.basename(output)}"}
 
-    raise HTTPException(500, "Download failed")
+def find_quote_timestamp(quote: str, transcript_cache: dict, video_id: str) -> tuple:
+    """Find the timestamp of a quote in the transcript"""
+    # Get cached transcript or fetch it
+    if video_id not in transcript_cache:
+        return None, None
+    
+    transcript = transcript_cache[video_id]
+    if not transcript:
+        return None, None
+    
+    # Clean the quote for matching
+    quote_clean = quote.lower().strip()
+    quote_words = quote_clean.split()[:8]  # Use first 8 words for matching
+    search_phrase = ' '.join(quote_words)
+    
+    best_match_time = None
+    best_match_score = 0
+    
+    for segment in transcript:
+        text = segment.get('text', '').lower()
+        start_time = segment.get('start', 0)
+        
+        # Check if quote words appear in this segment
+        if search_phrase in text or all(w in text for w in quote_words[:4]):
+            # Good match found
+            return start_time, start_time + segment.get('duration', 10)
+        
+        # Partial match scoring
+        matches = sum(1 for w in quote_words if w in text)
+        if matches > best_match_score:
+            best_match_score = matches
+            best_match_time = start_time
+    
+    # Return best partial match if no exact match
+    if best_match_time is not None and best_match_score >= 2:
+        return best_match_time, best_match_time + 15
+    
+    return None, None
 
 
 @app.post("/api/highlight_reel")
 async def highlight_reel(req: Request):
-    """Create highlight reel from quotes"""
+    """Create highlight reel from quotes - finds actual timestamps in transcript"""
+    if CLOUD_MODE:
+        return {
+            "error": "Video clip download is not available in cloud mode",
+            "message": "YouTube blocks video downloads from cloud servers. Run the desktop app for this feature.",
+            "jobId": None
+        }
+    
     data = await req.json()
     vid = data.get("videoId", "")
     quotes = data.get("quotes", [])
-    pad = data.get("pad", 2)
+    pad = data.get("pad", 3)  # seconds of padding before/after
     format_type = data.get("format", "combined")
-
+    transcript_data = data.get("transcript", [])  # Can pass transcript directly
+    
+    if not vid:
+        return {"error": "No video ID provided", "jobId": None}
+    
+    if not quotes:
+        return {"error": "No quotes provided", "jobId": None}
+    
+    # Try to get transcript if not provided
+    if not transcript_data:
+        # Check cache
+        cache_key = f"transcript_{vid}"
+        if cache_key in TRANSCRIPT_CACHE:
+            transcript_data = TRANSCRIPT_CACHE[cache_key]
+        else:
+            # Try to fetch transcript
+            try:
+                from youtube_transcript_api import YouTubeTranscriptApi
+                transcript_data = YouTubeTranscriptApi.get_transcript(vid)
+                TRANSCRIPT_CACHE[cache_key] = transcript_data
+            except Exception as e:
+                print(f"Could not fetch transcript for timestamp matching: {e}")
+    
+    # Build clips by finding quote timestamps
     clips = []
-    for i, quote in enumerate(quotes[:10]):
-        start = i * 30
-        clips.append({"start": start, "end": start + 15, "label": quote[:60]})
-
+    transcript_cache = {vid: transcript_data} if transcript_data else {}
+    
+    # Use only first 5 quotes for the reel (as requested)
+    for quote in quotes[:5]:
+        start_time, end_time = find_quote_timestamp(quote, transcript_cache, vid)
+        
+        if start_time is not None:
+            # Apply padding
+            clip_start = max(0, start_time - pad)
+            clip_end = end_time + pad
+            clips.append({
+                "start": clip_start,
+                "end": clip_end,
+                "label": quote[:60]
+            })
+        else:
+            print(f"Could not find timestamp for quote: {quote[:50]}...")
+    
+    if not clips:
+        # Fallback: create clips at regular intervals if no matches found
+        print("Warning: No quote timestamps found, using fallback intervals")
+        for i, quote in enumerate(quotes[:5]):
+            start = i * 60  # 1 minute intervals
+            clips.append({
+                "start": start,
+                "end": start + 20,
+                "label": quote[:60]
+            })
+    
+    print(f"Creating highlight reel with {len(clips)} clips: {clips}")
+    
     job_id = str(uuid.uuid4())
-    JOBS[job_id] = {"status": "queued", "percent": 0, "message": "Building reel..."}
-
+    JOBS[job_id] = {"status": "queued", "percent": 0, "message": f"Building reel from {len(clips)} clips..."}
+    
     threading.Thread(
         target=simple_job, args=(job_id, vid, clips, format_type), daemon=True
     ).start()
@@ -3606,6 +3988,41 @@ async def get_clip_preview(req: Request):
     except Exception as e:
         print(f" Preview error: {e}")
         raise HTTPException(500, f"Failed to get preview: {str(e)}")
+
+
+
+
+# ============================================================================
+# CATCH-ALL ROUTES FOR REACT SPA (must be LAST after all API routes)
+# ============================================================================
+
+# Only add catch-all if DIST_DIR exists
+if DIST_DIR:
+    @app.get("/")
+    async def serve_react_app_root():
+        """Serve React app at root"""
+        return FileResponse(os.path.join(DIST_DIR, "index.html"))
+    
+    @app.get("/{full_path:path}")
+    async def serve_react_app_catchall(full_path: str):
+        """Catch-all for React SPA routing - must be LAST route"""
+        # Don't catch API routes - they should 404 normally
+        if full_path.startswith("api/"):
+            raise HTTPException(404, f"API endpoint not found: /{full_path}")
+        
+        # Don't catch file routes
+        if full_path.startswith("files/"):
+            raise HTTPException(404, f"File not found: /{full_path}")
+        
+        # Check if it's a static file (logo, favicon, etc.)
+        static_path = os.path.join(DIST_DIR, full_path)
+        if os.path.isfile(static_path):
+            return FileResponse(static_path)
+        
+        # Otherwise serve the React app for client-side routing
+        return FileResponse(os.path.join(DIST_DIR, "index.html"))
+    
+    print("[OK] React catch-all routes registered (at end of file)")
 
 
 if __name__ == "__main__":

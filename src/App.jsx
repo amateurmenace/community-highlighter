@@ -138,7 +138,9 @@ function HowToGuide({ onOpenAssistant }) {
     }
   };
 
-  const stepColors = ['#059669', '#0891b2', '#7c3aed', '#db2777'];
+  // 4 cards only - removed "Add a Meeting"
+  const borderColors = ['#0891b2', '#7c3aed', '#db2777', '#f97316'];
+  const mainGreen = '#1e7f63';
 
   return (
     <section 
@@ -155,63 +157,37 @@ function HowToGuide({ onOpenAssistant }) {
       }}
     >
       <div className="howto" style={{ 
-        gap: isCompact ? '8px' : '12px',
+        gap: isCompact ? '10px' : '16px',
         transition: 'all 0.3s ease'
       }}>
-        <div 
-          className="step step-clickable" 
-          onClick={() => scrollToElement('url-input-section')}
-          style={{ 
-            cursor: 'pointer',
-            padding: isCompact ? '8px 12px' : '16px',
-            minHeight: isCompact ? 'auto' : '80px',
-            transition: 'all 0.3s ease'
-          }}
-        >
-          <div className="num" style={{ 
-            background: stepColors[0],
-            fontSize: isCompact ? '14px' : '18px',
-            width: isCompact ? '28px' : '36px',
-            height: isCompact ? '28px' : '36px',
-            transition: 'all 0.3s ease'
-          }}>1</div>
-          <div>
-            <div style={{ 
-              fontSize: isCompact ? '14px' : '18px', 
-              fontWeight: '800',
-              color: stepColors[0],
-              transition: 'all 0.3s ease'
-            }}>Add a Meeting</div>
-            {!isCompact && (
-              <div className="step-subtitle" style={{ marginTop: '4px' }}>
-                Paste a link to any YouTube video below
-              </div>
-            )}
-          </div>
-        </div>
-
+        {/* Card 1: Search a Meeting */}
         <div 
           className="step step-clickable" 
           onClick={() => scrollToElement('search-section')}
           style={{ 
             cursor: 'pointer',
-            padding: isCompact ? '8px 12px' : '16px',
-            minHeight: isCompact ? 'auto' : '80px',
-            transition: 'all 0.3s ease'
+            padding: isCompact ? '10px 14px' : '20px',
+            minHeight: isCompact ? 'auto' : '90px',
+            transition: 'all 0.3s ease',
+            border: '2px solid ' + borderColors[0],
+            background: 'white',
+            borderRadius: '12px'
           }}
         >
           <div className="num" style={{ 
-            background: stepColors[1],
+            background: borderColors[0],
             fontSize: isCompact ? '14px' : '18px',
-            width: isCompact ? '28px' : '36px',
-            height: isCompact ? '28px' : '36px',
+            width: isCompact ? '30px' : '42px',
+            height: isCompact ? '30px' : '42px',
             transition: 'all 0.3s ease'
-          }}>2</div>
+          }}>1</div>
           <div>
             <div style={{ 
-              fontSize: isCompact ? '14px' : '18px', 
-              fontWeight: '800',
-              color: stepColors[1],
+              fontSize: isCompact ? '17px' : '24px', 
+              fontWeight: '900',
+              color: mainGreen,
+              letterSpacing: '-0.5px',
+              textShadow: '0 1px 0 rgba(0,0,0,0.1)',
               transition: 'all 0.3s ease'
             }}>Search a Meeting</div>
             {!isCompact && (
@@ -222,30 +198,36 @@ function HowToGuide({ onOpenAssistant }) {
           </div>
         </div>
 
+        {/* Card 2: Talk to a Meeting */}
         <div 
           className="step step-clickable" 
           onClick={() => {
-            if (onOpenAssistant) onOpenAssistant();
+            if (onOpenAssistant) onOpenAssistant(true);
           }}
           style={{ 
             cursor: 'pointer',
-            padding: isCompact ? '8px 12px' : '16px',
-            minHeight: isCompact ? 'auto' : '80px',
-            transition: 'all 0.3s ease'
+            padding: isCompact ? '10px 14px' : '20px',
+            minHeight: isCompact ? 'auto' : '90px',
+            transition: 'all 0.3s ease',
+            border: '2px solid ' + borderColors[1],
+            background: 'white',
+            borderRadius: '12px'
           }}
         >
           <div className="num" style={{ 
-            background: stepColors[2],
+            background: borderColors[1],
             fontSize: isCompact ? '14px' : '18px',
-            width: isCompact ? '28px' : '36px',
-            height: isCompact ? '28px' : '36px',
+            width: isCompact ? '30px' : '42px',
+            height: isCompact ? '30px' : '42px',
             transition: 'all 0.3s ease'
-          }}>3</div>
+          }}>2</div>
           <div>
             <div style={{ 
-              fontSize: isCompact ? '14px' : '18px', 
-              fontWeight: '800',
-              color: stepColors[2],
+              fontSize: isCompact ? '17px' : '24px', 
+              fontWeight: '900',
+              color: mainGreen,
+              letterSpacing: '-0.5px',
+              textShadow: '0 1px 0 rgba(0,0,0,0.1)',
               transition: 'all 0.3s ease'
             }}>Talk to a Meeting</div>
             {!isCompact && (
@@ -256,33 +238,77 @@ function HowToGuide({ onOpenAssistant }) {
           </div>
         </div>
 
+        {/* Card 3: Analyze a Meeting */}
         <div 
           className="step step-clickable" 
           onClick={() => scrollToElement('analytics-section')}
           style={{ 
             cursor: 'pointer',
-            padding: isCompact ? '8px 12px' : '16px',
-            minHeight: isCompact ? 'auto' : '80px',
-            transition: 'all 0.3s ease'
+            padding: isCompact ? '10px 14px' : '20px',
+            minHeight: isCompact ? 'auto' : '90px',
+            transition: 'all 0.3s ease',
+            border: '2px solid ' + borderColors[2],
+            background: 'white',
+            borderRadius: '12px'
           }}
         >
           <div className="num" style={{ 
-            background: stepColors[3],
+            background: borderColors[2],
             fontSize: isCompact ? '14px' : '18px',
-            width: isCompact ? '28px' : '36px',
-            height: isCompact ? '28px' : '36px',
+            width: isCompact ? '30px' : '42px',
+            height: isCompact ? '30px' : '42px',
             transition: 'all 0.3s ease'
-          }}>4</div>
+          }}>3</div>
           <div>
             <div style={{ 
-              fontSize: isCompact ? '14px' : '18px', 
-              fontWeight: '800',
-              color: stepColors[3],
+              fontSize: isCompact ? '17px' : '24px', 
+              fontWeight: '900',
+              color: mainGreen,
+              letterSpacing: '-0.5px',
+              textShadow: '0 1px 0 rgba(0,0,0,0.1)',
               transition: 'all 0.3s ease'
             }}>Analyze a Meeting</div>
             {!isCompact && (
               <div className="step-subtitle" style={{ marginTop: '4px' }}>
-                Use the data visualizations to make quick sense of long meetings, and even suggest your own!
+                Use data visualizations to make quick sense of long meetings
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Card 4: Highlight a Meeting */}
+        <div 
+          className="step step-clickable" 
+          onClick={() => scrollToElement('video-section')}
+          style={{ 
+            cursor: 'pointer',
+            padding: isCompact ? '10px 14px' : '20px',
+            minHeight: isCompact ? 'auto' : '90px',
+            transition: 'all 0.3s ease',
+            border: '2px solid ' + borderColors[3],
+            background: 'white',
+            borderRadius: '12px'
+          }}
+        >
+          <div className="num" style={{ 
+            background: borderColors[3],
+            fontSize: isCompact ? '14px' : '18px',
+            width: isCompact ? '30px' : '42px',
+            height: isCompact ? '30px' : '42px',
+            transition: 'all 0.3s ease'
+          }}>4</div>
+          <div>
+            <div style={{ 
+              fontSize: isCompact ? '17px' : '24px', 
+              fontWeight: '900',
+              color: mainGreen,
+              letterSpacing: '-0.5px',
+              textShadow: '0 1px 0 rgba(0,0,0,0.1)',
+              transition: 'all 0.3s ease'
+            }}>Highlight a Meeting</div>
+            {!isCompact && (
+              <div className="step-subtitle" style={{ marginTop: '4px' }}>
+                Choose clips to watch, download, & even auto edit into a reel - or have AI do it all for you!
               </div>
             )}
           </div>
@@ -1964,45 +1990,128 @@ function MeetingEfficiencyDashboard({ fullText, cues }) {
 }
 
 function ExportModal({ onSelect, onClose, clipCount }) {
+  const [addCaptions, setAddCaptions] = useState(false);
+  const [captionStyle, setCaptionStyle] = useState('bottom');
+  
+  const handleSelect = (format) => {
+    onSelect(format, { addCaptions, captionStyle });
+  };
+
   return (
     <div className="export-modal-overlay" onClick={onClose}>
-      <div className="export-modal" onClick={e => e.stopPropagation()}>
+      <div className="export-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px' }}>
         <div className="export-modal-header">
           <h2>Choose Export Format</h2>
-          <button className="btn-close" onClick={onClose}>âœ•</button>
+          <button className="btn-close" onClick={onClose}>✕</button>
+        </div>
+
+        {/* Video Options */}
+        <div style={{ 
+          padding: '16px 20px', 
+          background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+          borderBottom: '2px solid #f59e0b',
+          marginBottom: '16px'
+        }}>
+          <div style={{ 
+            fontSize: '18px', 
+            fontWeight: '800', 
+            color: '#92400e',
+            marginBottom: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            🎬 Video Options
+          </div>
+          
+          <label style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '12px',
+            cursor: 'pointer',
+            padding: '12px 16px',
+            background: 'white',
+            borderRadius: '10px',
+            border: addCaptions ? '2px solid #f59e0b' : '2px solid #e5e7eb',
+            transition: 'all 0.2s ease'
+          }}>
+            <input 
+              type="checkbox" 
+              checked={addCaptions}
+              onChange={(e) => setAddCaptions(e.target.checked)}
+              style={{ width: '20px', height: '20px', accentColor: '#f59e0b' }}
+            />
+            <div>
+              <div style={{ fontSize: '16px', fontWeight: '700', color: '#1f2937' }}>
+                Add Captions 📝
+              </div>
+              <div style={{ fontSize: '13px', color: '#6b7280' }}>
+                Burn transcript text onto video clips
+              </div>
+            </div>
+          </label>
+          
+          {addCaptions && (
+            <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {[
+                { id: 'bottom', label: '📍 Bottom', desc: 'Classic style' },
+                { id: 'center', label: '🎯 Center', desc: 'TikTok style' },
+                { id: 'top', label: '⬆️ Top', desc: 'Above action' }
+              ].map(style => (
+                <button
+                  key={style.id}
+                  onClick={() => setCaptionStyle(style.id)}
+                  style={{
+                    padding: '10px 16px',
+                    border: captionStyle === style.id ? '2px solid #f59e0b' : '2px solid #e5e7eb',
+                    borderRadius: '8px',
+                    background: captionStyle === style.id ? '#fef3c7' : 'white',
+                    cursor: 'pointer',
+                    textAlign: 'left'
+                  }}
+                >
+                  <div style={{ fontSize: '14px', fontWeight: '700' }}>{style.label}</div>
+                  <div style={{ fontSize: '11px', color: '#6b7280' }}>{style.desc}</div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="export-options">
-          <div className="export-option" onClick={() => onSelect('combined')}>
-            <div className="export-title">Highlight Reel</div>
+          <div className="export-option" onClick={() => handleSelect('combined')}>
+            <div className="export-title">🎬 Highlight Reel</div>
             <div className="export-desc">
               Single MP4 with smooth transitions between {clipCount} clips
             </div>
-            <div className="export-badge">Most Popular</div>
+            <div className="export-badge" style={{ background: '#10b981' }}>Most Popular</div>
           </div>
 
-          <div className="export-option" onClick={() => onSelect('titled')}>
-            <div className="export-title">Professional Version</div>
+          <div className="export-option" onClick={() => handleSelect('titled')}>
+            <div className="export-title">🎯 Professional Version</div>
             <div className="export-desc">
               Highlight reel with title cards and chapter markers
             </div>
-            <div className="export-badge">Best for Presentations</div>
+            <div className="export-badge" style={{ background: '#6366f1' }}>Best for Presentations</div>
           </div>
 
-          <div className="export-option" onClick={() => onSelect('social')}>
-            <div className="export-title">Social Media Reel</div>
+          <div className="export-option" onClick={() => handleSelect('social')} style={{ 
+            border: '2px solid #f97316',
+            background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)'
+          }}>
+            <div className="export-title" style={{ color: '#ea580c' }}>📱 Social Media Reel</div>
             <div className="export-desc">
-              60-second vertical video (9:16) for TikTok/Instagram
+              60-second vertical video (9:16) - <strong>center-cropped</strong> for TikTok/Instagram
             </div>
-            <div className="export-badge">Ready to Share</div>
+            <div className="export-badge" style={{ background: '#f97316' }}>Full Screen 9:16</div>
           </div>
 
-          <div className="export-option" onClick={() => onSelect('individual')}>
-            <div className="export-title">Individual Clips</div>
+          <div className="export-option" onClick={() => handleSelect('individual')}>
+            <div className="export-title">📦 Individual Clips</div>
             <div className="export-desc">
               Download each of the {clipCount} clips as separate MP4 files
             </div>
-            <div className="export-badge">ZIP Archive</div>
+            <div className="export-badge" style={{ background: '#8b5cf6' }}>ZIP Archive</div>
           </div>
         </div>
       </div>
@@ -2308,12 +2417,19 @@ function ClipPreview({ clip, videoId }) {
 
 
 // New Component: AI Meeting Assistant
-function MeetingAssistant({ videoId, transcript }) {
+function MeetingAssistant({ videoId, transcript, forceOpen = 0 }) {
   const [messages, setMessages] = useState([]);
   const [inputQuery, setInputQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [isOpen, setIsOpen] = useState(false);
+  
+  // Open when forceOpen counter increments
+  useEffect(() => {
+    if (forceOpen > 0) {
+      setIsOpen(true);
+    }
+  }, [forceOpen]);
   // v5.2: Uses global BACKEND_URL (empty for relative URLs)
 
   useEffect(() => {
@@ -2647,7 +2763,8 @@ export default function App() {
   const [showOptimizationPanel, setShowOptimizationPanel] = useState(false);
 
   // 🔴 NEW v4.0: State for new features
-  const [showAssistant, setShowAssistant] = useState(true);
+  const [showAssistant, setShowAssistant] = useState(false);
+  const [forceAssistantOpen, setForceAssistantOpen] = useState(0); // Counter to force open
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
   const [showLiveMode, setShowLiveMode] = useState(false);
 
@@ -3018,7 +3135,7 @@ export default function App() {
     setClipBasket(prev => [...prev, clip]);
   };
 
-  const exportClips = async (format) => {
+  const exportClips = async (format, options = {}) => {
     setShowExportModal(false);
 
     if (clipBasket.length === 0) {
@@ -3030,8 +3147,9 @@ export default function App() {
     setProcessStatus({
       active: true,
       message: format === 'individual' ? "Creating individual clips..." :
-        format === 'social' ? "Creating social media reel..." :
+        format === 'social' ? "Creating social media reel (9:16 center-crop)..." :
           format === 'titled' ? "Creating professional version..." :
+            options.addCaptions ? "Creating highlight reel with captions..." :
             "Creating highlight reel...",
       percent: 0
     });
@@ -3041,7 +3159,10 @@ export default function App() {
         videoId,
         clips: clipBasket,
         format: format,
-        title: videoTitle || "Community Highlight Reel"
+        title: videoTitle || "Community Highlight Reel",
+        addCaptions: options.addCaptions || false,
+        captionStyle: options.captionStyle || 'bottom',
+        transcript: sents // Pass transcript for captions
       });
       pollJobStatus(res.jobId);
     } catch (e) {
@@ -3073,9 +3194,11 @@ export default function App() {
     setLoading(l => ({ ...l, reel: true }));
 
     try {
+      // Pass transcript segments so backend can find timestamps
       const res = await apiHighlightReel({
         videoId,
-        quotes: quotes,
+        quotes: quotes.slice(0, 5), // Use first 5 quotes as requested
+        transcript: sents, // Pass transcript for timestamp matching
         pad,
         format: format
       });
@@ -3470,7 +3593,7 @@ export default function App() {
         )}
 
         <section className="card section animate-fadeIn">
-          <HowToGuide onOpenAssistant={() => setShowAssistant(true)} />
+          <HowToGuide onOpenAssistant={() => { setShowAssistant(true); setForceAssistantOpen(prev => prev + 1); }} />
 
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: '20px' }}>
             <input
@@ -3915,7 +4038,7 @@ export default function App() {
             )}
 
             {videoId && (
-              <div className="video-section animate-slideIn">
+              <div id="video-section" className="video-section animate-slideIn">
                 <div style={{ fontWeight: 700, marginBottom: 12 }}>{t.videoPlayer}</div>
                 <iframe
                   ref={playerRef}
@@ -3977,16 +4100,35 @@ export default function App() {
                 </button>
 
                 <button
+                  type="button"
                   className="btn-full-width btn-muted-ghost"
-                  onClick={async () => {
-                    if (!videoId) return;
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!videoId) {
+                      alert("Please load a video first");
+                      return;
+                    }
                     setLoading(l => ({ ...l, mp4: true }));
+                    setProcessStatus({ active: true, message: "Downloading video from YouTube...", percent: 10 });
                     try {
+                      console.log("Starting video download for:", videoId);
                       const d = await apiDownloadMp4(videoId);
-                      window.open(d.file, '_blank');
-                    } catch (e) { }
-                    finally {
+                      console.log("Download response:", d);
+                      if (d && d.file) {
+                        setProcessStatus({ active: true, message: "Download ready! Starting...", percent: 100 });
+                        // Open the file download in new window
+                        window.open(d.file, '_blank');
+                      } else if (d && d.error) {
+                        throw new Error(d.error);
+                      }
+                    } catch (err) {
+                      console.error("Download failed:", err);
+                      alert("Download failed: " + (err.message || "Unknown error. Check console for details."));
+                      setProcessStatus({ active: false, message: "", percent: 0 });
+                    } finally {
                       setLoading(l => ({ ...l, mp4: false }));
+                      setTimeout(() => setProcessStatus({ active: false, message: "", percent: 0 }), 3000);
                     }
                   }}
                 >
@@ -4048,7 +4190,10 @@ export default function App() {
               <div className="action-buttons" style={{ marginTop: '20px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                 <button
                   className="btn btn-secondary"
-                  onClick={() => setShowAssistant(!showAssistant)}
+                  onClick={() => {
+                    setShowAssistant(true);
+                    setForceAssistantOpen(prev => prev + 1);
+                  }}
                 >
                   💬 AI Assistant
                 </button>
@@ -4142,6 +4287,7 @@ export default function App() {
           <MeetingAssistant
             videoId={videoId}
             transcript={fullText}
+            forceOpen={forceAssistantOpen}
           />
         )}
 
