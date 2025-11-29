@@ -3533,7 +3533,6 @@ export default function App() {
       )}
 
       {/* v5.6: Desktop download banner - only shows in cloud mode */}
-      <DesktopAppBanner />
       
       <header className="animate-fadeIn">
         <div className="container">
@@ -4357,6 +4356,8 @@ export default function App() {
       )}
 
 
+      {/* v5.10: Desktop download banner - shows above footer in cloud mode */}
+      <DesktopAppBanner />
       <footer className="footer">
         <div className="container">
           <div className="footer-content">
