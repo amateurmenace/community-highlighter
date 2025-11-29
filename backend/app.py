@@ -824,26 +824,20 @@ async def get_transcript(req: Request):
                 await asyncio.sleep(wait_time)
             
             print("   Trying YouTubeTranscriptApi...")
-            transcript_list = ytt_api.list_transcripts(video_id)
+            if PROXY_ENABLED:
+                print("   Using Webshare residential proxy")
+            
+            # New v1.0+ API: use fetch() directly, returns FetchedTranscript object
+            # Convert to dict list with .to_raw_data()
+            fetched_transcript = ytt_api.fetch(video_id, languages=['en'])
+            transcript_data = fetched_transcript.to_raw_data()
 
-            transcript = None
-            for t in transcript_list:
-                if t.language_code.startswith("en"):
-                    transcript = t
-                    break
+            # Store for AI assistant
+            STORED_TRANSCRIPTS[video_id] = transcript_data
+            print(f"[OK] STORED {len(transcript_data)} segments (YouTubeTranscriptApi)")
 
-            if not transcript:
-                transcript = next(iter(transcript_list))
-
-            if transcript:
-                transcript_data = transcript.fetch()
-
-                # Store for AI assistant
-                STORED_TRANSCRIPTS[video_id] = transcript_data
-                print(f"[OK] STORED {len(transcript_data)} segments (YouTubeTranscriptApi)")
-
-                vtt = to_vtt(transcript_data)
-                return Response(content=vtt, media_type="text/vtt")
+            vtt = to_vtt(transcript_data)
+            return Response(content=vtt, media_type="text/vtt")
 
         except Exception as e:
             last_error = e
@@ -2472,7 +2466,7 @@ async def start_live_monitoring(req: Request):
         while meeting_id in live_manager.active_connections:
             try:
                 # Get latest transcript segment
-                transcript = ytt_api.fetch(video_id)
+                transcript = ytt_api.fetch(video_id).to_raw_data()
 
                 # Find new segments
                 new_segments = [s for s in transcript if s["start"] > last_position]
@@ -2558,7 +2552,7 @@ async def chat_with_meeting(req: Request):
                 print(f"✅ Using cached transcript: {len(transcript_data)} segments")
             else:
                 try:
-                    transcript_data = ytt_api.fetch(meeting_id)
+                    transcript_data = ytt_api.fetch(meeting_id).to_raw_data()
                     STORED_TRANSCRIPTS[meeting_id] = transcript_data
                     print(f"✅ Fetched and cached {len(transcript_data)} segments")
                 except Exception as e:
@@ -2992,7 +2986,7 @@ async def add_meeting_to_knowledge_base(req: Request):
         # Get transcript
         transcript_text = ""
         try:
-            transcript = ytt_api.fetch(video_id)
+            transcript = ytt_api.fetch(video_id).to_raw_data()
             vtt = ["WEBVTT", "", ""]
             for i, entry in enumerate(transcript):
                 start = entry["start"]
@@ -3298,7 +3292,7 @@ async def compare_two_meetings(req: Request):
                 transcripts[mid] = STORED_TRANSCRIPTS[mid]
             else:
                 try:
-                    transcripts[mid] = ytt_api.fetch(mid)
+                    transcripts[mid] = ytt_api.fetch(mid).to_raw_data()
                     STORED_TRANSCRIPTS[mid] = transcripts[mid]
                 except Exception as e:
                     raise HTTPException(400, f"Could not get transcript for {mid}: {e}")
@@ -3453,7 +3447,7 @@ async def get_clip_preview(req: Request):
         # Get transcript segment for the clip
         preview_text = ""
         try:
-            transcript = ytt_api.fetch(video_id)
+            transcript = ytt_api.fetch(video_id).to_raw_data()
             for entry in transcript:
                 if start_time <= entry["start"] <= end_time:
                     preview_text += clean_text(entry["text"]) + " "
