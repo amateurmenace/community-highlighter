@@ -115,17 +115,6 @@ function useDebounce(value, delay = 220) {
 }
 
 function HowToGuide({ onOpenAssistant }) {
-  const [isCompact, setIsCompact] = useState(false);
-  
-  useEffect(() => {
-    const handleScroll = () => {
-      setIsCompact(window.scrollY > 150);
-    };
-    
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
   const scrollToElement = (id) => {
     const element = document.getElementById(id);
     if (element) {
@@ -146,19 +135,13 @@ function HowToGuide({ onOpenAssistant }) {
     <section 
       className="how-to-permanent"
       style={{
-        position: 'sticky',
-        top: '0',
-        zIndex: 100,
         background: 'white',
-        padding: isCompact ? '8px 0' : '16px 0',
-        transition: 'all 0.3s ease',
-        boxShadow: isCompact ? '0 2px 8px rgba(0,0,0,0.1)' : 'none',
-        borderBottom: isCompact ? '2px solid #e2e8f0' : 'none'
+        padding: '16px 0',
+        borderBottom: '1px solid #e2e8f0'
       }}
     >
       <div className="howto" style={{ 
-        gap: isCompact ? '10px' : '16px',
-        transition: 'all 0.3s ease'
+        gap: '16px'
       }}>
         {/* Card 1: Search a Meeting */}
         <div 
@@ -166,8 +149,8 @@ function HowToGuide({ onOpenAssistant }) {
           onClick={() => scrollToElement('search-section')}
           style={{ 
             cursor: 'pointer',
-            padding: isCompact ? '10px 14px' : '20px',
-            minHeight: isCompact ? 'auto' : '90px',
+            padding: '20px',
+            minHeight: '90px',
             transition: 'all 0.3s ease',
             border: '2px solid ' + borderColors[0],
             background: 'white',
@@ -176,25 +159,25 @@ function HowToGuide({ onOpenAssistant }) {
         >
           <div className="num" style={{ 
             background: borderColors[0],
-            fontSize: isCompact ? '14px' : '18px',
-            width: isCompact ? '30px' : '42px',
-            height: isCompact ? '30px' : '42px',
+            fontSize: '18px',
+            width: '42px',
+            height: '42px',
             transition: 'all 0.3s ease'
           }}>1</div>
           <div>
             <div style={{ 
-              fontSize: isCompact ? '17px' : '24px', 
+              fontSize: '24px', 
               fontWeight: '900',
               color: mainGreen,
               letterSpacing: '-0.5px',
               textShadow: '0 1px 0 rgba(0,0,0,0.1)',
               transition: 'all 0.3s ease'
             }}>Search a Meeting</div>
-            {!isCompact && (
+                        
               <div className="step-subtitle" style={{ marginTop: '4px' }}>
                 Use the search bar or word cloud to find anything anywhere at anytime
               </div>
-            )}
+            
           </div>
         </div>
 
@@ -206,8 +189,8 @@ function HowToGuide({ onOpenAssistant }) {
           }}
           style={{ 
             cursor: 'pointer',
-            padding: isCompact ? '10px 14px' : '20px',
-            minHeight: isCompact ? 'auto' : '90px',
+            padding: '20px',
+            minHeight: '90px',
             transition: 'all 0.3s ease',
             border: '2px solid ' + borderColors[1],
             background: 'white',
@@ -216,25 +199,25 @@ function HowToGuide({ onOpenAssistant }) {
         >
           <div className="num" style={{ 
             background: borderColors[1],
-            fontSize: isCompact ? '14px' : '18px',
-            width: isCompact ? '30px' : '42px',
-            height: isCompact ? '30px' : '42px',
+            fontSize: '18px',
+            width: '42px',
+            height: '42px',
             transition: 'all 0.3s ease'
           }}>2</div>
           <div>
             <div style={{ 
-              fontSize: isCompact ? '17px' : '24px', 
+              fontSize: '24px', 
               fontWeight: '900',
               color: mainGreen,
               letterSpacing: '-0.5px',
               textShadow: '0 1px 0 rgba(0,0,0,0.1)',
               transition: 'all 0.3s ease'
             }}>Talk to a Meeting</div>
-            {!isCompact && (
+                        
               <div className="step-subtitle" style={{ marginTop: '4px' }}>
                 An AI Agent will embed in the meeting and answer your questions
               </div>
-            )}
+            
           </div>
         </div>
 
@@ -244,8 +227,8 @@ function HowToGuide({ onOpenAssistant }) {
           onClick={() => scrollToElement('analytics-section')}
           style={{ 
             cursor: 'pointer',
-            padding: isCompact ? '10px 14px' : '20px',
-            minHeight: isCompact ? 'auto' : '90px',
+            padding: '20px',
+            minHeight: '90px',
             transition: 'all 0.3s ease',
             border: '2px solid ' + borderColors[2],
             background: 'white',
@@ -254,25 +237,25 @@ function HowToGuide({ onOpenAssistant }) {
         >
           <div className="num" style={{ 
             background: borderColors[2],
-            fontSize: isCompact ? '14px' : '18px',
-            width: isCompact ? '30px' : '42px',
-            height: isCompact ? '30px' : '42px',
+            fontSize: '18px',
+            width: '42px',
+            height: '42px',
             transition: 'all 0.3s ease'
           }}>3</div>
           <div>
             <div style={{ 
-              fontSize: isCompact ? '17px' : '24px', 
+              fontSize: '24px', 
               fontWeight: '900',
               color: mainGreen,
               letterSpacing: '-0.5px',
               textShadow: '0 1px 0 rgba(0,0,0,0.1)',
               transition: 'all 0.3s ease'
             }}>Analyze a Meeting</div>
-            {!isCompact && (
+                        
               <div className="step-subtitle" style={{ marginTop: '4px' }}>
                 Use data visualizations to make quick sense of long meetings
               </div>
-            )}
+            
           </div>
         </div>
 
@@ -282,8 +265,8 @@ function HowToGuide({ onOpenAssistant }) {
           onClick={() => scrollToElement('video-section')}
           style={{ 
             cursor: 'pointer',
-            padding: isCompact ? '10px 14px' : '20px',
-            minHeight: isCompact ? 'auto' : '90px',
+            padding: '20px',
+            minHeight: '90px',
             transition: 'all 0.3s ease',
             border: '2px solid ' + borderColors[3],
             background: 'white',
@@ -292,25 +275,25 @@ function HowToGuide({ onOpenAssistant }) {
         >
           <div className="num" style={{ 
             background: borderColors[3],
-            fontSize: isCompact ? '14px' : '18px',
-            width: isCompact ? '30px' : '42px',
-            height: isCompact ? '30px' : '42px',
+            fontSize: '18px',
+            width: '42px',
+            height: '42px',
             transition: 'all 0.3s ease'
           }}>4</div>
           <div>
             <div style={{ 
-              fontSize: isCompact ? '17px' : '24px', 
+              fontSize: '24px', 
               fontWeight: '900',
               color: mainGreen,
               letterSpacing: '-0.5px',
               textShadow: '0 1px 0 rgba(0,0,0,0.1)',
               transition: 'all 0.3s ease'
             }}>Highlight a Meeting</div>
-            {!isCompact && (
+                        
               <div className="step-subtitle" style={{ marginTop: '4px' }}>
                 Choose clips to watch, download, & even auto edit into a reel - or have AI do it all for you!
               </div>
-            )}
+            
           </div>
         </div>
       </div>
@@ -868,7 +851,7 @@ function MentionedEntitiesCard({ entities, isLoading }) {
                   className="entity-iframe"
                   sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
                 ></iframe>
-              )}
+              
             </div>
 
             {/* Action Buttons - Open in New Tab */}
@@ -1098,7 +1081,7 @@ function TopicHeatMap({ fullText, sents, openExpandedAt, t, addToBasket, playerR
                 ) : (
                   <p>No specific sentences found for this segment.</p>
                 )
-              )}
+              
             </div>
             <div className="entity-popup-actions">
               <button className="btn btn-ghost" onClick={closeTopicModal}>Close</button>
@@ -1719,7 +1702,7 @@ function ActionItemsTimeline({ fullText }) {
                 <div className="calendar-text">{item.text.slice(0, 80)}...</div>
                 {item.priority === 'high' && (
                   <div className="calendar-priority-dot"></div>
-                )}
+                
               </div>
             ))}
           </div>
@@ -2693,7 +2676,7 @@ function MeetingAssistant({ videoId, transcript, forceOpen = 0 }) {
                       </div>
                     ))}
                   </div>
-                )}
+                
               </div>
             ))}
             {loading && (
@@ -2704,7 +2687,7 @@ function MeetingAssistant({ videoId, transcript, forceOpen = 0 }) {
                   <span></span>
                 </div>
               </div>
-            )}
+            
           </div>
 
           <div className="chat-input">
@@ -3644,7 +3627,7 @@ export default function App() {
                   style={{ width: '100%', height: '500px', border: 'none' }}
                   sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
                 />
-              )}
+              
               {investigateViewMode === 'maps' && (
                 <iframe
                   src={`https://www.google.com/maps/embed/v1/place?key=AIzaSyBFw0Qbyq9zTFTd-tUY6dZWTgaQzuU17R8&q=${encodeURIComponent(investigateWord.text)}`}
@@ -3652,7 +3635,7 @@ export default function App() {
                   style={{ width: '100%', height: '500px', border: 'none' }}
                   allow="geolocation"
                 />
-              )}
+              
               {investigateViewMode === 'wikipedia' && (
                 <iframe
                   src={`https://en.wikipedia.org/wiki/${encodeURIComponent(investigateWord.text)}`}
@@ -3660,7 +3643,7 @@ export default function App() {
                   style={{ width: '100%', height: '500px', border: 'none' }}
                   sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
                 />
-              )}
+              
             </div>
 
             {/* Footer */}
@@ -3811,7 +3794,7 @@ export default function App() {
                             </span>
                           </div>
                         ))
-                      )}
+                      
                     </div>
                   </div>
 
@@ -3838,12 +3821,12 @@ export default function App() {
                             {highlight.text}
                           </div>
                         ))
-                      )}
+                      
                     </div>
                   </div>
                 </div>
               </div>
-            )}
+            
             <button
               className="btn btn-primary animate-hover"
               onClick={loadAll}
@@ -3876,7 +3859,7 @@ export default function App() {
                   <option value="gpt-4-turbo">GPT-4 Turbo</option>
                 </select>
               </>
-            )}
+            
           </div>
         </section>
 
@@ -3924,12 +3907,12 @@ export default function App() {
                         }}>
                           "{item.quote}"
                         </div>
-                      )}
+                      
                     </div>
                   ))}
                 </div>
               </div>
-            )}
+            
           </section>
         )}
 
@@ -3987,7 +3970,7 @@ export default function App() {
                   <div className="search-tooltip-green-above">
                     <strong>Try searching!</strong> Or click any word below to see all mentions
                   </div>
-                )}
+                
 
                 <div id="search-section" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: !query && !matches.length && videoId ? '12px' : '0' }}>
                   <input
@@ -4030,7 +4013,7 @@ export default function App() {
                       🔍 Investigate
                     </button>
                   </div>
-                )}
+                
 
 
                 {hits.length > 0 && matches.length > 0 && (
@@ -4049,7 +4032,7 @@ export default function App() {
                       ))}
                     </div>
                   </div>
-                )}
+                
 
                 {matches.length > 0 && (
                   <div className="results-scroll" style={{ marginTop: 12 }}>
@@ -4067,13 +4050,13 @@ export default function App() {
                       />
                     ))}
                   </div>
-                )}
+                
 
                 {matches.length === 0 && query && videoId && (
                   <div style={{ marginTop: 20, padding: 20, textAlign: "center", color: "#64748b" }}>
                     {t.noMatches} "{query}"
                   </div>
-                )}
+                
 
                 {words.length > 0 && (
                   <div className="visualization-card word-cloud-container" style={{ marginTop: 12 }}>
@@ -4116,9 +4099,9 @@ export default function App() {
                       })}
                     </div>
                   </div>
-                )}
+                
               </>
-            )}
+            
 
             {expanded.open && (
               <div className="expanded-wrap animate-slideIn">
@@ -4147,7 +4130,7 @@ export default function App() {
                   })}
                 </div>
               </div>
-            )}
+            
           </section>
 
           <section className="card section right-column animate-fadeIn">
@@ -4179,7 +4162,7 @@ export default function App() {
                   ))}
                 </div>
               </div>
-            )}
+            
 
             {job.status !== "idle" && (
               <div className="status-section animate-slideIn">
@@ -4201,9 +4184,9 @@ export default function App() {
                       {t.downloadFile}
                     </a>
                   </div>
-                )}
+                
               </div>
-            )}
+            
 
             {videoId && (
               <div id="video-section" className="video-section animate-slideIn">
@@ -4217,7 +4200,7 @@ export default function App() {
                   allowFullScreen
                 />
               </div>
-            )}
+            
 
             {/* v5.2: Live Meeting Mode removed */}
 
@@ -4262,7 +4245,7 @@ export default function App() {
                       ⬇️ Download Desktop App
                     </button>
                   </div>
-                )}
+                
 
                 <button
                   className="btn-full-width btn-muted-primary"
@@ -4393,14 +4376,14 @@ export default function App() {
                             }}>
                               "{item.quote}"
                             </div>
-                          )}
+                          
                         </div>
                       ))}
                     </div>
                   </div>
-                )}
+                
               </div>
-            )}
+            
 
             {videoId && (
               <div className="action-buttons" style={{ marginTop: '20px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -4420,7 +4403,7 @@ export default function App() {
                   📸 Knowledge Base
                 </button>
               </div>
-            )}
+            
           </section>
         </div>
 
