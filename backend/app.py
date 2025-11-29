@@ -1313,21 +1313,28 @@ Extract ONLY high-quality, properly named entities.
 
 STRICT RULES:
 
-1. PEOPLE - MUST have first AND last name
-   YES: "John Smith", "Mayor Sarah Johnson", "Dr. Michael Chen"
+1. PEOPLE - MUST EITHER have first AND last name or a formal title 
+   YES: "John Smith", "President Trump", "Dr. Michael Chen", "Commissioner Garcia"
    NO: "John", "the mayor", "someone", single names
 
 2. PLACES - MUST be specific named locations  
-   YES: "Springfield City Hall", "Oak Street", "Lincoln Park", "Washington D.C."
+   YES: "Brookline Town Hall", "Harvard Street", "Lincoln Park", "Washington D.C.", "Olmstead Road"
    NO: "the building", "downtown", "a park"
 
 3. ORGANIZATIONS - MUST be official names
-   YES: "Google", "Department of Transportation", "Springfield School Board"
+   YES: "Google", "Department of Transportation", "Brookline School Committee", "Brookline Select Board", "ICE", "Flock"
    NO: "the department", "a company", "the board"
 
 4. TECHNOLOGY - MUST be specific product names
-   YES: "Microsoft Teams", "Zoom", "iPhone"
-   NO: "software", "the app", "technology"
+   YES: "Microsoft Teams", "Zoom", "iPhone", "Flock", "AI", "Surveillance", "iPhone", "Smartphones", "Computer"
+   NO: "Internet", "software", "device"
+
+5. CULTURALLY SIGNIFICANT ENTITIES - Include names of landmarks, historical sites, well-known public figures, major events, and widely recognized organizations relevant to civic contexts, as well as items in the current news.
+   YES: "Statue of Liberty", "Martin Luther King", "ICE", "Surveillance", "Capitalism","World War II", "United Nations", "Social Media", Popular Platforms like "Facebook" and "TikTok"
+   NO: Generic or vague references like "a monument", "a leader", "an event"
+
+6. WHENEVER THE TRANSCRIPT MENTIONS "BROOKLYN" ALWAYS READ IT AND TAG IT AS "BROOKLINE" and make sure all outputs respell it to Brookline.
+
 
 NEVER include:
 - Single first names only
