@@ -42,3 +42,5 @@ Thumbs.db
 # Cache
 .cache/
 *.log
+*.zip
+CommunityHighlighter-*.zip
