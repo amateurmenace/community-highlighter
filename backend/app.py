@@ -87,6 +87,12 @@ if os.path.exists("dist"):
         # Check if it's an API route
         if full_path.startswith("api/"):
             raise HTTPException(404, "API endpoint not found")
+        
+        # Check if it's a static file (logo, favicon, etc.)
+        static_path = os.path.join("dist", full_path)
+        if os.path.isfile(static_path):
+            return FileResponse(static_path)
+        
         # Otherwise serve the React app
         return FileResponse("dist/index.html")
 
@@ -768,6 +774,7 @@ def parse_vtt_to_transcript(vtt_content: str) -> list:
 @app.post("/api/transcript")
 async def get_transcript(req: Request):
     from typing import Dict, Any, Optional
+    import random
 
     data = await req.json()
     url = data.get("url")
@@ -778,37 +785,53 @@ async def get_transcript(req: Request):
 
     print(f"[*][>] Getting transcript for video: {video_id}")
 
-    # Try YouTube Transcript API FIRST (most reliable)
-    try:
-        print("   Trying YouTubeTranscriptApi...")
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+    # Try YouTube Transcript API FIRST with retry logic
+    max_retries = 3
+    last_error = None
+    
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                wait_time = (attempt * 2) + random.uniform(0.5, 1.5)
+                print(f"   Retry {attempt + 1}/{max_retries} after {wait_time:.1f}s...")
+                await asyncio.sleep(wait_time)
+            
+            print("   Trying YouTubeTranscriptApi...")
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
 
-        transcript = None
-        for t in transcript_list:
-            if t.language_code.startswith("en"):
-                transcript = t
+            transcript = None
+            for t in transcript_list:
+                if t.language_code.startswith("en"):
+                    transcript = t
+                    break
+
+            if not transcript:
+                transcript = next(iter(transcript_list))
+
+            if transcript:
+                transcript_data = transcript.fetch()
+
+                # Store for AI assistant
+                STORED_TRANSCRIPTS[video_id] = transcript_data
+                print(f"[OK] STORED {len(transcript_data)} segments (YouTubeTranscriptApi)")
+
+                vtt = to_vtt(transcript_data)
+                return Response(content=vtt, media_type="text/vtt")
+
+        except Exception as e:
+            last_error = e
+            error_msg = str(e).lower()
+            print(f"   YouTubeTranscriptApi attempt {attempt + 1} failed: {e}")
+            
+            # Don't retry if captions are definitely not available
+            if "disabled" in error_msg or "no transcript" in error_msg:
+                print("   Captions disabled for this video")
                 break
-
-        if not transcript:
-            transcript = next(iter(transcript_list))
-
-        if transcript:
-            transcript_data = transcript.fetch()
-
-            #  Store for AI assistant
-            STORED_TRANSCRIPTS[video_id] = transcript_data
-            print(
-                f" STORED {len(transcript_data)} segments (Method: YouTubeTranscriptApi)"
-            )
-
-            vtt = to_vtt(transcript_data)
-            return Response(content=vtt, media_type="text/vtt")
-
-    except Exception as e:
-        print(f"   YouTubeTranscriptApi failed: {e}")
-        print(
-            f"   This may be due to: disabled captions, age restrictions, or private video"
-        )
+            
+            if attempt < max_retries - 1:
+                continue
+    
+    print(f"   YouTubeTranscriptApi failed after {max_retries} attempts")
 
     # Fallback: YouTube Data API
     if YOUTUBE_API_KEY:
