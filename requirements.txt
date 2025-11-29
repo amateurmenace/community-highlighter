@@ -1,23 +1,33 @@
-httpx==0.24.1
-openai==1.12.0
-huggingface-hub==0.17.3
-transformers==4.34.0
-sentence-transformers==2.2.2
+# Core web framework
 fastapi==0.104.1
 uvicorn==0.24.0
 python-multipart==0.0.6
 python-dotenv==1.0.0
-youtube-transcript-api==0.6.2
-chromadb==0.4.18
-nltk==3.8.1
-textblob==0.18.0
-pandas==2.2.3
-numpy==1.26.4
+pydantic==2.5.0
+starlette==0.27.0
+
+# HTTP clients
+httpx==0.24.1
 requests==2.31.0
 aiohttp==3.9.1
 websockets==12.0
-chat-downloader==0.2.8
+
+# YouTube/Video
+youtube-transcript-api==0.6.2
 git+https://github.com/yt-dlp/yt-dlp.git
-pydantic==2.5.0
+
+# AI/OpenAI
+openai==1.12.0
+
+# Text processing
+nltk==3.8.1
+textblob==0.18.0
+
+# Data
+pandas==2.2.3
+numpy==1.26.4
 sqlalchemy==2.0.23
 dateparser==1.2.0
+
+# Live chat (optional - may fail but won't break build)
+chat-downloader==0.2.8
