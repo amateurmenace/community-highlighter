@@ -17,6 +17,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from youtube_transcript_api import YouTubeTranscriptApi
+try:
+    from youtube_transcript_api.proxies import WebshareProxyConfig
+    WEBSHARE_IMPORT_OK = True
+except ImportError:
+    WEBSHARE_IMPORT_OK = False
+    print("[!] youtube-transcript-api proxy support not available - update the package")
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
 import yt_dlp
 import zipfile
@@ -64,6 +70,27 @@ except:
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
+
+# Webshare Residential Proxy Configuration
+# Sign up at https://www.webshare.io/ and get rotating residential proxy credentials
+WEBSHARE_PROXY_USERNAME = os.getenv("WEBSHARE_PROXY_USERNAME", "")
+WEBSHARE_PROXY_PASSWORD = os.getenv("WEBSHARE_PROXY_PASSWORD", "")
+
+# Initialize YouTube Transcript API - with proxy if available
+if WEBSHARE_IMPORT_OK and WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
+    print("[OK] Webshare residential proxy configured for YouTube access")
+    ytt_api = YouTubeTranscriptApi(
+        proxy_config=WebshareProxyConfig(
+            proxy_username=WEBSHARE_PROXY_USERNAME,
+            proxy_password=WEBSHARE_PROXY_PASSWORD,
+        )
+    )
+    PROXY_ENABLED = True
+else:
+    if not WEBSHARE_PROXY_USERNAME:
+        print("[!] No WEBSHARE_PROXY_USERNAME set - YouTube may block cloud server requests")
+    ytt_api = YouTubeTranscriptApi()
+    PROXY_ENABLED = False
 
 
 app = FastAPI()
@@ -797,7 +824,7 @@ async def get_transcript(req: Request):
                 await asyncio.sleep(wait_time)
             
             print("   Trying YouTubeTranscriptApi...")
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            transcript_list = ytt_api.list_transcripts(video_id)
 
             transcript = None
             for t in transcript_list:
@@ -2445,7 +2472,7 @@ async def start_live_monitoring(req: Request):
         while meeting_id in live_manager.active_connections:
             try:
                 # Get latest transcript segment
-                transcript = YouTubeTranscriptApi.get_transcript(video_id)
+                transcript = ytt_api.fetch(video_id)
 
                 # Find new segments
                 new_segments = [s for s in transcript if s["start"] > last_position]
@@ -2531,7 +2558,7 @@ async def chat_with_meeting(req: Request):
                 print(f"✅ Using cached transcript: {len(transcript_data)} segments")
             else:
                 try:
-                    transcript_data = YouTubeTranscriptApi.get_transcript(meeting_id)
+                    transcript_data = ytt_api.fetch(meeting_id)
                     STORED_TRANSCRIPTS[meeting_id] = transcript_data
                     print(f"✅ Fetched and cached {len(transcript_data)} segments")
                 except Exception as e:
@@ -2965,7 +2992,7 @@ async def add_meeting_to_knowledge_base(req: Request):
         # Get transcript
         transcript_text = ""
         try:
-            transcript = YouTubeTranscriptApi.get_transcript(video_id)
+            transcript = ytt_api.fetch(video_id)
             vtt = ["WEBVTT", "", ""]
             for i, entry in enumerate(transcript):
                 start = entry["start"]
@@ -3271,7 +3298,7 @@ async def compare_two_meetings(req: Request):
                 transcripts[mid] = STORED_TRANSCRIPTS[mid]
             else:
                 try:
-                    transcripts[mid] = YouTubeTranscriptApi.get_transcript(mid)
+                    transcripts[mid] = ytt_api.fetch(mid)
                     STORED_TRANSCRIPTS[mid] = transcripts[mid]
                 except Exception as e:
                     raise HTTPException(400, f"Could not get transcript for {mid}: {e}")
@@ -3426,7 +3453,7 @@ async def get_clip_preview(req: Request):
         # Get transcript segment for the clip
         preview_text = ""
         try:
-            transcript = YouTubeTranscriptApi.get_transcript(video_id)
+            transcript = ytt_api.fetch(video_id)
             for entry in transcript:
                 if start_time <= entry["start"] <= end_time:
                     preview_text += clean_text(entry["text"]) + " "
