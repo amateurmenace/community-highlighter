@@ -34,9 +34,9 @@ try:
     CHROMADB_AVAILABLE = True
 except ImportError:
     CHROMADB_AVAILABLE = False
-    print("[!] ChromaDB not available - Knowledge Base disabled")
+    print("[!] ChromaDB/SentenceTransformers not available - Knowledge Base disabled")
 
-# Live Chat Support - removed in v5.2
+# Live Chat Support - disabled in v5.2
 LIVE_CHAT_AVAILABLE = False
 
 # AI Optimization Support (optional)
@@ -108,50 +108,42 @@ MEETING_CACHE = {}  # v5.0: Meeting summaries cache  # Cache for transcripts
 #   NEW: VECTOR DATABASE SETUP (ChromaDB for Knowledge Base)
 # ============================================================================
 
-# Initialize ChromaDB client with error handling for schema issues
+# Initialize ChromaDB only if available
 chroma_db_path = os.path.join(KB_DIR, "chroma_db")
+chroma_client = None
+meetings_collection = None
+embedding_model = None
 
-# Try to initialize ChromaDB, reset if schema error
-try:
-    chroma_client = chromadb.PersistentClient(path=chroma_db_path)
-    # Test if the database is working
-    chroma_client.list_collections()
-except Exception as e:
-    if "no such column" in str(e) or "OperationalError" in str(e):
-        print("[!] ChromaDB schema outdated. Resetting database...")
-        # Remove old database
-        if os.path.exists(chroma_db_path):
-            shutil.rmtree(chroma_db_path)
-        # Create new client with fresh database
+if CHROMADB_AVAILABLE:
+    try:
         chroma_client = chromadb.PersistentClient(path=chroma_db_path)
-        print(" ChromaDB database reset successfully")
-    else:
-        # Re-raise if it's a different error
-        raise
+        chroma_client.list_collections()
+        embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+        
+        try:
+            meetings_collection = chroma_client.get_collection(
+                name="community_meetings",
+                embedding_function=embedding_functions.SentenceTransformerEmbeddingFunction(
+                    model_name="all-MiniLM-L6-v2"
+                ),
+            )
+            print("[OK] ChromaDB collection loaded")
+        except:
+            meetings_collection = chroma_client.create_collection(
+                name="community_meetings",
+                embedding_function=embedding_functions.SentenceTransformerEmbeddingFunction(
+                    model_name="all-MiniLM-L6-v2"
+                ),
+            )
+            print("[OK] ChromaDB collection created")
+    except Exception as e:
+        print(f"[!] ChromaDB init failed: {e}")
+        CHROMADB_AVAILABLE = False
+        chroma_client = None
+        meetings_collection = None
+else:
+    print("[!] Knowledge Base disabled")
 
-# Initialize sentence transformer for embeddings
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-
-# Create or get collection for meetings
-try:
-    meetings_collection = chroma_client.get_collection(
-        name="community_meetings",
-        embedding_function=embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="all-MiniLM-L6-v2"
-        ),
-    )
-    print(" Using existing ChromaDB collection")
-except Exception as e:
-    print(f" Creating new ChromaDB collection...")
-    meetings_collection = chroma_client.create_collection(
-        name="community_meetings",
-        embedding_function=embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="all-MiniLM-L6-v2"
-        ),
-    )
-    print(" ChromaDB collection created")
-
-# ============================================================================
 #  NEW: WEBSOCKET CONNECTIONS FOR LIVE MODE
 # ============================================================================
 
@@ -3035,6 +3027,10 @@ async def add_meeting_to_knowledge_base(req: Request):
 
         # Add to ChromaDB
         if documents:
+            if not CHROMADB_AVAILABLE:
+
+                raise HTTPException(503, "Knowledge Base not available - ChromaDB not installed")
+
             meetings_collection.add(
                 documents=documents, metadatas=doc_metadata, ids=doc_ids
             )
@@ -3073,6 +3069,10 @@ async def search_knowledge_base(req: Request):
             where_clause["video_id"] = filters["video_id"]
 
         # Search in vector database
+        if not CHROMADB_AVAILABLE:
+
+            raise HTTPException(503, "Knowledge Base not available - ChromaDB not installed")
+
         results = meetings_collection.query(
             query_texts=[query],
             n_results=limit,
@@ -3128,6 +3128,10 @@ async def find_related_meetings(req: Request):
 
     try:
         # Get the meeting's documents from knowledge base
+        if not CHROMADB_AVAILABLE:
+
+            raise HTTPException(503, "Knowledge Base not available - ChromaDB not installed")
+
         meeting_docs = meetings_collection.get(where={"video_id": video_id}, limit=1)
 
         if not meeting_docs or not meeting_docs["documents"]:
@@ -3137,6 +3141,10 @@ async def find_related_meetings(req: Request):
         query_text = meeting_docs["documents"][0]
 
         # Search for similar content, excluding the same video
+        if not CHROMADB_AVAILABLE:
+
+            raise HTTPException(503, "Knowledge Base not available - ChromaDB not installed")
+
         results = meetings_collection.query(
             query_texts=[query_text],
             n_results=limit + 5,  # Get extra to filter out same video
@@ -3182,6 +3190,10 @@ async def get_knowledge_base_stats():
     """Get statistics about the knowledge base"""
     try:
         # Get collection info
+        if not CHROMADB_AVAILABLE:
+
+            raise HTTPException(503, "Knowledge Base not available - ChromaDB not installed")
+
         collection_data = meetings_collection.get()
 
         if not collection_data or not collection_data["metadatas"]:
