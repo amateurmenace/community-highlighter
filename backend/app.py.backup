@@ -92,16 +92,6 @@ else:
     ytt_api = YouTubeTranscriptApi()
     PROXY_ENABLED = False
 
-# Cloud deployment mode - disables video download features (yt-dlp blocked by YouTube)
-# Set CLOUD_MODE=true in Render to enable this
-CLOUD_MODE = os.getenv("CLOUD_MODE", "false").lower() == "true"
-if CLOUD_MODE:
-    print("[!] CLOUD_MODE enabled - video download/clip features disabled")
-    print("    (Transcripts, AI analysis, and all analytics still work!)")
-
-
-# Define BASE_DIR early for static files
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = FastAPI()
 app.add_middleware(
@@ -112,30 +102,12 @@ app.add_middleware(
 )
 
 # Serve static files from React build (for production)
-# Check multiple possible locations for dist folder
-def find_dist_dir():
-    """Find the dist directory in various possible locations"""
-    candidates = [
-        os.path.join(BASE_DIR, "dist"),                    # Same dir as app.py
-        os.path.join(os.path.dirname(BASE_DIR), "dist"),   # Parent dir
-        os.path.abspath("dist"),                            # Current working dir
-        os.path.join(BASE_DIR, "..", "dist"),              # Relative parent
-    ]
-    for candidate in candidates:
-        if os.path.exists(candidate) and os.path.exists(os.path.join(candidate, "assets")):
-            return os.path.abspath(candidate)
-    return None
-
-DIST_DIR = find_dist_dir()
-
-if DIST_DIR:
-    print(f"[OK] Serving static files from: {DIST_DIR}")
-    DIST_ASSETS_DIR = os.path.join(DIST_DIR, "assets")
-    app.mount("/assets", StaticFiles(directory=DIST_ASSETS_DIR), name="assets")
+if os.path.exists("dist"):
+    app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
     
     @app.get("/")
     async def serve_react_app():
-        return FileResponse(os.path.join(DIST_DIR, "index.html"))
+        return FileResponse("dist/index.html")
     
     @app.get("/{full_path:path}")
     async def serve_react_app_catchall(full_path: str):
@@ -144,16 +116,14 @@ if DIST_DIR:
             raise HTTPException(404, "API endpoint not found")
         
         # Check if it's a static file (logo, favicon, etc.)
-        static_path = os.path.join(DIST_DIR, full_path)
+        static_path = os.path.join("dist", full_path)
         if os.path.isfile(static_path):
             return FileResponse(static_path)
         
         # Otherwise serve the React app
-        return FileResponse(os.path.join(DIST_DIR, "index.html"))
-else:
-    print("[!] No dist folder found - frontend not available")
-    print("    Run 'npm run build' to build the frontend")
+        return FileResponse("dist/index.html")
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FILES_DIR = os.path.join(BASE_DIR, "cache")
 os.makedirs(FILES_DIR, exist_ok=True)
 
@@ -748,67 +718,11 @@ async def health_check():
     """Health check endpoint for deployment monitoring"""
     return {
         "status": "healthy",
-        "version": "5.5",
-        "cloud_mode": CLOUD_MODE,
-        "proxy_enabled": PROXY_ENABLED,
+        "version": "5.0",
         "features": {
-            "transcripts": True,
             "ai_assistant": bool(OPENAI_API_KEY),
-            "ai_summaries": bool(OPENAI_API_KEY),
-            "entity_extraction": bool(OPENAI_API_KEY),
-            "word_frequency": True,
-            "sentiment_analysis": True,
-            "knowledge_base": CHROMADB_AVAILABLE,
-            "video_clips": not CLOUD_MODE,
-            "video_download": not CLOUD_MODE,
+            "knowledge_base": True,
             "live_mode": False
-        },
-        "notes": "Video download features disabled in cloud mode (YouTube blocks cloud IPs)" if CLOUD_MODE else None
-    }
-
-
-@app.get("/api/system/status")
-async def system_status():
-    """Detailed system status including desktop download information"""
-    return {
-        "version": "5.5",
-        "environment": "cloud" if CLOUD_MODE else "desktop",
-        "cloud_mode": CLOUD_MODE,
-        "proxy_enabled": PROXY_ENABLED,
-        "features": {
-            "transcripts": {"available": True, "description": "Fetch YouTube video transcripts"},
-            "ai_analysis": {"available": bool(OPENAI_API_KEY), "description": "AI-powered summaries and insights"},
-            "entity_extraction": {"available": bool(OPENAI_API_KEY), "description": "Extract people, places, organizations"},
-            "word_frequency": {"available": True, "description": "Analyze common words and phrases"},
-            "sentiment_analysis": {"available": True, "description": "Analyze sentiment over time"},
-            "action_items": {"available": bool(OPENAI_API_KEY), "description": "Extract action items and decisions"},
-            "knowledge_base": {"available": CHROMADB_AVAILABLE, "description": "Compare multiple meetings"},
-            "video_clips": {
-                "available": not CLOUD_MODE,
-                "description": "Download and create video clips",
-                "cloud_note": "Requires desktop app - YouTube blocks cloud servers" if CLOUD_MODE else None
-            },
-            "highlight_reels": {
-                "available": not CLOUD_MODE,
-                "description": "Create highlight compilation videos",
-                "cloud_note": "Requires desktop app - YouTube blocks cloud servers" if CLOUD_MODE else None
-            }
-        },
-        "desktop_app": {
-            "required_for": ["video_clips", "highlight_reels"] if CLOUD_MODE else [],
-            "download_url": "https://github.com/amateurmenace/community-highlighter/releases",
-            "platforms": {
-                "mac": {
-                    "name": "macOS",
-                    "filename": "CommunityHighlighter-mac.zip",
-                    "requirements": "macOS 10.15 or later"
-                },
-                "windows": {
-                    "name": "Windows",
-                    "filename": "CommunityHighlighter-windows.zip",
-                    "requirements": "Windows 10 or later"
-                }
-            }
         }
     }
 
@@ -910,20 +824,26 @@ async def get_transcript(req: Request):
                 await asyncio.sleep(wait_time)
             
             print("   Trying YouTubeTranscriptApi...")
-            if PROXY_ENABLED:
-                print("   Using Webshare residential proxy")
-            
-            # New v1.0+ API: use fetch() directly, returns FetchedTranscript object
-            # Convert to dict list with .to_raw_data()
-            fetched_transcript = ytt_api.fetch(video_id, languages=['en'])
-            transcript_data = fetched_transcript.to_raw_data()
+            transcript_list = ytt_api.list_transcripts(video_id)
 
-            # Store for AI assistant
-            STORED_TRANSCRIPTS[video_id] = transcript_data
-            print(f"[OK] STORED {len(transcript_data)} segments (YouTubeTranscriptApi)")
+            transcript = None
+            for t in transcript_list:
+                if t.language_code.startswith("en"):
+                    transcript = t
+                    break
 
-            vtt = to_vtt(transcript_data)
-            return Response(content=vtt, media_type="text/vtt")
+            if not transcript:
+                transcript = next(iter(transcript_list))
+
+            if transcript:
+                transcript_data = transcript.fetch()
+
+                # Store for AI assistant
+                STORED_TRANSCRIPTS[video_id] = transcript_data
+                print(f"[OK] STORED {len(transcript_data)} segments (YouTubeTranscriptApi)")
+
+                vtt = to_vtt(transcript_data)
+                return Response(content=vtt, media_type="text/vtt")
 
         except Exception as e:
             last_error = e
@@ -1382,29 +1302,21 @@ Extract ONLY high-quality, properly named entities.
 
 STRICT RULES:
 
-1. PEOPLE - MUST EITHER have first AND last name or a formal title 
-   YES: "John Smith", "President Trump", "Dr. Michael Chen", "Commissioner Garcia"
+1. PEOPLE - MUST have first AND last name
+   YES: "John Smith", "Mayor Sarah Johnson", "Dr. Michael Chen"
    NO: "John", "the mayor", "someone", single names
 
 2. PLACES - MUST be specific named locations  
-   YES: "Brookline Town Hall", "Harvard Street", "Lincoln Park", "Washington D.C.", "Olmstead Road"
+   YES: "Springfield City Hall", "Oak Street", "Lincoln Park", "Washington D.C."
    NO: "the building", "downtown", "a park"
 
 3. ORGANIZATIONS - MUST be official names
-   YES: "Google", "Department of Transportation", "Brookline School Committee", "Brookline Select Board", "ICE", "Flock"
+   YES: "Google", "Department of Transportation", "Springfield School Board"
    NO: "the department", "a company", "the board"
 
 4. TECHNOLOGY - MUST be specific product names
-   YES: "Microsoft Teams", "Zoom", "iPhone", "Flock", "AI", "Surveillance", "iPhone", "Smartphones", "Computer"
-   NO: "Internet", "software", "device"
-
-5. CULTURALLY SIGNIFICANT ENTITIES - Include names of landmarks, historical sites, well-known public figures, major events, and widely recognized organizations relevant to civic contexts, as well as items in the current news.
-   YES: "Statue of Liberty", "Martin Luther King", "ICE", "Surveillance", "Capitalism","World War II", "United Nations", "Social Media", Popular Platforms like "Facebook" and "TikTok"
-   NO: Generic or vague references like "a monument", "a leader", "an event"
-
-6. WHENEVER THE TRANSCRIPT MENTIONS "BROOKLYN" ALWAYS READ IT AND TAG IT AS "BROOKLINE" and make sure all outputs respell it to Brookline.
-
-7. If there's even a single entry of the work "Flock" or "ICE" include them as returns.
+   YES: "Microsoft Teams", "Zoom", "iPhone"
+   NO: "software", "the app", "technology"
 
 NEVER include:
 - Single first names only
@@ -1784,21 +1696,6 @@ async def get_budget_impact(req: Request):
                 }
             )
 
-        # Check for thousands
-        thousands = re.findall(dollar_patterns[0], sent, re.IGNORECASE)
-        for amount in thousands:
-            amount_clean = amount.replace(",", "")
-            value = float(amount_clean) * 1_000
-            category = categorize_budget_item(sent_lower)
-            budget_items.append(
-                {
-                    "amount": value,
-                    "display": f"${amount_clean}K",
-                    "category": category,
-                    "context": sent.strip()[:100],
-                }
-            )
-
         # Check for regular dollars (only if > $1000)
         regular = re.findall(dollar_patterns[2], sent, re.IGNORECASE)
         for amount in regular:
@@ -2113,14 +2010,6 @@ def simple_job(job_id, vid, clips, format_type="combined"):
 
 @app.post("/api/render_clips")
 async def render_clips(req: Request):
-    # Disable video downloads on cloud (YouTube blocks yt-dlp from cloud IPs)
-    if CLOUD_MODE:
-        return {
-            "error": "Video clip download is not available in cloud mode",
-            "message": "YouTube blocks video downloads from cloud servers. All transcript analysis features work normally. For clip downloads, run the app locally.",
-            "jobId": None
-        }
-    
     data = await req.json()
     vid = data.get("videoId", "")
     clips = data.get("clips", [])
@@ -2142,9 +2031,6 @@ async def job_status(jobId: str):
 
 @app.post("/api/download_mp4")
 async def download_mp4(req: Request):
-    if CLOUD_MODE:
-        raise HTTPException(503, "Video download not available in cloud mode. YouTube blocks downloads from cloud servers.")
-    
     data = await req.json()
     vid = data.get("videoId", "")
 
@@ -2586,7 +2472,7 @@ async def start_live_monitoring(req: Request):
         while meeting_id in live_manager.active_connections:
             try:
                 # Get latest transcript segment
-                transcript = ytt_api.fetch(video_id).to_raw_data()
+                transcript = ytt_api.fetch(video_id)
 
                 # Find new segments
                 new_segments = [s for s in transcript if s["start"] > last_position]
@@ -2672,7 +2558,7 @@ async def chat_with_meeting(req: Request):
                 print(f"✅ Using cached transcript: {len(transcript_data)} segments")
             else:
                 try:
-                    transcript_data = ytt_api.fetch(meeting_id).to_raw_data()
+                    transcript_data = ytt_api.fetch(meeting_id)
                     STORED_TRANSCRIPTS[meeting_id] = transcript_data
                     print(f"✅ Fetched and cached {len(transcript_data)} segments")
                 except Exception as e:
@@ -3106,7 +2992,7 @@ async def add_meeting_to_knowledge_base(req: Request):
         # Get transcript
         transcript_text = ""
         try:
-            transcript = ytt_api.fetch(video_id).to_raw_data()
+            transcript = ytt_api.fetch(video_id)
             vtt = ["WEBVTT", "", ""]
             for i, entry in enumerate(transcript):
                 start = entry["start"]
@@ -3412,7 +3298,7 @@ async def compare_two_meetings(req: Request):
                 transcripts[mid] = STORED_TRANSCRIPTS[mid]
             else:
                 try:
-                    transcripts[mid] = ytt_api.fetch(mid).to_raw_data()
+                    transcripts[mid] = ytt_api.fetch(mid)
                     STORED_TRANSCRIPTS[mid] = transcripts[mid]
                 except Exception as e:
                     raise HTTPException(400, f"Could not get transcript for {mid}: {e}")
@@ -3539,9 +3425,6 @@ async def get_conversation_starters():
 @app.post("/api/clip/preview")
 async def get_clip_preview(req: Request):
     """Get preview data for a clip (thumbnail and text snippet)"""
-    if CLOUD_MODE:
-        return {"error": "Clip preview not available in cloud mode", "frames": [], "transcript_snippet": ""}
-    
     data = await req.json()
     video_id = data.get("videoId")
     start_time = data.get("startTime", 0)
@@ -3570,7 +3453,7 @@ async def get_clip_preview(req: Request):
         # Get transcript segment for the clip
         preview_text = ""
         try:
-            transcript = ytt_api.fetch(video_id).to_raw_data()
+            transcript = ytt_api.fetch(video_id)
             for entry in transcript:
                 if start_time <= entry["start"] <= end_time:
                     preview_text += clean_text(entry["text"]) + " "

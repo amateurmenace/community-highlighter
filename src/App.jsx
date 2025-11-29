@@ -10,6 +10,8 @@ import {
   apiStoreTranscript
 } from "./api";
 
+import { DesktopAppBanner, DesktopAppInlinePrompt, useCloudMode } from './components/DesktopAppBanner';
+
 // v5.2: Use relative URLs for deployment compatibility
 const BACKEND_URL = "";
 
@@ -108,6 +110,7 @@ function HowToGuide({ t }) {
 
   return (
     <>
+    <DesktopAppBanner />
       {isPopupOpen && (
         <div className="entity-popup-overlay" onClick={() => setIsPopupOpen(false)}>
           <div className="entity-popup-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', padding: '24px' }}>
@@ -2481,6 +2484,23 @@ function KnowledgeBase({ currentVideoId, onSelectMeeting }) {
 }
 
 export default function App() {
+  const { isCloudMode } = useCloudMode();
+
+  return (
+    <div className="app">
+      {/* Desktop download banner at top */}
+      <DesktopAppBanner />
+
+      {/* ... rest of your app ... */}
+
+      {/* Where you have clip download buttons: */}
+      {isCloudMode ? (
+        <DesktopAppInlinePrompt feature="Video clip downloads" />
+      ) : (
+        <YourClipDownloadComponent />
+      )}
+    </div>
+  );
   const [url, setUrl] = useState("");
   const [videoId, setVideoId] = useState("");
   const [liveUrl, setLiveUrl] = useState("");
