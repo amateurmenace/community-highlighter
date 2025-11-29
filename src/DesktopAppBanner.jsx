@@ -78,61 +78,45 @@ export function DesktopAppBanner({ onDismiss }) {
   
   return (
     <div style={{
-      background: '#f5f0e6',
-      color: '#1a1a1a',
-      padding: '12px 20px',
       display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: '16px',
-      fontSize: '14px',
-      borderBottom: '2px solid #1e7f63',
+      justifyContent: 'center',
+      padding: '24px 20px',
     }}>
       <div style={{
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
         gap: '12px',
-        flex: 1,
+        maxWidth: '320px',
+        textAlign: 'center',
       }}>
-        <span style={{ fontSize: '24px' }}>🖥️</span>
-        <div>
-          <div style={{ fontWeight: '700', marginBottom: '2px', color: '#1e7f63' }}>
-            Want to create video clips and highlight reels?
-          </div>
-          <div style={{ color: '#4a4a4a', fontSize: '13px' }}>
-            Download the desktop app for full features including video downloads
-          </div>
+        <div style={{ fontSize: '13px', color: '#666', lineHeight: '1.5' }}>
+          Want to create video clips and highlight reels? Download the desktop app for full video editing features.
         </div>
-      </div>
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
         <button 
           onClick={handleDownload}
           style={{
             background: '#1e7f63',
             color: 'white',
             border: 'none',
-            padding: '8px 16px',
+            padding: '10px 20px',
             borderRadius: '6px',
             fontWeight: '600',
             cursor: 'pointer',
-            fontSize: '13px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
+            fontSize: '14px',
           }}
         >
-          <span>⬇️</span> Download App
+          ⬇️ Download Desktop App
         </button>
         <button 
           onClick={handleDismiss}
           style={{
             background: 'transparent',
-            color: '#1a1a1a',
-            border: '1px solid #ccc',
-            padding: '8px 12px',
-            borderRadius: '6px',
+            color: '#999',
+            border: 'none',
+            padding: '4px 8px',
             cursor: 'pointer',
-            fontSize: '13px',
+            fontSize: '12px',
           }}
         >
           Maybe Later

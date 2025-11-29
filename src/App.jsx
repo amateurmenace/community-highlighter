@@ -319,6 +319,171 @@ function HowToGuide({ onOpenAssistant }) {
 }
 
 // ============================================================================
+// Feedback Modal Component
+// ============================================================================
+function FeedbackModal({ onClose }) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [organization, setOrganization] = useState('');
+  const [feedback, setFeedback] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSending(true);
+    
+    try {
+      // Create mailto link with form data
+      const subject = encodeURIComponent('Community Highlighter Feedback');
+      const body = encodeURIComponent(
+        `Name: ${name}\nEmail: ${email}\nOrganization: ${organization}\n\nFeedback:\n${feedback}`
+      );
+      window.location.href = `mailto:stephen@weirdmachine.org?subject=${subject}&body=${body}`;
+      setSent(true);
+      setTimeout(() => onClose(), 2000);
+    } catch (err) {
+      alert('Failed to send feedback. Please email stephen@weirdmachine.org directly.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'rgba(0,0,0,0.5)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000,
+    }} onClick={onClose}>
+      <div style={{
+        background: 'white',
+        borderRadius: '12px',
+        padding: '24px',
+        maxWidth: '450px',
+        width: '90%',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h2 style={{ margin: 0, fontSize: '20px', color: '#1e7f63' }}>Share Your Feedback</h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#999' }}>×</button>
+        </div>
+        
+        {sent ? (
+          <div style={{ textAlign: 'center', padding: '20px' }}>
+            <div style={{ fontSize: '48px', marginBottom: '12px' }}>✅</div>
+            <div style={{ fontSize: '16px', color: '#1e7f63' }}>Thank you for your feedback!</div>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#333' }}>Name</label>
+              <input
+                type="text"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                required
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  border: '2px solid #e0e0e0',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  boxSizing: 'border-box'
+                }}
+                placeholder="Your name"
+              />
+            </div>
+            
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#333' }}>Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  border: '2px solid #e0e0e0',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  boxSizing: 'border-box'
+                }}
+                placeholder="your@email.com"
+              />
+            </div>
+            
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#333' }}>Organization</label>
+              <input
+                type="text"
+                value={organization}
+                onChange={e => setOrganization(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  border: '2px solid #e0e0e0',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  boxSizing: 'border-box'
+                }}
+                placeholder="Your organization (optional)"
+              />
+            </div>
+            
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#333' }}>Feedback</label>
+              <textarea
+                value={feedback}
+                onChange={e => setFeedback(e.target.value)}
+                required
+                rows={4}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  border: '2px solid #e0e0e0',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  resize: 'vertical',
+                  boxSizing: 'border-box'
+                }}
+                placeholder="Tell us what you think, report bugs, or suggest features..."
+              />
+            </div>
+            
+            <button
+              type="submit"
+              disabled={sending}
+              style={{
+                width: '100%',
+                padding: '12px',
+                background: '#1e7f63',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '15px',
+                fontWeight: '600',
+                cursor: sending ? 'not-allowed' : 'pointer',
+                opacity: sending ? 0.7 : 1
+              }}
+            >
+              {sending ? 'Sending...' : 'Send Feedback'}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // 🚀 NEW: Optimization Panel Component
 // ============================================================================
 function OptimizationPanel({ stats, onClose, onClearCache }) {
@@ -2761,6 +2926,7 @@ export default function App() {
   // 🚀 NEW: Optimization stats state
   const [optimizationStats, setOptimizationStats] = useState(null);
   const [showOptimizationPanel, setShowOptimizationPanel] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
   // 🔴 NEW v4.0: State for new features
   const [showAssistant, setShowAssistant] = useState(false);
@@ -3532,8 +3698,6 @@ export default function App() {
         </div>
       )}
 
-      {/* v5.6: Desktop download banner - only shows in cloud mode */}
-      
       <header className="animate-fadeIn">
         <div className="container">
           <div className="wrap">
@@ -3551,23 +3715,28 @@ export default function App() {
               <div className="powered-section">
                 <span className="powered-text">{t.poweredBy}</span>
                 <img src="/secondary.png" alt="BIG" className="secondary-logo-large" />
-                {/* 🚀 NEW: Optimization button */}
-                {optimizationStats && (
+                {/* Feedback button */}
+                <div style={{ marginLeft: '12px', textAlign: 'center' }}>
                   <button
                     className="btn btn-ghost"
-                    onClick={() => setShowOptimizationPanel(!showOptimizationPanel)}
+                    onClick={() => setShowFeedbackModal(true)}
                     style={{
-                      marginLeft: "12px",
-                      fontSize: "13px",
-                      padding: "8px 16px",
-                      background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                      color: "white",
-                      fontWeight: "700"
+                      fontSize: '13px',
+                      padding: '8px 16px',
+                      background: '#1e7f63',
+                      color: 'white',
+                      fontWeight: '600',
+                      borderRadius: '6px',
+                      border: 'none',
+                      cursor: 'pointer'
                     }}
                   >
-                    🚀 {optimizationStats.estimated_savings?.percentage}% Savings
+                    Give Feedback
                   </button>
-                )}
+                  <div style={{ fontSize: '10px', color: '#888', marginTop: '4px' }}>
+                    This app is in BETA
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -4355,9 +4524,9 @@ export default function App() {
         </section>
       )}
 
-
       {/* v5.10: Desktop download banner - shows above footer in cloud mode */}
       <DesktopAppBanner />
+
       <footer className="footer">
         <div className="container">
           <div className="footer-content">
@@ -4376,6 +4545,30 @@ export default function App() {
             <div className="footer-website">
               <a href="https://weirdmachine.org" target="_blank" rel="noopener noreferrer">weirdmachine.org</a>
             </div>
+            <div style={{ marginTop: '12px' }}>
+              <a 
+                href="https://github.com/amateurmenace/community-highlighter" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 16px',
+                  background: '#24292e',
+                  color: 'white',
+                  borderRadius: '6px',
+                  textDecoration: 'none',
+                  fontSize: '13px',
+                  fontWeight: '500'
+                }}
+              >
+                <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                </svg>
+                View on GitHub
+              </a>
+            </div>
           </div>
         </div>
       </footer>
@@ -4389,7 +4582,7 @@ export default function App() {
           onClearCache={async () => {
             try {
               await apiClearCache();
-              alert("âœ… Cache cleared!");
+              alert("✅ Cache cleared!");
               const newStats = await apiOptimizationStats();
               setOptimizationStats(newStats);
             } catch (e) {
@@ -4397,6 +4590,11 @@ export default function App() {
             }
           }}
         />
+      )}
+
+      {/* Feedback Modal */}
+      {showFeedbackModal && (
+        <FeedbackModal onClose={() => setShowFeedbackModal(false)} />
       )}
 
 
