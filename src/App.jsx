@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 
 // v5.6: Desktop App Banner for cloud mode
-import { DesktopAppBanner, useCloudMode } from './DesktopAppBanner';
+import { DesktopAppBanner, DesktopAppInlinePrompt, useCloudMode } from './DesktopAppBanner';
 import {
   apiTranscript, apiWordfreq, apiSummaryAI, apiTranslate,
   apiRenderJob, apiJobStatus, apiDownloadMp4, apiMetadata, apiHighlightReel,
@@ -4059,20 +4059,61 @@ export default function App() {
                   {t.createReel}
                 </div>
 
+                {/* Cloud mode warning for video features */}
+                {isCloudMode && (
+                  <div style={{
+                    background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+                    border: '2px solid #f59e0b',
+                    borderRadius: '12px',
+                    padding: '16px',
+                    marginBottom: '16px',
+                    textAlign: 'center',
+                  }}>
+                    <div style={{ fontSize: '28px', marginBottom: '8px' }}>🎬</div>
+                    <div style={{ fontWeight: '700', color: '#92400e', marginBottom: '6px', fontSize: '16px' }}>
+                      Video Features Require Desktop App
+                    </div>
+                    <div style={{ color: '#b45309', fontSize: '14px', marginBottom: '12px', lineHeight: '1.4' }}>
+                      YouTube blocks video downloads from cloud servers.<br/>
+                      Download the free desktop app for full video editing!
+                    </div>
+                    <button 
+                      onClick={() => window.open('https://github.com/amateurmenace/community-highlighter/releases', '_blank')}
+                      style={{
+                        background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                        color: 'white',
+                        border: 'none',
+                        padding: '12px 24px',
+                        borderRadius: '8px',
+                        fontWeight: '700',
+                        cursor: 'pointer',
+                        fontSize: '15px',
+                        boxShadow: '0 2px 8px rgba(245, 158, 11, 0.4)',
+                      }}
+                    >
+                      ⬇️ Download Desktop App
+                    </button>
+                  </div>
+                )}
+
                 <button
                   className="btn-full-width btn-muted-primary"
                   onClick={() => buildReel('combined')}
-                  disabled={loading.reel}
+                  disabled={loading.reel || isCloudMode}
+                  title={isCloudMode ? "Desktop app required for video features" : ""}
+                  style={isCloudMode ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
-                  {t.buildReel}
+                  {isCloudMode ? '🔒 ' : ''}{t.buildReel}
                 </button>
 
                 <button
                   className="btn-full-width btn-muted-social"
                   onClick={() => buildReel('social')}
-                  disabled={loading.reel}
+                  disabled={loading.reel || isCloudMode}
+                  title={isCloudMode ? "Desktop app required for video features" : ""}
+                  style={isCloudMode ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
-                  Social Media Reel (60s)
+                  {isCloudMode ? '🔒 ' : ''}Social Media Reel (60s)
                 </button>
 
                 <button
@@ -4102,9 +4143,16 @@ export default function App() {
                 <button
                   type="button"
                   className="btn-full-width btn-muted-ghost"
+                  disabled={isCloudMode}
+                  title={isCloudMode ? "Desktop app required for video downloads" : ""}
+                  style={isCloudMode ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   onClick={async (e) => {
                     e.preventDefault();
                     e.stopPropagation();
+                    if (isCloudMode) {
+                      alert("Video downloads require the desktop app. YouTube blocks downloads from cloud servers.");
+                      return;
+                    }
                     if (!videoId) {
                       alert("Please load a video first");
                       return;
@@ -4132,7 +4180,7 @@ export default function App() {
                     }
                   }}
                 >
-                  {t.downloadVideo}
+                  {isCloudMode ? '🔒 ' : ''}{t.downloadVideo}
                 </button>
 
                 <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
