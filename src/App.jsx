@@ -115,6 +115,17 @@ function useDebounce(value, delay = 220) {
 }
 
 function HowToGuide({ onOpenAssistant }) {
+  const [isCompact, setIsCompact] = useState(false);
+  
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsCompact(window.scrollY > 150);
+    };
+    
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
   const scrollToElement = (id) => {
     const element = document.getElementById(id);
     if (element) {
@@ -135,13 +146,19 @@ function HowToGuide({ onOpenAssistant }) {
     <section 
       className="how-to-permanent"
       style={{
+        position: 'sticky',
+        top: '0',
+        zIndex: 100,
         background: 'white',
-        padding: '16px 0',
-        borderBottom: '1px solid #e2e8f0'
+        padding: isCompact ? '8px 0' : '16px 0',
+        transition: 'all 0.3s ease',
+        boxShadow: isCompact ? '0 2px 8px rgba(0,0,0,0.1)' : 'none',
+        borderBottom: isCompact ? '2px solid #e2e8f0' : 'none'
       }}
     >
       <div className="howto" style={{ 
-        gap: '16px'
+        gap: isCompact ? '10px' : '16px',
+        transition: 'all 0.3s ease'
       }}>
         {/* Card 1: Search a Meeting */}
         <div 
@@ -149,8 +166,8 @@ function HowToGuide({ onOpenAssistant }) {
           onClick={() => scrollToElement('search-section')}
           style={{ 
             cursor: 'pointer',
-            padding: '20px',
-            minHeight: '90px',
+            padding: isCompact ? '10px 14px' : '20px',
+            minHeight: isCompact ? 'auto' : '90px',
             transition: 'all 0.3s ease',
             border: '2px solid ' + borderColors[0],
             background: 'white',
@@ -159,25 +176,25 @@ function HowToGuide({ onOpenAssistant }) {
         >
           <div className="num" style={{ 
             background: borderColors[0],
-            fontSize: '18px',
-            width: '42px',
-            height: '42px',
+            fontSize: isCompact ? '14px' : '18px',
+            width: isCompact ? '30px' : '42px',
+            height: isCompact ? '30px' : '42px',
             transition: 'all 0.3s ease'
           }}>1</div>
           <div>
             <div style={{ 
-              fontSize: '24px', 
+              fontSize: isCompact ? '17px' : '24px', 
               fontWeight: '900',
               color: mainGreen,
               letterSpacing: '-0.5px',
               textShadow: '0 1px 0 rgba(0,0,0,0.1)',
               transition: 'all 0.3s ease'
             }}>Search a Meeting</div>
-                        
+            {!isCompact && (
               <div className="step-subtitle" style={{ marginTop: '4px' }}>
                 Use the search bar or word cloud to find anything anywhere at anytime
               </div>
-            
+            )}
           </div>
         </div>
 
@@ -189,8 +206,8 @@ function HowToGuide({ onOpenAssistant }) {
           }}
           style={{ 
             cursor: 'pointer',
-            padding: '20px',
-            minHeight: '90px',
+            padding: isCompact ? '10px 14px' : '20px',
+            minHeight: isCompact ? 'auto' : '90px',
             transition: 'all 0.3s ease',
             border: '2px solid ' + borderColors[1],
             background: 'white',
@@ -199,25 +216,25 @@ function HowToGuide({ onOpenAssistant }) {
         >
           <div className="num" style={{ 
             background: borderColors[1],
-            fontSize: '18px',
-            width: '42px',
-            height: '42px',
+            fontSize: isCompact ? '14px' : '18px',
+            width: isCompact ? '30px' : '42px',
+            height: isCompact ? '30px' : '42px',
             transition: 'all 0.3s ease'
           }}>2</div>
           <div>
             <div style={{ 
-              fontSize: '24px', 
+              fontSize: isCompact ? '17px' : '24px', 
               fontWeight: '900',
               color: mainGreen,
               letterSpacing: '-0.5px',
               textShadow: '0 1px 0 rgba(0,0,0,0.1)',
               transition: 'all 0.3s ease'
             }}>Talk to a Meeting</div>
-                        
+            {!isCompact && (
               <div className="step-subtitle" style={{ marginTop: '4px' }}>
                 An AI Agent will embed in the meeting and answer your questions
               </div>
-            
+            )}
           </div>
         </div>
 
@@ -227,8 +244,8 @@ function HowToGuide({ onOpenAssistant }) {
           onClick={() => scrollToElement('analytics-section')}
           style={{ 
             cursor: 'pointer',
-            padding: '20px',
-            minHeight: '90px',
+            padding: isCompact ? '10px 14px' : '20px',
+            minHeight: isCompact ? 'auto' : '90px',
             transition: 'all 0.3s ease',
             border: '2px solid ' + borderColors[2],
             background: 'white',
@@ -237,25 +254,25 @@ function HowToGuide({ onOpenAssistant }) {
         >
           <div className="num" style={{ 
             background: borderColors[2],
-            fontSize: '18px',
-            width: '42px',
-            height: '42px',
+            fontSize: isCompact ? '14px' : '18px',
+            width: isCompact ? '30px' : '42px',
+            height: isCompact ? '30px' : '42px',
             transition: 'all 0.3s ease'
           }}>3</div>
           <div>
             <div style={{ 
-              fontSize: '24px', 
+              fontSize: isCompact ? '17px' : '24px', 
               fontWeight: '900',
               color: mainGreen,
               letterSpacing: '-0.5px',
               textShadow: '0 1px 0 rgba(0,0,0,0.1)',
               transition: 'all 0.3s ease'
             }}>Analyze a Meeting</div>
-                        
+            {!isCompact && (
               <div className="step-subtitle" style={{ marginTop: '4px' }}>
                 Use data visualizations to make quick sense of long meetings
               </div>
-            
+            )}
           </div>
         </div>
 
@@ -265,8 +282,8 @@ function HowToGuide({ onOpenAssistant }) {
           onClick={() => scrollToElement('video-section')}
           style={{ 
             cursor: 'pointer',
-            padding: '20px',
-            minHeight: '90px',
+            padding: isCompact ? '10px 14px' : '20px',
+            minHeight: isCompact ? 'auto' : '90px',
             transition: 'all 0.3s ease',
             border: '2px solid ' + borderColors[3],
             background: 'white',
@@ -275,194 +292,29 @@ function HowToGuide({ onOpenAssistant }) {
         >
           <div className="num" style={{ 
             background: borderColors[3],
-            fontSize: '18px',
-            width: '42px',
-            height: '42px',
+            fontSize: isCompact ? '14px' : '18px',
+            width: isCompact ? '30px' : '42px',
+            height: isCompact ? '30px' : '42px',
             transition: 'all 0.3s ease'
           }}>4</div>
           <div>
             <div style={{ 
-              fontSize: '24px', 
+              fontSize: isCompact ? '17px' : '24px', 
               fontWeight: '900',
               color: mainGreen,
               letterSpacing: '-0.5px',
               textShadow: '0 1px 0 rgba(0,0,0,0.1)',
               transition: 'all 0.3s ease'
             }}>Highlight a Meeting</div>
-                        
+            {!isCompact && (
               <div className="step-subtitle" style={{ marginTop: '4px' }}>
                 Choose clips to watch, download, & even auto edit into a reel - or have AI do it all for you!
               </div>
-            
+            )}
           </div>
         </div>
       </div>
     </section>
-  );
-}
-
-// ============================================================================
-// Feedback Modal Component
-// ============================================================================
-function FeedbackModal({ onClose }) {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [organization, setOrganization] = useState('');
-  const [feedback, setFeedback] = useState('');
-  const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSending(true);
-    
-    try {
-      // Create mailto link with form data
-      const subject = encodeURIComponent('Community Highlighter Feedback');
-      const body = encodeURIComponent(
-        `Name: ${name}\nEmail: ${email}\nOrganization: ${organization}\n\nFeedback:\n${feedback}`
-      );
-      window.location.href = `mailto:stephen@weirdmachine.org?subject=${subject}&body=${body}`;
-      setSent(true);
-      setTimeout(() => onClose(), 2000);
-    } catch (err) {
-      alert('Failed to send feedback. Please email stephen@weirdmachine.org directly.');
-    } finally {
-      setSending(false);
-    }
-  };
-
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0,0,0,0.5)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-    }} onClick={onClose}>
-      <div style={{
-        background: 'white',
-        borderRadius: '12px',
-        padding: '24px',
-        maxWidth: '450px',
-        width: '90%',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-      }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2 style={{ margin: 0, fontSize: '20px', color: '#1e7f63' }}>Share Your Feedback</h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#999' }}>×</button>
-        </div>
-        
-        {sent ? (
-          <div style={{ textAlign: 'center', padding: '20px' }}>
-            <div style={{ fontSize: '48px', marginBottom: '12px' }}>✅</div>
-            <div style={{ fontSize: '16px', color: '#1e7f63' }}>Thank you for your feedback!</div>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit}>
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#333' }}>Name</label>
-              <input
-                type="text"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                required
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  border: '2px solid #e0e0e0',
-                  borderRadius: '6px',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
-                }}
-                placeholder="Your name"
-              />
-            </div>
-            
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#333' }}>Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  border: '2px solid #e0e0e0',
-                  borderRadius: '6px',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
-                }}
-                placeholder="your@email.com"
-              />
-            </div>
-            
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#333' }}>Organization</label>
-              <input
-                type="text"
-                value={organization}
-                onChange={e => setOrganization(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  border: '2px solid #e0e0e0',
-                  borderRadius: '6px',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
-                }}
-                placeholder="Your organization (optional)"
-              />
-            </div>
-            
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#333' }}>Feedback</label>
-              <textarea
-                value={feedback}
-                onChange={e => setFeedback(e.target.value)}
-                required
-                rows={4}
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  border: '2px solid #e0e0e0',
-                  borderRadius: '6px',
-                  fontSize: '14px',
-                  resize: 'vertical',
-                  boxSizing: 'border-box'
-                }}
-                placeholder="Tell us what you think, report bugs, or suggest features..."
-              />
-            </div>
-            
-            <button
-              type="submit"
-              disabled={sending}
-              style={{
-                width: '100%',
-                padding: '12px',
-                background: '#1e7f63',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                fontSize: '15px',
-                fontWeight: '600',
-                cursor: sending ? 'not-allowed' : 'pointer',
-                opacity: sending ? 0.7 : 1
-              }}
-            >
-              {sending ? 'Sending...' : 'Send Feedback'}
-            </button>
-          </form>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -851,7 +703,7 @@ function MentionedEntitiesCard({ entities, isLoading }) {
                   className="entity-iframe"
                   sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
                 ></iframe>
-              
+              )}
             </div>
 
             {/* Action Buttons - Open in New Tab */}
@@ -1081,7 +933,7 @@ function TopicHeatMap({ fullText, sents, openExpandedAt, t, addToBasket, playerR
                 ) : (
                   <p>No specific sentences found for this segment.</p>
                 )
-              
+              )}
             </div>
             <div className="entity-popup-actions">
               <button className="btn btn-ghost" onClick={closeTopicModal}>Close</button>
@@ -1702,7 +1554,7 @@ function ActionItemsTimeline({ fullText }) {
                 <div className="calendar-text">{item.text.slice(0, 80)}...</div>
                 {item.priority === 'high' && (
                   <div className="calendar-priority-dot"></div>
-                
+                )}
               </div>
             ))}
           </div>
@@ -2676,7 +2528,7 @@ function MeetingAssistant({ videoId, transcript, forceOpen = 0 }) {
                       </div>
                     ))}
                   </div>
-                
+                )}
               </div>
             ))}
             {loading && (
@@ -2687,7 +2539,7 @@ function MeetingAssistant({ videoId, transcript, forceOpen = 0 }) {
                   <span></span>
                 </div>
               </div>
-            
+            )}
           </div>
 
           <div className="chat-input">
@@ -2909,7 +2761,6 @@ export default function App() {
   // 🚀 NEW: Optimization stats state
   const [optimizationStats, setOptimizationStats] = useState(null);
   const [showOptimizationPanel, setShowOptimizationPanel] = useState(false);
-  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
   // 🔴 NEW v4.0: State for new features
   const [showAssistant, setShowAssistant] = useState(false);
@@ -3627,7 +3478,7 @@ export default function App() {
                   style={{ width: '100%', height: '500px', border: 'none' }}
                   sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
                 />
-              
+              )}
               {investigateViewMode === 'maps' && (
                 <iframe
                   src={`https://www.google.com/maps/embed/v1/place?key=AIzaSyBFw0Qbyq9zTFTd-tUY6dZWTgaQzuU17R8&q=${encodeURIComponent(investigateWord.text)}`}
@@ -3635,7 +3486,7 @@ export default function App() {
                   style={{ width: '100%', height: '500px', border: 'none' }}
                   allow="geolocation"
                 />
-              
+              )}
               {investigateViewMode === 'wikipedia' && (
                 <iframe
                   src={`https://en.wikipedia.org/wiki/${encodeURIComponent(investigateWord.text)}`}
@@ -3643,7 +3494,7 @@ export default function App() {
                   style={{ width: '100%', height: '500px', border: 'none' }}
                   sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
                 />
-              
+              )}
             </div>
 
             {/* Footer */}
@@ -3681,6 +3532,9 @@ export default function App() {
         </div>
       )}
 
+      {/* v5.6: Desktop download banner - only shows in cloud mode */}
+      <DesktopAppBanner />
+      
       <header className="animate-fadeIn">
         <div className="container">
           <div className="wrap">
@@ -3698,28 +3552,23 @@ export default function App() {
               <div className="powered-section">
                 <span className="powered-text">{t.poweredBy}</span>
                 <img src="/secondary.png" alt="BIG" className="secondary-logo-large" />
-                {/* Feedback button */}
-                <div style={{ marginLeft: '12px', textAlign: 'center' }}>
+                {/* 🚀 NEW: Optimization button */}
+                {optimizationStats && (
                   <button
                     className="btn btn-ghost"
-                    onClick={() => setShowFeedbackModal(true)}
+                    onClick={() => setShowOptimizationPanel(!showOptimizationPanel)}
                     style={{
-                      fontSize: '13px',
-                      padding: '8px 16px',
-                      background: '#1e7f63',
-                      color: 'white',
-                      fontWeight: '600',
-                      borderRadius: '6px',
-                      border: 'none',
-                      cursor: 'pointer'
+                      marginLeft: "12px",
+                      fontSize: "13px",
+                      padding: "8px 16px",
+                      background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                      color: "white",
+                      fontWeight: "700"
                     }}
                   >
-                    Give Feedback
+                    🚀 {optimizationStats.estimated_savings?.percentage}% Savings
                   </button>
-                  <div style={{ fontSize: '10px', color: '#888', marginTop: '4px' }}>
-                    This app is in BETA
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           </div>
@@ -3794,7 +3643,7 @@ export default function App() {
                             </span>
                           </div>
                         ))
-                      
+                      )}
                     </div>
                   </div>
 
@@ -3821,12 +3670,12 @@ export default function App() {
                             {highlight.text}
                           </div>
                         ))
-                      
+                      )}
                     </div>
                   </div>
                 </div>
               </div>
-            
+            )}
             <button
               className="btn btn-primary animate-hover"
               onClick={loadAll}
@@ -3859,7 +3708,7 @@ export default function App() {
                   <option value="gpt-4-turbo">GPT-4 Turbo</option>
                 </select>
               </>
-            
+            )}
           </div>
         </section>
 
@@ -3907,12 +3756,12 @@ export default function App() {
                         }}>
                           "{item.quote}"
                         </div>
-                      
+                      )}
                     </div>
                   ))}
                 </div>
               </div>
-            
+            )}
           </section>
         )}
 
@@ -3970,7 +3819,7 @@ export default function App() {
                   <div className="search-tooltip-green-above">
                     <strong>Try searching!</strong> Or click any word below to see all mentions
                   </div>
-                
+                )}
 
                 <div id="search-section" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: !query && !matches.length && videoId ? '12px' : '0' }}>
                   <input
@@ -4013,7 +3862,7 @@ export default function App() {
                       🔍 Investigate
                     </button>
                   </div>
-                
+                )}
 
 
                 {hits.length > 0 && matches.length > 0 && (
@@ -4032,7 +3881,7 @@ export default function App() {
                       ))}
                     </div>
                   </div>
-                
+                )}
 
                 {matches.length > 0 && (
                   <div className="results-scroll" style={{ marginTop: 12 }}>
@@ -4050,13 +3899,13 @@ export default function App() {
                       />
                     ))}
                   </div>
-                
+                )}
 
                 {matches.length === 0 && query && videoId && (
                   <div style={{ marginTop: 20, padding: 20, textAlign: "center", color: "#64748b" }}>
                     {t.noMatches} "{query}"
                   </div>
-                
+                )}
 
                 {words.length > 0 && (
                   <div className="visualization-card word-cloud-container" style={{ marginTop: 12 }}>
@@ -4099,9 +3948,9 @@ export default function App() {
                       })}
                     </div>
                   </div>
-                
+                )}
               </>
-            
+            )}
 
             {expanded.open && (
               <div className="expanded-wrap animate-slideIn">
@@ -4130,7 +3979,7 @@ export default function App() {
                   })}
                 </div>
               </div>
-            
+            )}
           </section>
 
           <section className="card section right-column animate-fadeIn">
@@ -4162,7 +4011,7 @@ export default function App() {
                   ))}
                 </div>
               </div>
-            
+            )}
 
             {job.status !== "idle" && (
               <div className="status-section animate-slideIn">
@@ -4184,9 +4033,9 @@ export default function App() {
                       {t.downloadFile}
                     </a>
                   </div>
-                
+                )}
               </div>
-            
+            )}
 
             {videoId && (
               <div id="video-section" className="video-section animate-slideIn">
@@ -4200,7 +4049,7 @@ export default function App() {
                   allowFullScreen
                 />
               </div>
-            
+            )}
 
             {/* v5.2: Live Meeting Mode removed */}
 
@@ -4245,7 +4094,7 @@ export default function App() {
                       ⬇️ Download Desktop App
                     </button>
                   </div>
-                
+                )}
 
                 <button
                   className="btn-full-width btn-muted-primary"
@@ -4376,14 +4225,14 @@ export default function App() {
                             }}>
                               "{item.quote}"
                             </div>
-                          
+                          )}
                         </div>
                       ))}
                     </div>
                   </div>
-                
+                )}
               </div>
-            
+            )}
 
             {videoId && (
               <div className="action-buttons" style={{ marginTop: '20px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -4403,7 +4252,7 @@ export default function App() {
                   📸 Knowledge Base
                 </button>
               </div>
-            
+            )}
           </section>
         </div>
 
@@ -4507,8 +4356,6 @@ export default function App() {
         </section>
       )}
 
-      {/* v5.10: Desktop download banner - shows above footer in cloud mode */}
-      <DesktopAppBanner />
 
       <footer className="footer">
         <div className="container">
@@ -4528,30 +4375,6 @@ export default function App() {
             <div className="footer-website">
               <a href="https://weirdmachine.org" target="_blank" rel="noopener noreferrer">weirdmachine.org</a>
             </div>
-            <div style={{ marginTop: '12px' }}>
-              <a 
-                href="https://github.com/amateurmenace/community-highlighter" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '8px 16px',
-                  background: '#24292e',
-                  color: 'white',
-                  borderRadius: '6px',
-                  textDecoration: 'none',
-                  fontSize: '13px',
-                  fontWeight: '500'
-                }}
-              >
-                <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-                </svg>
-                View on GitHub
-              </a>
-            </div>
           </div>
         </div>
       </footer>
@@ -4565,7 +4388,7 @@ export default function App() {
           onClearCache={async () => {
             try {
               await apiClearCache();
-              alert("✅ Cache cleared!");
+              alert("âœ… Cache cleared!");
               const newStats = await apiOptimizationStats();
               setOptimizationStats(newStats);
             } catch (e) {
@@ -4573,11 +4396,6 @@ export default function App() {
             }
           }}
         />
-      )}
-
-      {/* Feedback Modal */}
-      {showFeedbackModal && (
-        <FeedbackModal onClose={() => setShowFeedbackModal(false)} />
       )}
 
 
