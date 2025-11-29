@@ -24,21 +24,20 @@ import httpx
 import time
 
 # NEW IMPORTS FOR ENHANCED FEATURES (v4.0)
-import chromadb
-from chromadb.utils import embedding_functions
-from sentence_transformers import SentenceTransformer
 import numpy as np
 
-# Live Chat Support
+# ChromaDB and embeddings - optional for cloud deployment
 try:
-    from chat_downloader import ChatDownloader
-
-    LIVE_CHAT_AVAILABLE = True
+    import chromadb
+    from chromadb.utils import embedding_functions
+    from sentence_transformers import SentenceTransformer
+    CHROMADB_AVAILABLE = True
 except ImportError:
-    LIVE_CHAT_AVAILABLE = False
-    print(
-        "  chat-downloader not installed. Install with: pip install chat-downloader"
-    )
+    CHROMADB_AVAILABLE = False
+    print("[!] ChromaDB not available - Knowledge Base disabled")
+
+# Live Chat Support - removed in v5.2
+LIVE_CHAT_AVAILABLE = False
 
 # AI Optimization Support (optional)
 try:
