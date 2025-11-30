@@ -90,6 +90,16 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 WEBSHARE_PROXY_USERNAME = os.getenv("WEBSHARE_PROXY_USERNAME", "")
 WEBSHARE_PROXY_PASSWORD = os.getenv("WEBSHARE_PROXY_PASSWORD", "")
 
+# Build proxy URL with proper URL encoding for special characters
+WEBSHARE_PROXY_URL = None
+if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
+    from urllib.parse import quote
+    # URL-encode credentials in case they have special characters like @, #, etc.
+    encoded_user = quote(WEBSHARE_PROXY_USERNAME, safe='')
+    encoded_pass = quote(WEBSHARE_PROXY_PASSWORD, safe='')
+    WEBSHARE_PROXY_URL = f"http://{encoded_user}:{encoded_pass}@p.webshare.io:80"
+    print(f"[OK] Proxy URL built for yt-dlp (username: {WEBSHARE_PROXY_USERNAME[:4]}...)")
+
 # Initialize YouTube Transcript API - with proxy if available
 if WEBSHARE_IMPORT_OK and WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
     print("[OK] Webshare residential proxy configured for YouTube access")
@@ -1033,10 +1043,9 @@ async def get_transcript(req: Request):
             "quiet": True,
         }
         
-        # Add proxy if available
-        if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
-            proxy_url = f"http://{WEBSHARE_PROXY_USERNAME}:{WEBSHARE_PROXY_PASSWORD}@p.webshare.io:80"
-            ydl_opts["proxy"] = proxy_url
+        # Add proxy if available (uses URL-encoded credentials)
+        if WEBSHARE_PROXY_URL:
+            ydl_opts["proxy"] = WEBSHARE_PROXY_URL
             print("   Using Webshare proxy for yt-dlp")
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -1059,9 +1068,8 @@ async def get_transcript(req: Request):
                     if vtt_url:
                         # Create httpx client, with proxy if available
                         client_kwargs = {}
-                        if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
-                            proxy_url = f"http://{WEBSHARE_PROXY_USERNAME}:{WEBSHARE_PROXY_PASSWORD}@p.webshare.io:80"
-                            client_kwargs["proxies"] = {"http://": proxy_url, "https://": proxy_url}
+                        if WEBSHARE_PROXY_URL:
+                            client_kwargs["proxies"] = {"http://": WEBSHARE_PROXY_URL, "https://": WEBSHARE_PROXY_URL}
                         
                         async with httpx.AsyncClient(**client_kwargs) as client:
                             resp = await client.get(vtt_url)
@@ -1413,9 +1421,9 @@ async def get_metadata(req: Request):
         ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True}
         
         # Add proxy if available
-        if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
-            proxy_url = f"http://{WEBSHARE_PROXY_USERNAME}:{WEBSHARE_PROXY_PASSWORD}@p.webshare.io:80"
-            ydl_opts["proxy"] = proxy_url
+        if WEBSHARE_PROXY_URL:
+            
+            ydl_opts["proxy"] = WEBSHARE_PROXY_URL
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(
@@ -3604,9 +3612,9 @@ async def add_meeting_to_knowledge_base(req: Request):
         try:
             ydl_opts = {"quiet": True, "no_warnings": True}
             # Add proxy if available (for cloud deployment)
-            if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
-                proxy_url = f"http://{WEBSHARE_PROXY_USERNAME}:{WEBSHARE_PROXY_PASSWORD}@p.webshare.io:80"
-                ydl_opts["proxy"] = proxy_url
+            if WEBSHARE_PROXY_URL:
+                
+                ydl_opts["proxy"] = WEBSHARE_PROXY_URL
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(
                     f"https://youtube.com/watch?v={video_id}", download=False
@@ -3899,9 +3907,9 @@ async def compare_two_meetings(req: Request):
             try:
                 ydl_opts = {"quiet": True, "no_warnings": True}
                 # Add proxy if available (for cloud deployment)
-                if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
-                    proxy_url = f"http://{WEBSHARE_PROXY_USERNAME}:{WEBSHARE_PROXY_PASSWORD}@p.webshare.io:80"
-                    ydl_opts["proxy"] = proxy_url
+                if WEBSHARE_PROXY_URL:
+                    
+                    ydl_opts["proxy"] = WEBSHARE_PROXY_URL
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(f"https://youtube.com/watch?v={mid}", download=False)
                     metadata[mid] = {
@@ -4039,9 +4047,9 @@ async def get_clip_preview(req: Request):
         try:
             ydl_opts = {"quiet": True, "no_warnings": True}
             # Add proxy if available
-            if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
-                proxy_url = f"http://{WEBSHARE_PROXY_USERNAME}:{WEBSHARE_PROXY_PASSWORD}@p.webshare.io:80"
-                ydl_opts["proxy"] = proxy_url
+            if WEBSHARE_PROXY_URL:
+                
+                ydl_opts["proxy"] = WEBSHARE_PROXY_URL
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(
                     f"https://youtube.com/watch?v={video_id}", download=False
