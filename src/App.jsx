@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 
 // v5.6: Desktop App Banner for cloud mode
-import { DesktopAppBanner, DesktopAppInlinePrompt, useCloudMode } from './DesktopAppBanner';
+import { DesktopAppBanner, useCloudMode } from './DesktopAppBanner';
 import {
   apiTranscript, apiWordfreq, apiSummaryAI, apiTranslate,
   apiRenderJob, apiJobStatus, apiDownloadMp4, apiMetadata, apiHighlightReel,
@@ -10,7 +10,13 @@ import {
   apiChatWithMeeting, apiChatSuggestions,
   apiAddToKnowledgeBase, apiSearchKnowledgeBase, apiFindRelated,
   apiClipPreview, apiStartLiveMonitoring,
-  apiStoreTranscript
+  apiStoreTranscript,
+  // v6.0: New feature API calls
+  apiCreateSubscription, apiListSubscriptions, apiDeleteSubscription, apiCheckSubscriptionMatches,
+  apiCreateIssue, apiListIssues, apiAddMeetingToIssue, apiAutoTrackIssue, apiGetIssueTimeline,
+  apiCompareMeetings,
+  apiExplainJargon, apiGetJargonDictionary,
+  apiBuildKnowledgeGraph
 } from "./api";
 
 // v5.2: Use relative URLs for deployment compatibility
@@ -44,12 +50,15 @@ const cleanHtmlEntities = (text) => {
   return cleaned.trim();
 };
 
-// v5.6: Replace Brooklyn with Brookline (common transcription error)
+// v6.0: Replace Brooklyn with Brookline AND fix Martin Luther -> Martin Luther King
 const fixBrooklyn = (text) => {
   if (!text) return text;
-  return text
-    .replace(/Brooklyn/gi, 'Brookline')
-    .replace(/BROOKLYN/g, 'BROOKLINE');
+  let fixed = text
+    .replace(/Brooklyn/gi, 'Brookline')
+    .replace(/BROOKLYN/g, 'BROOKLINE');
+  // Fix Martin Luther truncation - always use full name
+  fixed = fixed.replace(/\bMartin Luther\b(?! King)/gi, 'Martin Luther King');
+  return fixed;
 };
 
 const padTime = (x) => {
@@ -115,17 +124,6 @@ function useDebounce(value, delay = 220) {
 }
 
 function HowToGuide({ onOpenAssistant }) {
-  const [isCompact, setIsCompact] = useState(false);
-  
-  useEffect(() => {
-    const handleScroll = () => {
-      setIsCompact(window.scrollY > 150);
-    };
-    
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
   const scrollToElement = (id) => {
     const element = document.getElementById(id);
     if (element) {
@@ -138,37 +136,27 @@ function HowToGuide({ onOpenAssistant }) {
     }
   };
 
-  // 4 cards only - removed "Add a Meeting"
-  const borderColors = ['#0891b2', '#7c3aed', '#db2777', '#f97316'];
+  const borderColors = ['#059669', '#0891b2', '#7c3aed', '#db2777'];
   const mainGreen = '#1e7f63';
 
   return (
     <section 
       className="how-to-permanent"
       style={{
-        position: 'sticky',
-        top: '0',
-        zIndex: 100,
         background: 'white',
-        padding: isCompact ? '8px 0' : '16px 0',
-        transition: 'all 0.3s ease',
-        boxShadow: isCompact ? '0 2px 8px rgba(0,0,0,0.1)' : 'none',
-        borderBottom: isCompact ? '2px solid #e2e8f0' : 'none'
+        padding: '16px 0',
+        borderBottom: '1px solid #e2e8f0'
       }}
     >
-      <div className="howto" style={{ 
-        gap: isCompact ? '10px' : '16px',
-        transition: 'all 0.3s ease'
-      }}>
-        {/* Card 1: Search a Meeting */}
+      <div className="howto" style={{ gap: '12px' }}>
+        {/* Step 1: Search a Meeting */}
         <div 
           className="step step-clickable" 
           onClick={() => scrollToElement('search-section')}
           style={{ 
             cursor: 'pointer',
-            padding: isCompact ? '10px 14px' : '20px',
-            minHeight: isCompact ? 'auto' : '90px',
-            transition: 'all 0.3s ease',
+            padding: '18px',
+            minHeight: '85px',
             border: '2px solid ' + borderColors[0],
             background: 'white',
             borderRadius: '12px'
@@ -176,29 +164,24 @@ function HowToGuide({ onOpenAssistant }) {
         >
           <div className="num" style={{ 
             background: borderColors[0],
-            fontSize: isCompact ? '14px' : '18px',
-            width: isCompact ? '30px' : '42px',
-            height: isCompact ? '30px' : '42px',
-            transition: 'all 0.3s ease'
+            fontSize: '18px',
+            width: '40px',
+            height: '40px',
           }}>1</div>
           <div>
             <div style={{ 
-              fontSize: isCompact ? '17px' : '24px', 
+              fontSize: '22px', 
               fontWeight: '900',
               color: mainGreen,
-              letterSpacing: '-0.5px',
-              textShadow: '0 1px 0 rgba(0,0,0,0.1)',
-              transition: 'all 0.3s ease'
+              letterSpacing: '-0.5px'
             }}>Search a Meeting</div>
-            {!isCompact && (
-              <div className="step-subtitle" style={{ marginTop: '4px' }}>
-                Use the search bar or word cloud to find anything anywhere at anytime
-              </div>
-            )}
+            <div className="step-subtitle" style={{ marginTop: '4px' }}>
+              Use the search bar or word cloud to find anything anywhere at anytime
+            </div>
           </div>
         </div>
 
-        {/* Card 2: Talk to a Meeting */}
+        {/* Step 2: Talk to a Meeting */}
         <div 
           className="step step-clickable" 
           onClick={() => {
@@ -206,9 +189,8 @@ function HowToGuide({ onOpenAssistant }) {
           }}
           style={{ 
             cursor: 'pointer',
-            padding: isCompact ? '10px 14px' : '20px',
-            minHeight: isCompact ? 'auto' : '90px',
-            transition: 'all 0.3s ease',
+            padding: '18px',
+            minHeight: '85px',
             border: '2px solid ' + borderColors[1],
             background: 'white',
             borderRadius: '12px'
@@ -216,37 +198,31 @@ function HowToGuide({ onOpenAssistant }) {
         >
           <div className="num" style={{ 
             background: borderColors[1],
-            fontSize: isCompact ? '14px' : '18px',
-            width: isCompact ? '30px' : '42px',
-            height: isCompact ? '30px' : '42px',
-            transition: 'all 0.3s ease'
+            fontSize: '18px',
+            width: '40px',
+            height: '40px',
           }}>2</div>
           <div>
             <div style={{ 
-              fontSize: isCompact ? '17px' : '24px', 
+              fontSize: '22px', 
               fontWeight: '900',
               color: mainGreen,
-              letterSpacing: '-0.5px',
-              textShadow: '0 1px 0 rgba(0,0,0,0.1)',
-              transition: 'all 0.3s ease'
+              letterSpacing: '-0.5px'
             }}>Talk to a Meeting</div>
-            {!isCompact && (
-              <div className="step-subtitle" style={{ marginTop: '4px' }}>
-                An AI Agent will embed in the meeting and answer your questions
-              </div>
-            )}
+            <div className="step-subtitle" style={{ marginTop: '4px' }}>
+              An AI Agent will embed in the meeting and answer your questions
+            </div>
           </div>
         </div>
 
-        {/* Card 3: Analyze a Meeting */}
+        {/* Step 3: Analyze a Meeting */}
         <div 
           className="step step-clickable" 
           onClick={() => scrollToElement('analytics-section')}
           style={{ 
             cursor: 'pointer',
-            padding: isCompact ? '10px 14px' : '20px',
-            minHeight: isCompact ? 'auto' : '90px',
-            transition: 'all 0.3s ease',
+            padding: '18px',
+            minHeight: '85px',
             border: '2px solid ' + borderColors[2],
             background: 'white',
             borderRadius: '12px'
@@ -254,37 +230,31 @@ function HowToGuide({ onOpenAssistant }) {
         >
           <div className="num" style={{ 
             background: borderColors[2],
-            fontSize: isCompact ? '14px' : '18px',
-            width: isCompact ? '30px' : '42px',
-            height: isCompact ? '30px' : '42px',
-            transition: 'all 0.3s ease'
+            fontSize: '18px',
+            width: '40px',
+            height: '40px',
           }}>3</div>
           <div>
             <div style={{ 
-              fontSize: isCompact ? '17px' : '24px', 
+              fontSize: '22px', 
               fontWeight: '900',
               color: mainGreen,
-              letterSpacing: '-0.5px',
-              textShadow: '0 1px 0 rgba(0,0,0,0.1)',
-              transition: 'all 0.3s ease'
+              letterSpacing: '-0.5px'
             }}>Analyze a Meeting</div>
-            {!isCompact && (
-              <div className="step-subtitle" style={{ marginTop: '4px' }}>
-                Use data visualizations to make quick sense of long meetings
-              </div>
-            )}
+            <div className="step-subtitle" style={{ marginTop: '4px' }}>
+              Use data visualizations to make quick sense of long meetings
+            </div>
           </div>
         </div>
 
-        {/* Card 4: Highlight a Meeting */}
+        {/* Step 4: Highlight a Meeting */}
         <div 
           className="step step-clickable" 
-          onClick={() => scrollToElement('video-section')}
+          onClick={() => scrollToElement('clip-basket-section')}
           style={{ 
             cursor: 'pointer',
-            padding: isCompact ? '10px 14px' : '20px',
-            minHeight: isCompact ? 'auto' : '90px',
-            transition: 'all 0.3s ease',
+            padding: '18px',
+            minHeight: '85px',
             border: '2px solid ' + borderColors[3],
             background: 'white',
             borderRadius: '12px'
@@ -292,25 +262,20 @@ function HowToGuide({ onOpenAssistant }) {
         >
           <div className="num" style={{ 
             background: borderColors[3],
-            fontSize: isCompact ? '14px' : '18px',
-            width: isCompact ? '30px' : '42px',
-            height: isCompact ? '30px' : '42px',
-            transition: 'all 0.3s ease'
+            fontSize: '18px',
+            width: '40px',
+            height: '40px',
           }}>4</div>
           <div>
             <div style={{ 
-              fontSize: isCompact ? '17px' : '24px', 
+              fontSize: '22px', 
               fontWeight: '900',
               color: mainGreen,
-              letterSpacing: '-0.5px',
-              textShadow: '0 1px 0 rgba(0,0,0,0.1)',
-              transition: 'all 0.3s ease'
+              letterSpacing: '-0.5px'
             }}>Highlight a Meeting</div>
-            {!isCompact && (
-              <div className="step-subtitle" style={{ marginTop: '4px' }}>
-                Choose clips to watch, download, & even auto edit into a reel - or have AI do it all for you!
-              </div>
-            )}
+            <div className="step-subtitle" style={{ marginTop: '4px' }}>
+              Choose clips to watch, download, & even auto edit into a reel - or have AI do it all for you!
+            </div>
           </div>
         </div>
       </div>
@@ -319,7 +284,104 @@ function HowToGuide({ onOpenAssistant }) {
 }
 
 // ============================================================================
-// 🚀 NEW: Optimization Panel Component
+// Feedback Modal Component
+// ============================================================================
+function FeedbackModal({ onClose }) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [organization, setOrganization] = useState('');
+  const [feedback, setFeedback] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSending(true);
+    try {
+      const subject = encodeURIComponent('Community Highlighter Feedback');
+      const body = encodeURIComponent(
+        `Name: ${name}\nEmail: ${email}\nOrganization: ${organization}\n\nFeedback:\n${feedback}`
+      );
+      window.location.href = `mailto:stephen@weirdmachine.org?subject=${subject}&body=${body}`;
+      setSent(true);
+      setTimeout(() => onClose(), 2000);
+    } catch (err) {
+      alert('Failed to send feedback. Please email stephen@weirdmachine.org directly.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'rgba(0,0,0,0.5)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000
+    }} onClick={onClose}>
+      <div style={{
+        background: 'white',
+        borderRadius: '12px',
+        padding: '24px',
+        maxWidth: '450px',
+        width: '90%',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h2 style={{ margin: 0, fontSize: '20px', color: '#1e7f63' }}>Share Your Feedback</h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#999' }}>Ã—</button>
+        </div>
+        
+        {sent ? (
+          <div style={{ textAlign: 'center', padding: '20px' }}>
+            <div style={{ fontSize: '48px', marginBottom: '12px' }}>âœ…</div>
+            <div style={{ fontSize: '16px', color: '#1e7f63' }}>Thank you for your feedback!</div>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#333' }}>Name</label>
+              <input type="text" value={name} onChange={e => setName(e.target.value)} required
+                style={{ width: '100%', padding: '10px 12px', border: '2px solid #e0e0e0', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+                placeholder="Your name" />
+            </div>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#333' }}>Email</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} required
+                style={{ width: '100%', padding: '10px 12px', border: '2px solid #e0e0e0', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+                placeholder="your@email.com" />
+            </div>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#333' }}>Organization</label>
+              <input type="text" value={organization} onChange={e => setOrganization(e.target.value)}
+                style={{ width: '100%', padding: '10px 12px', border: '2px solid #e0e0e0', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+                placeholder="Your organization (optional)" />
+            </div>
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#333' }}>Feedback</label>
+              <textarea value={feedback} onChange={e => setFeedback(e.target.value)} required rows={4}
+                style={{ width: '100%', padding: '10px 12px', border: '2px solid #e0e0e0', borderRadius: '6px', fontSize: '14px', resize: 'vertical', boxSizing: 'border-box' }}
+                placeholder="Tell us what you think, report bugs, or suggest features..." />
+            </div>
+            <button type="submit" disabled={sending}
+              style={{ width: '100%', padding: '12px', background: '#1e7f63', color: 'white', border: 'none', borderRadius: '6px', fontSize: '15px', fontWeight: '600', cursor: sending ? 'not-allowed' : 'pointer', opacity: sending ? 0.7 : 1 }}>
+              {sending ? 'Sending...' : 'Send Feedback'}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// š€ NEW: Optimization Panel Component
 // ============================================================================
 function OptimizationPanel({ stats, onClose, onClearCache }) {
   if (!stats) return null;
@@ -349,7 +411,7 @@ function OptimizationPanel({ stats, onClose, onClearCache }) {
         paddingBottom: '12px',
         borderBottom: '2px solid var(--line)'
       }}>
-        <h3 style={{ margin: 0, fontSize: '18px' }}>🚀 AI Optimizations</h3>
+        <h3 style={{ margin: 0, fontSize: '18px' }}>š€ AI Optimizations</h3>
         <button onClick={onClose} style={{
           background: 'none',
           border: 'none',
@@ -390,7 +452,7 @@ function OptimizationPanel({ stats, onClose, onClearCache }) {
             fontSize: '12px'
           }}>
             <span style={{ color: enabled ? '#22c55e' : '#94a3b8' }}>
-              {enabled ? 'âœ“' : 'â—‹'}
+              {enabled ? 'Å“â€œ' : 'â€”â€¹'}
             </span>
             <span style={{ textTransform: 'capitalize' }}>
               {key.replace(/_/g, ' ')}
@@ -409,8 +471,8 @@ function OptimizationPanel({ stats, onClose, onClearCache }) {
           Cache Statistics:
         </div>
         <div style={{ fontSize: '12px', color: '#64748b' }}>
-          <div>✨ Cached analyses: {cache.total_entries || 0}</div>
-          <div>💾 Cache size: {cache.total_size_mb || 0} MB</div>
+          <div>âœ¨ Cached analyses: {cache.total_entries || 0}</div>
+          <div>’¾ Cache size: {cache.total_size_mb || 0} MB</div>
         </div>
       </div>
 
@@ -419,7 +481,7 @@ function OptimizationPanel({ stats, onClose, onClearCache }) {
         onClick={onClearCache}
         style={{ width: '100%', fontSize: '13px' }}
       >
-        📸 Clear Cache
+        “¸ Clear Cache
       </button>
     </div>
   );
@@ -566,7 +628,7 @@ function DecisionTimeline({ sents, playerRef, videoId, addToBasket, pad, openExp
         <div className="decision-popup">
           <div className="popup-header">
             <span>{selectedDecision.timestamp}</span>
-            <button className="btn-close-popup" onClick={() => setSelectedDecision(null)}>âœ•</button>
+            <button className="btn-close-popup" onClick={() => setSelectedDecision(null)}>Å“â€¢</button>
           </div>
           <div className="popup-text">{selectedDecision.text}</div>
           <div className="popup-actions">
@@ -655,7 +717,7 @@ function MentionedEntitiesCard({ entities, isLoading }) {
           <div className="entity-popup-card entity-popup-positioned" onClick={(e) => e.stopPropagation()}>
             <div className="entity-popup-header">
               <h3>{selectedEntity.text}</h3>
-              <button className="btn-close-popup" onClick={closeModal}>âœ•</button>
+              <button className="btn-close-popup" onClick={closeModal}>Å“â€¢</button>
             </div>
 
             {/* View Mode Tabs */}
@@ -664,7 +726,7 @@ function MentionedEntitiesCard({ entities, isLoading }) {
                 className={`entity-tab ${viewMode === 'maps' ? 'active' : ''}`}
                 onClick={switchToMaps}
               >
-                ✨ Google Maps
+                âœ¨ Google Maps
               </button>
               <button
                 className={`entity-tab ${viewMode === 'wikipedia' ? 'active' : ''}`}
@@ -776,7 +838,7 @@ function MentionedEntitiesCard({ entities, isLoading }) {
 function SearchResultCard({ match, query, t, openExpandedAt, addToBasket, playerRef, videoId, pad }) {
   return (
     <div className="result-card animate-slideIn">
-      <div style={{ fontSize: 12, color: "#64748b" }}>{padTimePrecise(match.start)} â€” {padTimePrecise(match.end)}</div>
+      <div style={{ fontSize: 12, color: "#64748b" }}>{padTimePrecise(match.start)} â‚¬â€ {padTimePrecise(match.end)}</div>
       <div style={{ marginTop: 6 }}>
         {query ? match.text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, "gi")).map((part, idx) => (
           <span key={idx} className={part.toLowerCase() === query.toLowerCase() ? "hit" : ""}>{part}</span>
@@ -900,7 +962,7 @@ function TopicHeatMap({ fullText, sents, openExpandedAt, t, addToBasket, playerR
           <div className="entity-popup-card" onClick={(e) => e.stopPropagation()}>
             <div className="entity-popup-header">
               <h3>Sentences related to "{selectedTopic.name}"</h3>
-              <button className="btn-close-popup" onClick={closeTopicModal}>âœ•</button>
+              <button className="btn-close-popup" onClick={closeTopicModal}>Å“â€¢</button>
             </div>
             <div className="entity-popup-content" style={{ overflowY: 'auto', padding: '10px' }}>
               {selectedSentence ? (
@@ -993,7 +1055,7 @@ function DisagreementTimeline({ sents, playerRef, videoId, openExpandedAt, addTo
     const disagreementKeywords = [
       'disagree', 'opposed', 'against', 'object', 'concern', 'worried',
       'problem', 'issue', 'challenge', 'difficulty', 'reject', 'deny', 'refuse',
-      'violation', 'unacceptable', 'unfortunately'
+      'violation', 'unacceptable', 'unfortunately', 'strongly oppose', 'cannot support'
     ];
 
     const modifierKeywords = ['but', 'however', 'although', 'not'];
@@ -1011,7 +1073,8 @@ function DisagreementTimeline({ sents, playerRef, videoId, openExpandedAt, addTo
         if (lowerText.includes(keyword)) score += 1;
       });
 
-      if (score > 1) {
+      // v6.0: Moderate filtering - require score >= 2 for balanced results
+      if (score >= 2) {
         const match = { idx, ...sent };
         moments.push({
           ...match,
@@ -1078,7 +1141,7 @@ function DisagreementTimeline({ sents, playerRef, videoId, openExpandedAt, addTo
         <div className="decision-popup">
           <div className="popup-header">
             <span>{selectedMoment.timestamp}</span>
-            <button className="btn-close-popup" onClick={() => setSelectedMoment(null)}>âœ•</button>
+            <button className="btn-close-popup" onClick={() => setSelectedMoment(null)}>Å“â€¢</button>
           </div>
           <div className="popup-text">{selectedMoment.text}</div>
           <div className="popup-actions">
@@ -1109,97 +1172,6 @@ function DisagreementTimeline({ sents, playerRef, videoId, openExpandedAt, addTo
 
       {disagreements.length === 0 && (
         <div className="no-decisions">No significant disagreements detected</div>
-      )}
-    </div>
-  );
-}
-
-// NEW: Policy Impact Tracker
-function PolicyImpactTracker({ fullText }) {
-  const [policyData, setPolicyData] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-
-  useEffect(() => {
-    if (!fullText) return;
-
-    setIsLoading(true);
-
-    // Call the backend API
-    fetch('/api/analytics/policy_impact', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transcript: fullText })
-    })
-      .then(res => res.json())
-      .then(data => {
-        setPolicyData(data.policy_areas || []);
-        setIsLoading(false);
-      })
-      .catch(err => {
-        console.error('Policy impact error:', err);
-        setIsLoading(false);
-      });
-  }, [fullText]);
-
-  const total = policyData.reduce((sum, item) => sum + item.mentions, 0);
-
-  return (
-    <div className="viz-card policy-impact-tracker">
-      <h3>Policy Impact Tracker</h3>
-      <p className="viz-desc">
-        Shows which policy areas were most discussed. Larger segments = more focus.
-      </p>
-
-      {isLoading ? (
-        <div className="entities-loader-container">
-          <div className="spinner" />
-          <span>Analyzing policy areas...</span>
-        </div>
-      ) : policyData.length > 0 ? (
-        <>
-          <div className="policy-chart">
-            {policyData.map((area, idx) => {
-              const percentage = ((area.mentions / total) * 100).toFixed(1);
-              const colors = ['#1e7f63', '#2d9f7f', '#3cbf9f', '#10b981', '#34d399', '#6ee7b7', '#99f6e4', '#ccfbf1'];
-
-              return (
-                <div
-                  key={idx}
-                  className="policy-segment"
-                  style={{
-                    flex: area.mentions,
-                    backgroundColor: colors[idx % colors.length],
-                    minWidth: '40px'
-                  }}
-                  title={`${area.category}: ${area.mentions} mentions (${percentage}%)`}
-                >
-                  {percentage > 8 && <span className="policy-label">{percentage}%</span>}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="policy-legend">
-            {policyData.map((area, idx) => {
-              const percentage = ((area.mentions / total) * 100).toFixed(1);
-              const colors = ['#1e7f63', '#2d9f7f', '#3cbf9f', '#10b981', '#34d399', '#6ee7b7', '#99f6e4', '#ccfbf1'];
-
-              return (
-                <div key={idx} className="policy-legend-item">
-                  <div
-                    className="policy-color-box"
-                    style={{ backgroundColor: colors[idx % colors.length] }}
-                  ></div>
-                  <span className="policy-legend-label">
-                    {area.category} ({area.mentions})
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      ) : (
-        <div className="no-decisions">No policy areas detected</div>
       )}
     </div>
   );
@@ -1380,7 +1352,7 @@ function CrossReferenceNetwork({ fullText, entities }) {
         </div>
         {network.nodes.length > 0 && (
           <button className="btn btn-ghost btn-export" onClick={exportNetworkImage}>
-            📸 Export
+            “¸ Export
           </button>
         )}
       </div>
@@ -1482,107 +1454,6 @@ function CrossReferenceNetwork({ fullText, entities }) {
 }
 
 // NEW: Action Items Timeline - IMPROVED with calendar view
-function ActionItemsTimeline({ fullText }) {
-  const [actionItems, setActionItems] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [selectedItem, setSelectedItem] = useState(null);
-
-  useEffect(() => {
-    if (!fullText) return;
-
-    setIsLoading(true);
-
-    fetch('/api/analytics/action_items', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transcript: fullText })
-    })
-      .then(res => res.json())
-      .then(data => {
-        // Only keep items with actual dates
-        const itemsWithDates = (data.action_items || []).filter(item =>
-          item.date && item.date !== "No date specified"
-        );
-        setActionItems(itemsWithDates);
-        setIsLoading(false);
-      })
-      .catch(err => {
-        console.error('Action items error:', err);
-        setIsLoading(false);
-      });
-  }, [fullText]);
-
-  const exportCalendarImage = () => {
-    const element = document.querySelector('.action-calendar-grid');
-    if (!element) return;
-
-    // Simple screenshot approach
-    alert('Calendar export: Use browser screenshot (Cmd+Shift+4 on Mac, Win+Shift+S on Windows) to capture the calendar view.');
-  };
-
-  return (
-    <div className="viz-card action-items-timeline">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h3>Action Items Calendar</h3>
-          <p className="viz-desc">
-            Tasks with specific dates mentioned in the meeting. Click to see details.
-          </p>
-        </div>
-        {actionItems.length > 0 && (
-          <button className="btn btn-ghost btn-export" onClick={exportCalendarImage}>
-            📸 Export
-          </button>
-        )}
-      </div>
-
-      {isLoading ? (
-        <div className="entities-loader-container">
-          <div className="spinner" />
-          <span>Extracting dated action items...</span>
-        </div>
-      ) : actionItems.length > 0 ? (
-        <>
-          <div className="action-calendar-grid">
-            {actionItems.map((item, idx) => (
-              <div
-                key={idx}
-                className={`calendar-item ${item.priority === 'high' ? 'calendar-item-high' : ''}`}
-                onClick={() => setSelectedItem(item)}
-              >
-                <div className="calendar-date">{item.date}</div>
-                <div className="calendar-text">{item.text.slice(0, 80)}...</div>
-                {item.priority === 'high' && (
-                  <div className="calendar-priority-dot"></div>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {selectedItem && (
-            <div className="decision-popup">
-              <div className="popup-header">
-                <span>{selectedItem.date}</span>
-                <button className="btn-close-popup" onClick={() => setSelectedItem(null)}>âœ•</button>
-              </div>
-              <div className="popup-text">
-                {selectedItem.text}
-              </div>
-              <div className="popup-actions">
-                <button className="btn btn-ghost" onClick={() => setSelectedItem(null)}>
-                  Close
-                </button>
-              </div>
-            </div>
-          )}
-        </>
-      ) : (
-        <div className="no-decisions">No action items with specific dates found</div>
-      )}
-    </div>
-  );
-}
-
 // NEW: Conversation Dynamics - Interactive intensity heatmap
 function ConversationDynamics({ sents, playerRef, videoId }) {
   const [dynamics, setDynamics] = useState([]);
@@ -1665,7 +1536,7 @@ function ConversationDynamics({ sents, playerRef, videoId }) {
           </p>
         </div>
         <button className="btn btn-ghost btn-export" onClick={exportDynamicsImage}>
-          📸 Export
+          “¸ Export
         </button>
       </div>
 
@@ -1696,147 +1567,792 @@ function ConversationDynamics({ sents, playerRef, videoId }) {
       )}
 
       <div className="dynamics-legend">
-        <span style={{ color: '#3b82f6' }}>¼ Slow/Calm</span>
-        <span style={{ color: '#10b981' }}>¼ Moderate</span>
-        <span style={{ color: '#f59e0b' }}>¼ Active</span>
-        <span style={{ color: '#ef4444' }}>¼ Fast/Intense</span>
+        <span style={{ color: '#3b82f6' }}> Slow/Calm</span>
+        <span style={{ color: '#10b981' }}> Moderate</span>
+        <span style={{ color: '#f59e0b' }}> Active</span>
+        <span style={{ color: '#ef4444' }}> Fast/Intense</span>
       </div>
     </div>
   );
 }
 
-// NEW: Budget Impact Tracker - Bubble chart
-function BudgetImpactTracker({ fullText }) {
-  const [budgetItems, setBudgetItems] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [selectedItem, setSelectedItem] = useState(null);
+// ============================================================================
+// v6.0: NEW FEATURE COMPONENTS
+// ============================================================================
+
+// Topic Subscriptions Panel
+function TopicSubscriptionsPanel({ transcript, videoId, videoTitle }) {
+  const [subscriptions, setSubscriptions] = useState([]);
+  const [newTopic, setNewTopic] = useState('');
+  const [email, setEmail] = useState('');
+  const [frequency, setFrequency] = useState('instant');
+  const [loading, setLoading] = useState(false);
+  const [matches, setMatches] = useState([]);
+  const [showAddForm, setShowAddForm] = useState(false);
+
+  useEffect(() => { loadSubscriptions(); }, []);
 
   useEffect(() => {
-    if (!fullText) return;
+    if (transcript && subscriptions.length > 0) checkMatches();
+  }, [transcript, subscriptions]);
 
-    setIsLoading(true);
-
-    fetch('/api/analytics/budget_impact', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transcript: fullText })
-    })
-      .then(res => res.json())
-      .then(data => {
-        setBudgetItems(data.budget_items || []);
-        setIsLoading(false);
-      })
-      .catch(err => {
-        console.error('Budget impact error:', err);
-        setIsLoading(false);
-      });
-  }, [fullText]);
-
-  const categoryColors = {
-    "Capital Projects": "#1e7f63",
-    "Salaries & Personnel": "#3b82f6",
-    "Public Safety": "#ef4444",
-    "Education": "#f59e0b",
-    "Services": "#10b981",
-    "Transportation": "#8b5cf6",
-    "Other": "#64748b"
+  const loadSubscriptions = async () => {
+    try {
+      const result = await apiListSubscriptions();
+      setSubscriptions(result.subscriptions || []);
+    } catch (e) { console.error('Failed to load subscriptions:', e); }
   };
 
-  const maxAmount = budgetItems.length > 0 ? budgetItems[0].amount : 1;
+  const checkMatches = async () => {
+    if (!transcript) return;
+    try {
+      const result = await apiCheckSubscriptionMatches({ transcript, video_id: videoId, video_title: videoTitle });
+      setMatches(result.matches || []);
+    } catch (e) { console.error('Failed to check matches:', e); }
+  };
 
-  const exportBudgetImage = () => {
-    alert('Budget export: Use browser screenshot to capture the visualization.');
+  const handleSubscribe = async () => {
+    if (!newTopic.trim()) return;
+    setLoading(true);
+    try {
+      await apiCreateSubscription({ topic: newTopic, email, frequency });
+      setNewTopic('');
+      setShowAddForm(false);
+      loadSubscriptions();
+    } catch (e) { alert('Failed to create subscription'); }
+    finally { setLoading(false); }
+  };
+
+  const handleUnsubscribe = async (topic) => {
+    try {
+      await apiDeleteSubscription({ topic });
+      loadSubscriptions();
+    } catch (e) { alert('Failed to unsubscribe'); }
   };
 
   return (
-    <div className="viz-card budget-impact-tracker">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h3>Budget Impact Tracker</h3>
-          <p className="viz-desc">
-            Dollar amounts mentioned in the meeting. Size = amount, color = category. Click for details.
-          </p>
+    <div className="viz-card subscriptions-card">
+      <h3>Topic Subscriptions</h3>
+      <p className="viz-desc">Get alerts when topics you care about are discussed in meetings.</p>
+
+      {matches.length > 0 && (
+        <div style={{ background: 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)', border: '2px solid #22c55e', borderRadius: '12px', padding: '16px', marginBottom: '16px' }}>
+          <div style={{ fontWeight: '700', color: '#15803d', marginBottom: '8px' }}>
+            {matches.length} topic{matches.length > 1 ? 's' : ''} mentioned in this meeting!
+          </div>
+          {matches.map((match, idx) => (
+            <div key={idx} style={{ background: 'white', padding: '10px', borderRadius: '8px', marginTop: '8px', fontSize: '14px' }}>
+              <strong>{match.topic}</strong>
+              <div style={{ color: '#64748b', marginTop: '4px' }}>{match.context}</div>
+            </div>
+          ))}
         </div>
-        {budgetItems.length > 0 && (
-          <button className="btn btn-ghost btn-export" onClick={exportBudgetImage}>
-            📸 Export
-          </button>
+      )}
+
+      <div style={{ marginBottom: '16px' }}>
+        {subscriptions.length === 0 ? (
+          <div style={{ color: '#64748b', fontStyle: 'italic' }}>No subscriptions yet</div>
+        ) : (
+          subscriptions.map((sub, idx) => (
+            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: '#f8fafc', borderRadius: '8px', marginBottom: '8px', border: '1px solid #e2e8f0' }}>
+              <div>
+                <span style={{ fontWeight: '600' }}>{sub.topic}</span>
+                <span style={{ marginLeft: '8px', fontSize: '12px', color: '#64748b', background: '#e2e8f0', padding: '2px 8px', borderRadius: '4px' }}>{sub.frequency}</span>
+              </div>
+              <button onClick={() => handleUnsubscribe(sub.topic)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px' }}>X</button>
+            </div>
+          ))
         )}
       </div>
 
-      {isLoading ? (
-        <div className="entities-loader-container">
-          <div className="spinner" />
-          <span>Analyzing budget mentions...</span>
+      {showAddForm ? (
+        <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '2px solid #e2e8f0' }}>
+          <input type="text" value={newTopic} onChange={(e) => setNewTopic(e.target.value)} placeholder="Enter topic (e.g., bike lanes, school budget)"
+            style={{ width: '100%', padding: '10px 12px', border: '2px solid #e2e8f0', borderRadius: '8px', marginBottom: '10px', fontSize: '14px' }} />
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email for alerts (optional)"
+            style={{ width: '100%', padding: '10px 12px', border: '2px solid #e2e8f0', borderRadius: '8px', marginBottom: '10px', fontSize: '14px' }} />
+          <select value={frequency} onChange={(e) => setFrequency(e.target.value)} style={{ width: '100%', padding: '10px 12px', border: '2px solid #e2e8f0', borderRadius: '8px', marginBottom: '10px', fontSize: '14px' }}>
+            <option value="instant">Instant alerts</option>
+            <option value="daily">Daily digest</option>
+            <option value="weekly">Weekly summary</option>
+          </select>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn btn-primary" onClick={handleSubscribe} disabled={loading || !newTopic.trim()}>{loading ? 'Subscribing...' : 'Subscribe'}</button>
+            <button className="btn btn-ghost" onClick={() => setShowAddForm(false)}>Cancel</button>
+          </div>
         </div>
-      ) : budgetItems.length > 0 ? (
-        <>
-          <div className="budget-bubble-container">
-            {budgetItems.slice(0, 15).map((item, idx) => {
-              const size = Math.max(40, Math.min(180, (item.amount / maxAmount) * 180));
-              const color = categoryColors[item.category] || categoryColors["Other"];
-
-              return (
-                <div
-                  key={idx}
-                  className="budget-bubble"
-                  style={{
-                    width: `${size}px`,
-                    height: `${size}px`,
-                    backgroundColor: color,
-                    cursor: 'pointer'
-                  }}
-                  onClick={() => setSelectedItem(item)}
-                  title={`${item.display} - ${item.category}`}
-                >
-                  <div className="budget-bubble-text">
-                    {item.display}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="budget-legend">
-            {Object.entries(categoryColors).map(([category, color]) => {
-              const count = budgetItems.filter(item => item.category === category).length;
-              if (count === 0) return null;
-
-              return (
-                <div key={category} className="budget-legend-item">
-                  <div
-                    className="budget-color-box"
-                    style={{ backgroundColor: color }}
-                  ></div>
-                  <span>{category} ({count})</span>
-                </div>
-              );
-            })}
-          </div>
-
-          {selectedItem && (
-            <div className="decision-popup">
-              <div className="popup-header">
-                <span>{selectedItem.display} - {selectedItem.category}</span>
-                <button className="btn-close-popup" onClick={() => setSelectedItem(null)}>âœ•</button>
-              </div>
-              <div className="popup-text">
-                {selectedItem.context}
-              </div>
-              <div className="popup-actions">
-                <button className="btn btn-ghost" onClick={() => setSelectedItem(null)}>
-                  Close
-                </button>
-              </div>
-            </div>
-          )}
-        </>
       ) : (
-        <div className="no-decisions">No budget amounts detected in transcript</div>
+        <button className="btn btn-accent" onClick={() => setShowAddForm(true)} style={{ width: '100%' }}>+ Add Topic Subscription</button>
       )}
     </div>
   );
 }
+
+// Issue Timeline Panel
+function IssueTimelinePanel({ transcript, videoId, videoTitle, entities }) {
+  const [issues, setIssues] = useState([]);
+  const [selectedIssue, setSelectedIssue] = useState(null);
+  const [timeline, setTimeline] = useState(null);
+  const [newIssueName, setNewIssueName] = useState('');
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [trackingResult, setTrackingResult] = useState(null);
+
+  useEffect(() => { loadIssues(); }, []);
+
+  const loadIssues = async () => {
+    try {
+      const result = await apiListIssues();
+      setIssues(result.issues || []);
+    } catch (e) { console.error('Failed to load issues:', e); }
+  };
+
+  const handleCreateIssue = async () => {
+    if (!newIssueName.trim()) return;
+    setLoading(true);
+    try {
+      await apiCreateIssue({ name: newIssueName });
+      setNewIssueName('');
+      setShowCreateForm(false);
+      loadIssues();
+    } catch (e) { alert('Failed to create issue'); }
+    finally { setLoading(false); }
+  };
+
+  const handleTrackInMeeting = async (issueId) => {
+    if (!transcript) { alert('Load a meeting transcript first'); return; }
+    setLoading(true);
+    try {
+      const result = await apiAutoTrackIssue({ issue_id: issueId, transcript, video_id: videoId, video_title: videoTitle });
+      setTrackingResult(result);
+      if (result.mention_count > 0) {
+        await apiAddMeetingToIssue({ issue_id: issueId, video_id: videoId, video_title: videoTitle, summary: result.ai_summary, decisions: result.ai_decisions });
+        loadIssues();
+      }
+    } catch (e) { alert('Failed to track issue'); }
+    finally { setLoading(false); }
+  };
+
+  const handleViewTimeline = async (issueId) => {
+    try {
+      const result = await apiGetIssueTimeline(issueId);
+      setTimeline(result);
+      setSelectedIssue(issueId);
+    } catch (e) { alert('Failed to load timeline'); }
+  };
+
+  return (
+    <div className="viz-card issue-timeline-card">
+      <h3>Issue Timeline Tracker</h3>
+      <p className="viz-desc">Track how issues evolve across multiple meetings over time.</p>
+
+      {trackingResult && trackingResult.mention_count > 0 && (
+        <div style={{ background: 'linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)', border: '2px solid #3b82f6', borderRadius: '12px', padding: '16px', marginBottom: '16px' }}>
+          <div style={{ fontWeight: '700', color: '#1d4ed8', marginBottom: '8px' }}>Found {trackingResult.mention_count} mentions of "{trackingResult.issue_name}"</div>
+          {trackingResult.ai_summary && <div style={{ marginTop: '8px', color: '#1e40af' }}><strong>Summary:</strong> {trackingResult.ai_summary}</div>}
+          <button className="btn btn-ghost" onClick={() => setTrackingResult(null)} style={{ marginTop: '8px' }}>Dismiss</button>
+        </div>
+      )}
+
+      {timeline && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }} onClick={() => setTimeline(null)}>
+          <div style={{ background: 'white', borderRadius: '16px', width: '90%', maxWidth: '800px', maxHeight: '80vh', overflow: 'auto', padding: '24px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ margin: 0 }}>{timeline.name} Timeline</h2>
+              <button onClick={() => setTimeline(null)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer' }}>X</button>
+            </div>
+            <div style={{ borderLeft: '3px solid #1E7F63', paddingLeft: '20px' }}>
+              {timeline.meetings && timeline.meetings.length > 0 ? timeline.meetings.map((meeting, idx) => (
+                <div key={idx} style={{ position: 'relative', paddingBottom: '24px', marginBottom: '24px', borderBottom: idx < timeline.meetings.length - 1 ? '1px dashed #e2e8f0' : 'none' }}>
+                  <div style={{ position: 'absolute', left: '-28px', width: '14px', height: '14px', background: '#1E7F63', borderRadius: '50%', border: '3px solid white' }} />
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>{new Date(meeting.date).toLocaleDateString()}</div>
+                  <div style={{ fontWeight: '600', marginTop: '4px' }}>{meeting.video_title}</div>
+                  {meeting.summary && <div style={{ marginTop: '8px', color: '#374151' }}>{meeting.summary}</div>}
+                </div>
+              )) : <div style={{ color: '#64748b' }}>No meetings tracked yet</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginBottom: '16px' }}>
+        {issues.length === 0 ? <div style={{ color: '#64748b', fontStyle: 'italic' }}>No issues being tracked</div> : issues.map((issue, idx) => (
+          <div key={idx} style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', marginBottom: '8px', border: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <span style={{ fontWeight: '600' }}>{issue.name}</span>
+                <span style={{ marginLeft: '8px', fontSize: '12px', color: '#64748b' }}>{issue.meetings?.length || 0} meetings</span>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button className="btn btn-ghost" onClick={() => handleViewTimeline(issue.id)} style={{ fontSize: '12px', padding: '6px 12px' }}>View Timeline</button>
+                <button className="btn btn-accent" onClick={() => handleTrackInMeeting(issue.id)} disabled={loading || !transcript} style={{ fontSize: '12px', padding: '6px 12px' }}>{loading ? '...' : 'Track in This Meeting'}</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {showCreateForm ? (
+        <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '2px solid #e2e8f0' }}>
+          <input type="text" value={newIssueName} onChange={(e) => setNewIssueName(e.target.value)} placeholder="Issue name (e.g., Main Street Redesign)"
+            style={{ width: '100%', padding: '10px 12px', border: '2px solid #e2e8f0', borderRadius: '8px', marginBottom: '10px' }} />
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn btn-primary" onClick={handleCreateIssue} disabled={loading}>Create Issue</button>
+            <button className="btn btn-ghost" onClick={() => setShowCreateForm(false)}>Cancel</button>
+          </div>
+        </div>
+      ) : <button className="btn btn-accent" onClick={() => setShowCreateForm(true)} style={{ width: '100%' }}>+ Track New Issue</button>}
+    </div>
+  );
+}
+
+// Jargon Translator Panel
+function JargonTranslatorPanel() {
+  const [term, setTerm] = useState('');
+  const [explanation, setExplanation] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [dictionary, setDictionary] = useState([]);
+  const [showDictionary, setShowDictionary] = useState(false);
+
+  const handleExplain = async () => {
+    if (!term.trim()) return;
+    setLoading(true);
+    try {
+      const result = await apiExplainJargon({ term });
+      setExplanation(result);
+    } catch (e) { console.error('Jargon explanation failed:', e); }
+    finally { setLoading(false); }
+  };
+
+  const loadDictionary = async () => {
+    try {
+      const result = await apiGetJargonDictionary();
+      setDictionary(result.terms || []);
+      setShowDictionary(true);
+    } catch (e) { console.error('Failed to load dictionary:', e); }
+  };
+
+  return (
+    <div className="viz-card jargon-card">
+      <h3>Jargon Translator</h3>
+      <p className="viz-desc">Don't know what a term means? Get a plain-language explanation.</p>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+        <input type="text" value={term} onChange={(e) => setTerm(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleExplain()}
+          placeholder="Enter a term (e.g., TIF, variance, quorum)"
+          style={{ flex: 1, padding: '12px 16px', border: '2px solid #e2e8f0', borderRadius: '8px', fontSize: '14px' }} />
+        <button className="btn btn-primary" onClick={handleExplain} disabled={loading}>{loading ? '...' : 'Explain'}</button>
+      </div>
+      {explanation && (
+        <div style={{ background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)', padding: '16px', borderRadius: '12px', marginBottom: '16px', border: '2px solid #22c55e' }}>
+          <div style={{ fontWeight: '700', color: '#15803d', marginBottom: '8px' }}>{explanation.term}</div>
+          <div style={{ color: '#166534' }}>{explanation.explanation}</div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>Source: {explanation.source === 'dictionary' ? 'Built-in dictionary' : 'AI-generated'}</div>
+        </div>
+      )}
+      <button className="btn btn-ghost" onClick={loadDictionary} style={{ width: '100%' }}>Browse Full Dictionary</button>
+      {showDictionary && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }} onClick={() => setShowDictionary(false)}>
+          <div style={{ background: 'white', borderRadius: '16px', width: '90%', maxWidth: '700px', maxHeight: '80vh', overflow: 'auto', padding: '24px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ margin: 0 }}>Civic Jargon Dictionary</h2>
+              <button onClick={() => setShowDictionary(false)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer' }}>X</button>
+            </div>
+            <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '16px' }}>{dictionary.length} terms defined</div>
+            {dictionary.map((item, idx) => (
+              <div key={idx} style={{ padding: '12px', borderBottom: '1px solid #e2e8f0' }}>
+                <div style={{ fontWeight: '600', color: '#1E7F63' }}>{item.term}</div>
+                <div style={{ marginTop: '4px', color: '#374151' }}>{item.explanation}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Cross-Meeting Analysis Panel (Combined Knowledge Graph + Comparison)
+function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTranscript, currentEntities, currentSummary }) {
+  const [additionalMeetings, setAdditionalMeetings] = useState([]);
+  const [newUrl, setNewUrl] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [loadingMeeting, setLoadingMeeting] = useState(null);
+  const [activeTab, setActiveTab] = useState('add');
+  const [comparison, setComparison] = useState(null);
+  const [graphData, setGraphData] = useState(null);
+  const [selectedMeetingForCompare, setSelectedMeetingForCompare] = useState(null);
+
+  const extractVideoId = (url) => {
+    const patterns = [/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/, /^([a-zA-Z0-9_-]{11})$/];
+    for (const pattern of patterns) {
+      const match = url.match(pattern);
+      if (match) return match[1];
+    }
+    return null;
+  };
+
+  const handleAddMeeting = async () => {
+    const videoId = extractVideoId(newUrl.trim());
+    if (!videoId) { alert('Please enter a valid YouTube URL or video ID'); return; }
+    if (videoId === currentVideoId) { alert('This is the current meeting. Please add a different meeting.'); return; }
+    if (additionalMeetings.find(m => m.video_id === videoId)) { alert('This meeting has already been added.'); return; }
+
+    setLoadingMeeting(videoId);
+    console.log('[CrossMeeting] Starting to load meeting:', videoId);
+    
+    try {
+      // Step 1: Fetch transcript (required)
+      console.log('[CrossMeeting] Fetching transcript...');
+      const transcriptRes = await fetch('/api/transcript', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoId })
+      });
+      
+      if (!transcriptRes.ok) {
+        const errorText = await transcriptRes.text();
+        console.error('[CrossMeeting] Transcript fetch failed:', errorText);
+        throw new Error('Failed to fetch transcript');
+      }
+      
+      const transcriptText = await transcriptRes.text();
+      console.log('[CrossMeeting] Transcript received, length:', transcriptText.length);
+      
+      // Parse the VTT/transcript text to get full text
+      let fullText = transcriptText;
+      if (transcriptText.includes('WEBVTT') || transcriptText.includes('-->')) {
+        const lines = transcriptText.split('\n');
+        const textLines = lines.filter(line => 
+          line.trim() && 
+          !line.includes('WEBVTT') && 
+          !line.includes('-->') && 
+          !line.match(/^\d+$/) &&
+          !line.match(/^\d{2}:\d{2}/)
+        );
+        fullText = textLines.join(' ').replace(/\s+/g, ' ').trim();
+      }
+      console.log('[CrossMeeting] Parsed text length:', fullText.length);
+      
+      // Step 2: Fetch metadata for title (optional)
+      let title = `Meeting ${videoId}`;
+      try {
+        console.log('[CrossMeeting] Fetching metadata...');
+        const metaRes = await fetch('/api/metadata', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ videoId })
+        });
+        if (metaRes.ok) { 
+          const metaData = await metaRes.json(); 
+          title = metaData.title || title;
+          console.log('[CrossMeeting] Got title:', title);
+        }
+      } catch (e) { 
+        console.log('[CrossMeeting] Metadata fetch failed, using default title'); 
+      }
+
+      // Step 3: Extract keywords locally (no API call - avoids rate limiting)
+      // Simple keyword extraction from transcript
+      const words = fullText.toLowerCase().split(/\s+/);
+      const wordFreq = {};
+      const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'what', 'which', 'who', 'when', 'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 'just', 'also', 'now', 'here', 'there', 'then', 'about', 'into', 'over', 'after', 'before', 'between', 'under', 'again', 'further', 'once', 'during', 'while', 'through', 'because', 'if', 'until', 'against', 'above', 'below', 'up', 'down', 'out', 'off', 'right', 'left', 'going', 'think', 'know', 'want', 'get', 'got', 'like', 'make', 'made', 'say', 'said', 'see', 'come', 'came', 'take', 'took', 'go', 'went', 'well', 'back', 'much', 'even', 'still', 'way', 'really', 'thing', 'things', 'actually', 'something', 'anything', 'need', 'year', 'years', 'time', 'lot', 'okay', 'yeah', 'yes', 'thank', 'thanks', 'please', 'um', 'uh']);
+      
+      words.forEach(word => {
+        const clean = word.replace(/[^a-z]/g, '');
+        if (clean.length > 3 && !stopWords.has(clean)) {
+          wordFreq[clean] = (wordFreq[clean] || 0) + 1;
+        }
+      });
+      
+      // Get top keywords as pseudo-entities
+      const entities = Object.entries(wordFreq)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 30)
+        .map(([text, count]) => ({ text: text.charAt(0).toUpperCase() + text.slice(1), count, type: 'KEYWORD' }));
+      
+      console.log('[CrossMeeting] Extracted', entities.length, 'keywords locally');
+
+      // Step 4: Add the meeting
+      const newMeeting = { 
+        video_id: videoId, 
+        title, 
+        transcript: fullText, 
+        summary: '', // Skip AI summary to avoid rate limiting
+        entities, 
+        added_at: new Date().toISOString() 
+      };
+      
+      setAdditionalMeetings(prev => [...prev, newMeeting]);
+      setNewUrl('');
+      console.log('[CrossMeeting] Successfully added meeting:', title);
+      
+    } catch (e) { 
+      console.error('[CrossMeeting] Failed to add meeting:', e);
+      alert('Failed to load meeting: ' + e.message); 
+    }
+    finally { 
+      setLoadingMeeting(null); 
+    }
+  };
+
+  const handleRemoveMeeting = (videoId) => {
+    setAdditionalMeetings(prev => prev.filter(m => m.video_id !== videoId));
+    if (selectedMeetingForCompare === videoId) { setSelectedMeetingForCompare(null); setComparison(null); }
+  };
+
+  const handleCompare = async () => {
+    if (!selectedMeetingForCompare) return;
+    const meetingToCompare = additionalMeetings.find(m => m.video_id === selectedMeetingForCompare);
+    if (!meetingToCompare) return;
+    setLoading(true);
+    
+    try {
+      // Do comparison locally (faster and more reliable than API call)
+      const entities1 = new Set((currentEntities || []).map(e => e.text.toLowerCase()));
+      const entities2 = new Set((meetingToCompare.entities || []).map(e => e.text.toLowerCase()));
+      
+      // Find new, ongoing, and resolved topics
+      const newTopics = [...entities1].filter(e => !entities2.has(e));
+      const ongoingTopics = [...entities1].filter(e => entities2.has(e));
+      const resolvedTopics = [...entities2].filter(e => !entities1.has(e));
+      
+      // Capitalize for display
+      const capitalize = arr => arr.slice(0, 15).map(t => t.charAt(0).toUpperCase() + t.slice(1));
+      
+      setComparison({
+        new_topics: capitalize(newTopics),
+        ongoing_topics: capitalize(ongoingTopics),
+        resolved_topics: capitalize(resolvedTopics),
+        evolution_summary: `The current meeting introduces ${newTopics.length} new topics while ${ongoingTopics.length} topics continue from the previous meeting. ${resolvedTopics.length} topics from the previous meeting are not discussed.`
+      });
+      
+      console.log('[CrossMeeting] Comparison complete:', { new: newTopics.length, ongoing: ongoingTopics.length, resolved: resolvedTopics.length });
+      
+    } catch (e) { 
+      console.error('[CrossMeeting] Comparison failed:', e);
+      alert('Failed to compare meetings.'); 
+    }
+    finally { setLoading(false); }
+  };
+
+  const handleBuildGraph = async () => {
+    if (additionalMeetings.length === 0) { alert('Please add at least one additional meeting first.'); return; }
+    setLoading(true);
+    
+    try {
+      // Build graph locally (faster and more reliable)
+      const allMeetings = [
+        { video_id: currentVideoId, title: currentTitle, entities: currentEntities || [] },
+        ...additionalMeetings.map(m => ({ video_id: m.video_id, title: m.title, entities: m.entities || [] }))
+      ];
+      
+      // Track which entities appear in which meetings
+      const entityMeetings = {};
+      
+      allMeetings.forEach(meeting => {
+        (meeting.entities || []).forEach(entity => {
+          const key = entity.text.toLowerCase();
+          if (!entityMeetings[key]) {
+            entityMeetings[key] = { text: entity.text, meetings: new Set() };
+          }
+          entityMeetings[key].meetings.add(meeting.title);
+        });
+      });
+      
+      // Find shared entities (appear in 2+ meetings)
+      const sharedEntities = Object.values(entityMeetings)
+        .filter(e => e.meetings.size > 1)
+        .map(e => ({ name: e.text, meeting_count: e.meetings.size, meetings: [...e.meetings] }))
+        .sort((a, b) => b.meeting_count - a.meeting_count);
+      
+      // Calculate stats
+      const totalEntities = Object.keys(entityMeetings).length;
+      const crossConnections = sharedEntities.length;
+      
+      setGraphData({
+        shared_entities: sharedEntities.slice(0, 20),
+        stats: {
+          total_nodes: totalEntities + allMeetings.length,
+          total_edges: Object.values(entityMeetings).reduce((sum, e) => sum + e.meetings.size, 0),
+          cross_meeting_connections: crossConnections
+        }
+      });
+      
+      console.log('[CrossMeeting] Graph built:', { entities: totalEntities, shared: crossConnections });
+      
+    } catch (e) { 
+      console.error('[CrossMeeting] Graph build failed:', e);
+      alert('Failed to build knowledge graph.'); 
+    }
+    finally { setLoading(false); }
+  };
+
+  const totalMeetings = additionalMeetings.length + 1;
+
+  return (
+    <div className="viz-card cross-meeting-analysis-card">
+      <h3>Cross-Meeting Analysis</h3>
+      <p className="viz-desc">Compare meetings and discover connections across multiple sessions. Add meetings below to unlock analysis features.</p>
+
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: '2px solid #e2e8f0', paddingBottom: '8px' }}>
+        <button onClick={() => setActiveTab('add')} style={{ padding: '10px 16px', border: 'none', borderRadius: '8px 8px 0 0', cursor: 'pointer', fontWeight: '600', background: activeTab === 'add' ? '#1E7F63' : 'transparent', color: activeTab === 'add' ? 'white' : '#64748b' }}>+ Add Meetings ({totalMeetings})</button>
+        <button onClick={() => setActiveTab('compare')} disabled={additionalMeetings.length === 0} style={{ padding: '10px 16px', border: 'none', borderRadius: '8px 8px 0 0', cursor: additionalMeetings.length === 0 ? 'not-allowed' : 'pointer', fontWeight: '600', background: activeTab === 'compare' ? '#1E7F63' : 'transparent', color: activeTab === 'compare' ? 'white' : additionalMeetings.length === 0 ? '#cbd5e1' : '#64748b' }}>Compare</button>
+        <button onClick={() => setActiveTab('graph')} disabled={additionalMeetings.length === 0} style={{ padding: '10px 16px', border: 'none', borderRadius: '8px 8px 0 0', cursor: additionalMeetings.length === 0 ? 'not-allowed' : 'pointer', fontWeight: '600', background: activeTab === 'graph' ? '#1E7F63' : 'transparent', color: activeTab === 'graph' ? 'white' : additionalMeetings.length === 0 ? '#cbd5e1' : '#64748b' }}>Knowledge Graph</button>
+      </div>
+
+      {activeTab === 'add' && (
+        <div>
+          <div style={{ background: 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)', padding: '12px 16px', borderRadius: '10px', marginBottom: '16px', border: '2px solid #22c55e' }}>
+            <div style={{ fontSize: '12px', color: '#15803d', fontWeight: '600', marginBottom: '4px' }}>CURRENT MEETING</div>
+            <div style={{ fontWeight: '600', color: '#166534' }}>{currentTitle || `Video: ${currentVideoId}`}</div>
+            <div style={{ fontSize: '12px', color: '#15803d', marginTop: '4px' }}>{currentEntities?.length || 0} entities detected</div>
+          </div>
+
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px', color: '#374151' }}>Add Another Meeting to Compare:</label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input type="text" value={newUrl} onChange={(e) => setNewUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddMeeting()} placeholder="Paste YouTube URL (e.g., https://youtube.com/watch?v=...)" style={{ flex: 1, padding: '12px 16px', border: '2px solid #e2e8f0', borderRadius: '8px', fontSize: '14px' }} />
+              <button className="btn btn-primary" onClick={handleAddMeeting} disabled={loadingMeeting || !newUrl.trim()} style={{ minWidth: '120px' }}>{loadingMeeting ? 'Loading...' : '+ Add Meeting'}</button>
+            </div>
+            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '6px' }}>Tip: Add meetings from the same organization or topic series for best results</div>
+          </div>
+
+          {additionalMeetings.length > 0 && (
+            <div>
+              <div style={{ fontWeight: '600', marginBottom: '8px', color: '#374151' }}>Added Meetings ({additionalMeetings.length}):</div>
+              {additionalMeetings.map((meeting, idx) => (
+                <div key={meeting.video_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: '#f8fafc', borderRadius: '10px', marginBottom: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: '600', marginBottom: '4px' }}>{meeting.title}</div>
+                    <div style={{ fontSize: '12px', color: '#64748b' }}>{meeting.entities?.length || 0} entities - ID: {meeting.video_id}</div>
+                  </div>
+                  <button onClick={() => handleRemoveMeeting(meeting.video_id)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '18px', padding: '4px 8px' }}>X</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {additionalMeetings.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '30px 20px', background: '#f8fafc', borderRadius: '12px', border: '2px dashed #e2e8f0' }}>
+              <div style={{ fontSize: '32px', marginBottom: '8px' }}>+</div>
+              <div style={{ color: '#64748b', marginBottom: '4px' }}>No additional meetings added yet</div>
+              <div style={{ fontSize: '12px', color: '#94a3b8' }}>Add meetings above to enable comparison and knowledge graph features</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'compare' && (
+        <div>
+          {additionalMeetings.length === 0 ? <div style={{ textAlign: 'center', padding: '30px', color: '#64748b' }}>Add meetings first to enable comparison</div> : (
+            <>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>Select a meeting to compare with current:</label>
+                <select value={selectedMeetingForCompare || ''} onChange={(e) => { setSelectedMeetingForCompare(e.target.value); setComparison(null); }} style={{ width: '100%', padding: '12px', border: '2px solid #e2e8f0', borderRadius: '8px', fontSize: '14px' }}>
+                  <option value="">-- Select a meeting --</option>
+                  {additionalMeetings.map(m => <option key={m.video_id} value={m.video_id}>{m.title}</option>)}
+                </select>
+              </div>
+              {selectedMeetingForCompare && <button className="btn btn-primary" onClick={handleCompare} disabled={loading} style={{ width: '100%', marginBottom: '16px' }}>{loading ? 'Analyzing...' : 'Compare These Meetings'}</button>}
+              {comparison && (
+                <div style={{ marginTop: '16px' }}>
+                  <div style={{ marginBottom: '16px' }}>
+                    <h4 style={{ color: '#22c55e', marginBottom: '8px' }}>New Topics (in current meeting)</h4>
+                    {comparison.new_topics && comparison.new_topics.length > 0 ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>{comparison.new_topics.slice(0, 10).map((topic, idx) => <span key={idx} style={{ padding: '6px 12px', background: '#dcfce7', borderRadius: '16px', fontSize: '14px' }}>{topic}</span>)}</div> : <span style={{ color: '#64748b' }}>None detected</span>}
+                  </div>
+                  <div style={{ marginBottom: '16px' }}>
+                    <h4 style={{ color: '#3b82f6', marginBottom: '8px' }}>Ongoing Topics (in both meetings)</h4>
+                    {comparison.ongoing_topics && comparison.ongoing_topics.length > 0 ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>{comparison.ongoing_topics.slice(0, 10).map((topic, idx) => <span key={idx} style={{ padding: '6px 12px', background: '#dbeafe', borderRadius: '16px', fontSize: '14px' }}>{topic}</span>)}</div> : <span style={{ color: '#64748b' }}>None detected</span>}
+                  </div>
+                  {comparison.evolution_summary && <div style={{ background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)', padding: '16px', borderRadius: '12px', border: '2px solid #22c55e' }}><h4 style={{ marginBottom: '8px', color: '#15803d' }}>AI Summary of Changes</h4><p style={{ color: '#166534', lineHeight: '1.6' }}>{comparison.evolution_summary}</p></div>}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'graph' && (
+        <div>
+          {additionalMeetings.length === 0 ? <div style={{ textAlign: 'center', padding: '30px', color: '#64748b' }}>Add meetings first to build a knowledge graph</div> : (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '16px' }}>
+                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '10px', textAlign: 'center' }}><div style={{ fontSize: '28px', fontWeight: '700', color: '#1E7F63' }}>{totalMeetings}</div><div style={{ fontSize: '12px', color: '#64748b' }}>Meetings</div></div>
+                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '10px', textAlign: 'center' }}><div style={{ fontSize: '28px', fontWeight: '700', color: '#1E7F63' }}>{(currentEntities?.length || 0) + additionalMeetings.reduce((sum, m) => sum + (m.entities?.length || 0), 0)}</div><div style={{ fontSize: '12px', color: '#64748b' }}>Total Entities</div></div>
+                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '10px', textAlign: 'center' }}><div style={{ fontSize: '28px', fontWeight: '700', color: '#1E7F63' }}>{graphData?.stats?.cross_meeting_connections || '?'}</div><div style={{ fontSize: '12px', color: '#64748b' }}>Shared Topics</div></div>
+              </div>
+              <button className="btn btn-accent" onClick={handleBuildGraph} disabled={loading} style={{ width: '100%', marginBottom: '16px' }}>{loading ? 'Building Graph...' : 'Build Knowledge Graph'}</button>
+              
+              {graphData && (
+                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px' }}>
+                  {/* Visual Network Graph */}
+                  <div style={{ background: 'white', borderRadius: '12px', border: '2px solid #e2e8f0', marginBottom: '16px', overflow: 'hidden' }}>
+                    <svg viewBox="0 0 800 500" style={{ width: '100%', height: '400px', display: 'block' }}>
+                      {/* Background */}
+                      <rect width="800" height="500" fill="#fafafa" />
+                      
+                      {/* Draw edges first (so they appear behind nodes) */}
+                      {graphData.shared_entities && graphData.shared_entities.slice(0, 12).map((entity, idx) => {
+                        const entityX = 400 + Math.cos((idx / 12) * Math.PI * 2) * 150;
+                        const entityY = 250 + Math.sin((idx / 12) * Math.PI * 2) * 150;
+                        
+                        // Draw lines to each meeting this entity appears in
+                        const allMeetingsList = [
+                          { title: currentTitle || 'Current Meeting', x: 200, y: 250 },
+                          ...additionalMeetings.map((m, mIdx) => ({
+                            title: m.title,
+                            x: 600,
+                            y: 100 + (mIdx * 120)
+                          }))
+                        ];
+                        
+                        return entity.meetings?.map((meetingTitle, mIdx) => {
+                          const meeting = allMeetingsList.find(m => m.title === meetingTitle);
+                          if (!meeting) return null;
+                          return (
+                            <line
+                              key={`edge-${idx}-${mIdx}`}
+                              x1={entityX}
+                              y1={entityY}
+                              x2={meeting.x}
+                              y2={meeting.y}
+                              stroke="#1E7F63"
+                              strokeWidth="2"
+                              strokeOpacity="0.3"
+                            />
+                          );
+                        });
+                      })}
+                      
+                      {/* Meeting nodes (left and right sides) */}
+                      <g>
+                        {/* Current meeting - left side */}
+                        <circle cx="200" cy="250" r="45" fill="linear-gradient(135deg, #1E7F63 0%, #2d9f7f 100%)" stroke="#1E7F63" strokeWidth="3" />
+                        <circle cx="200" cy="250" r="45" fill="#1E7F63" />
+                        <text x="200" y="245" textAnchor="middle" fill="white" fontSize="11" fontWeight="bold">
+                          {(currentTitle || 'Current').substring(0, 12)}
+                        </text>
+                        <text x="200" y="260" textAnchor="middle" fill="white" fontSize="9">
+                          (Current)
+                        </text>
+                        
+                        {/* Additional meetings - right side */}
+                        {additionalMeetings.map((meeting, idx) => (
+                          <g key={`meeting-${idx}`}>
+                            <circle 
+                              cx="600" 
+                              cy={100 + (idx * 120)} 
+                              r="40" 
+                              fill="#3b82f6"
+                              stroke="#1d4ed8"
+                              strokeWidth="3"
+                            />
+                            <text 
+                              x="600" 
+                              y={100 + (idx * 120) + 4} 
+                              textAnchor="middle" 
+                              fill="white" 
+                              fontSize="10"
+                              fontWeight="bold"
+                            >
+                              {meeting.title.substring(0, 14)}
+                            </text>
+                          </g>
+                        ))}
+                      </g>
+                      
+                      {/* Shared entity nodes (center circle) */}
+                      {graphData.shared_entities && graphData.shared_entities.slice(0, 12).map((entity, idx) => {
+                        const angle = (idx / 12) * Math.PI * 2;
+                        const x = 400 + Math.cos(angle) * 150;
+                        const y = 250 + Math.sin(angle) * 150;
+                        const size = 20 + (entity.meeting_count * 5);
+                        
+                        return (
+                          <g key={`entity-${idx}`}>
+                            <circle
+                              cx={x}
+                              cy={y}
+                              r={size}
+                              fill="#22c55e"
+                              stroke="#15803d"
+                              strokeWidth="2"
+                              opacity="0.9"
+                            />
+                            <text
+                              x={x}
+                              y={y + 4}
+                              textAnchor="middle"
+                              fill="white"
+                              fontSize="9"
+                              fontWeight="600"
+                            >
+                              {entity.name.substring(0, 10)}
+                            </text>
+                          </g>
+                        );
+                      })}
+                      
+                      {/* Legend */}
+                      <g transform="translate(20, 20)">
+                        <rect x="0" y="0" width="140" height="90" fill="white" stroke="#e2e8f0" rx="8" />
+                        <circle cx="20" cy="25" r="8" fill="#1E7F63" />
+                        <text x="35" y="29" fontSize="11" fill="#374151">Current Meeting</text>
+                        <circle cx="20" cy="50" r="8" fill="#3b82f6" />
+                        <text x="35" y="54" fontSize="11" fill="#374151">Added Meeting</text>
+                        <circle cx="20" cy="75" r="8" fill="#22c55e" />
+                        <text x="35" y="79" fontSize="11" fill="#374151">Shared Topic</text>
+                      </g>
+                    </svg>
+                  </div>
+                  
+                  {/* Stats summary */}
+                  <div style={{ fontWeight: '700', color: '#1E7F63', marginBottom: '12px' }}>Knowledge Graph Built!</div>
+                  <div style={{ fontSize: '14px', color: '#374151', marginBottom: '12px' }}>
+                    Found <strong>{graphData.stats?.total_nodes || 0}</strong> total topics across <strong>{totalMeetings}</strong> meetings with <strong>{graphData.stats?.cross_meeting_connections || 0}</strong> shared between meetings.
+                  </div>
+                  
+                  {/* Shared entities list */}
+                  {graphData.shared_entities && graphData.shared_entities.length > 0 && (
+                    <div>
+                      <div style={{ fontWeight: '600', marginBottom: '8px' }}>Topics appearing in multiple meetings:</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {graphData.shared_entities.slice(0, 15).map((entity, idx) => (
+                          <span key={idx} style={{ 
+                            padding: '6px 12px', 
+                            background: 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)', 
+                            borderRadius: '16px', 
+                            fontSize: '13px', 
+                            border: '1px solid #22c55e',
+                            cursor: 'pointer'
+                          }}
+                          title={`Appears in: ${entity.meetings?.join(', ') || 'Multiple meetings'}`}
+                          >
+                            {entity.name} ({entity.meeting_count})
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {graphData.shared_entities && graphData.shared_entities.length === 0 && (
+                    <div style={{ color: '#64748b', fontStyle: 'italic', textAlign: 'center', padding: '20px' }}>
+                      No shared topics found between meetings. The meetings may discuss different subjects.
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// END v6.0 NEW FEATURE COMPONENTS
+// ============================================================================
 
 // NEW: Meeting Efficiency Dashboard
 function MeetingEfficiencyDashboard({ fullText, cues }) {
@@ -1887,7 +2403,7 @@ function MeetingEfficiencyDashboard({ fullText, cues }) {
         </div>
         {efficiency && (
           <button className="btn btn-ghost btn-export" onClick={exportEfficiencyImage}>
-            📸 Export
+            “¸ Export
           </button>
         )}
       </div>
@@ -1990,128 +2506,45 @@ function MeetingEfficiencyDashboard({ fullText, cues }) {
 }
 
 function ExportModal({ onSelect, onClose, clipCount }) {
-  const [addCaptions, setAddCaptions] = useState(false);
-  const [captionStyle, setCaptionStyle] = useState('bottom');
-  
-  const handleSelect = (format) => {
-    onSelect(format, { addCaptions, captionStyle });
-  };
-
   return (
     <div className="export-modal-overlay" onClick={onClose}>
-      <div className="export-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px' }}>
+      <div className="export-modal" onClick={e => e.stopPropagation()}>
         <div className="export-modal-header">
           <h2>Choose Export Format</h2>
-          <button className="btn-close" onClick={onClose}>✕</button>
-        </div>
-
-        {/* Video Options */}
-        <div style={{ 
-          padding: '16px 20px', 
-          background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
-          borderBottom: '2px solid #f59e0b',
-          marginBottom: '16px'
-        }}>
-          <div style={{ 
-            fontSize: '18px', 
-            fontWeight: '800', 
-            color: '#92400e',
-            marginBottom: '12px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-            🎬 Video Options
-          </div>
-          
-          <label style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '12px',
-            cursor: 'pointer',
-            padding: '12px 16px',
-            background: 'white',
-            borderRadius: '10px',
-            border: addCaptions ? '2px solid #f59e0b' : '2px solid #e5e7eb',
-            transition: 'all 0.2s ease'
-          }}>
-            <input 
-              type="checkbox" 
-              checked={addCaptions}
-              onChange={(e) => setAddCaptions(e.target.checked)}
-              style={{ width: '20px', height: '20px', accentColor: '#f59e0b' }}
-            />
-            <div>
-              <div style={{ fontSize: '16px', fontWeight: '700', color: '#1f2937' }}>
-                Add Captions 📝
-              </div>
-              <div style={{ fontSize: '13px', color: '#6b7280' }}>
-                Burn transcript text onto video clips
-              </div>
-            </div>
-          </label>
-          
-          {addCaptions && (
-            <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {[
-                { id: 'bottom', label: '📍 Bottom', desc: 'Classic style' },
-                { id: 'center', label: '🎯 Center', desc: 'TikTok style' },
-                { id: 'top', label: '⬆️ Top', desc: 'Above action' }
-              ].map(style => (
-                <button
-                  key={style.id}
-                  onClick={() => setCaptionStyle(style.id)}
-                  style={{
-                    padding: '10px 16px',
-                    border: captionStyle === style.id ? '2px solid #f59e0b' : '2px solid #e5e7eb',
-                    borderRadius: '8px',
-                    background: captionStyle === style.id ? '#fef3c7' : 'white',
-                    cursor: 'pointer',
-                    textAlign: 'left'
-                  }}
-                >
-                  <div style={{ fontSize: '14px', fontWeight: '700' }}>{style.label}</div>
-                  <div style={{ fontSize: '11px', color: '#6b7280' }}>{style.desc}</div>
-                </button>
-              ))}
-            </div>
-          )}
+          <button className="btn-close" onClick={onClose}>Å“â€¢</button>
         </div>
 
         <div className="export-options">
-          <div className="export-option" onClick={() => handleSelect('combined')}>
-            <div className="export-title">🎬 Highlight Reel</div>
+          <div className="export-option" onClick={() => onSelect('combined')}>
+            <div className="export-title">Highlight Reel</div>
             <div className="export-desc">
               Single MP4 with smooth transitions between {clipCount} clips
             </div>
-            <div className="export-badge" style={{ background: '#10b981' }}>Most Popular</div>
+            <div className="export-badge">Most Popular</div>
           </div>
 
-          <div className="export-option" onClick={() => handleSelect('titled')}>
-            <div className="export-title">🎯 Professional Version</div>
+          <div className="export-option" onClick={() => onSelect('titled')}>
+            <div className="export-title">Professional Version</div>
             <div className="export-desc">
               Highlight reel with title cards and chapter markers
             </div>
-            <div className="export-badge" style={{ background: '#6366f1' }}>Best for Presentations</div>
+            <div className="export-badge">Best for Presentations</div>
           </div>
 
-          <div className="export-option" onClick={() => handleSelect('social')} style={{ 
-            border: '2px solid #f97316',
-            background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)'
-          }}>
-            <div className="export-title" style={{ color: '#ea580c' }}>📱 Social Media Reel</div>
+          <div className="export-option" onClick={() => onSelect('social')}>
+            <div className="export-title">Social Media Reel</div>
             <div className="export-desc">
-              60-second vertical video (9:16) - <strong>center-cropped</strong> for TikTok/Instagram
+              60-second vertical video (9:16) for TikTok/Instagram
             </div>
-            <div className="export-badge" style={{ background: '#f97316' }}>Full Screen 9:16</div>
+            <div className="export-badge">Ready to Share</div>
           </div>
 
-          <div className="export-option" onClick={() => handleSelect('individual')}>
-            <div className="export-title">📦 Individual Clips</div>
+          <div className="export-option" onClick={() => onSelect('individual')}>
+            <div className="export-title">Individual Clips</div>
             <div className="export-desc">
               Download each of the {clipCount} clips as separate MP4 files
             </div>
-            <div className="export-badge" style={{ background: '#8b5cf6' }}>ZIP Archive</div>
+            <div className="export-badge">ZIP Archive</div>
           </div>
         </div>
       </div>
@@ -2170,7 +2603,7 @@ function LoadingCard({ title, message, percent, bytesLoaded, bytesTotal, startTi
       {bytesLoaded && bytesTotal && (
         <div className="loading-body" style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
           {formatBytes(bytesLoaded)} / {formatBytes(bytesTotal)}
-          {timeEstimate && <span style={{ marginLeft: '8px' }}>â€¢ {timeEstimate}</span>}
+          {timeEstimate && <span style={{ marginLeft: '8px' }}>â‚¬Â¢ {timeEstimate}</span>}
         </div>
       )}
       {(percent !== undefined && percent !== null) && (
@@ -2284,7 +2717,7 @@ Sent via Community Highlighter
         <div className="feedback-form-container card">
           <div className="feedback-header">
             <h3>Feature Request</h3>
-            <button className="btn-close-popup" onClick={() => setShowForm(false)}>âœ•</button>
+            <button className="btn-close-popup" onClick={() => setShowForm(false)}>Å“â€¢</button>
           </div>
 
           {!submitted ? (
@@ -2342,7 +2775,7 @@ Sent via Community Highlighter
 }
 
 // ============================================================================
-// 🔴 NEW v4.0 COMPONENTS: Enhanced Features
+// ”´ NEW v4.0 COMPONENTS: Enhanced Features
 // ============================================================================
 
 // New Component: Clip Preview Tooltip
@@ -2390,7 +2823,7 @@ function ClipPreview({ clip, videoId }) {
       onMouseLeave={() => setShowPreview(false)}
     >
       <div className="basket-item">
-        <div className="time">{padTime(clip.start)} â†’ {padTime(clip.end)}</div>
+        <div className="time">{padTime(clip.start)} â€ â€™ {padTime(clip.end)}</div>
         <div className="text">{clip.text}</div>
       </div>
 
@@ -2490,7 +2923,7 @@ function MeetingAssistant({ videoId, transcript, forceOpen = 0 }) {
         className="assistant-toggle"
         onClick={() => setIsOpen(!isOpen)}
       >
-        💬 AI Assistant {isOpen ? 'âœ–' : ''}
+        ’¬ AI Assistant {isOpen ? 'Å“â€“' : ''}
       </button>
 
       {isOpen && (
@@ -2643,7 +3076,7 @@ function KnowledgeBase({ currentVideoId, onSelectMeeting }) {
   return (
     <div className="knowledge-base">
       <div className="kb-header">
-        <h2>📸 Community Knowledge Base</h2>
+        <h2>“¸ Community Knowledge Base</h2>
         {kbStats && (
           <div className="kb-stats">
             <span>{kbStats.total_meetings} meetings</span>
@@ -2690,7 +3123,7 @@ function KnowledgeBase({ currentVideoId, onSelectMeeting }) {
             onClick={addCurrentMeetingToKB}
             disabled={isAddingToKB}
           >
-            {isAddingToKB ? 'Adding...' : 'âž• Add Current Meeting to Knowledge Base'}
+            {isAddingToKB ? 'Adding...' : 'Å¾â€¢ Add Current Meeting to Knowledge Base'}
           </button>
 
           {relatedMeetings.length > 0 && (
@@ -2758,11 +3191,12 @@ export default function App() {
     startTime: null
   });
 
-  // 🚀 NEW: Optimization stats state
+  // š€ NEW: Optimization stats state
   const [optimizationStats, setOptimizationStats] = useState(null);
   const [showOptimizationPanel, setShowOptimizationPanel] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
-  // 🔴 NEW v4.0: State for new features
+  // ”´ NEW v4.0: State for new features
   const [showAssistant, setShowAssistant] = useState(false);
   const [forceAssistantOpen, setForceAssistantOpen] = useState(0); // Counter to force open
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
@@ -2811,7 +3245,7 @@ export default function App() {
 
     return "";
   };
-  // 🚀 NEW: Load optimization stats on mount
+  // š€ NEW: Load optimization stats on mount
   useEffect(() => {
     const loadStats = async () => {
       try {
@@ -2918,7 +3352,7 @@ export default function App() {
           language: lang === "es" ? "es" : "en",
           model: aiModel,
           strategy: "concise",
-          video_id: vid  // 🚀 NEW: For caching
+          video_id: vid  // š€ NEW: For caching
         });
 
         let summaryText = "";
@@ -2975,7 +3409,7 @@ export default function App() {
       const ws = new WebSocket(getWebSocketUrl(`/ws/live`));
 
       ws.onopen = () => {
-        console.log("🔴 Live mode connected");
+        console.log("”´ Live mode connected");
       };
 
       ws.onmessage = (event) => {
@@ -2996,7 +3430,7 @@ export default function App() {
       };
 
       ws.onclose = () => {
-        console.log("🔴 Live mode disconnected");
+        console.log("”´ Live mode disconnected");
         setIsLiveMode(false);
       };
 
@@ -3040,7 +3474,7 @@ export default function App() {
         language: lang === "es" ? "es" : "en",
         model: aiModel,
         strategy: "detailed",
-        video_id: videoId  // 🚀 NEW: For caching
+        video_id: videoId  // š€ NEW: For caching
       });
 
       let summaryText = "";
@@ -3135,7 +3569,7 @@ export default function App() {
     setClipBasket(prev => [...prev, clip]);
   };
 
-  const exportClips = async (format, options = {}) => {
+  const exportClips = async (format) => {
     setShowExportModal(false);
 
     if (clipBasket.length === 0) {
@@ -3147,9 +3581,8 @@ export default function App() {
     setProcessStatus({
       active: true,
       message: format === 'individual' ? "Creating individual clips..." :
-        format === 'social' ? "Creating social media reel (9:16 center-crop)..." :
+        format === 'social' ? "Creating social media reel..." :
           format === 'titled' ? "Creating professional version..." :
-            options.addCaptions ? "Creating highlight reel with captions..." :
             "Creating highlight reel...",
       percent: 0
     });
@@ -3159,10 +3592,7 @@ export default function App() {
         videoId,
         clips: clipBasket,
         format: format,
-        title: videoTitle || "Community Highlight Reel",
-        addCaptions: options.addCaptions || false,
-        captionStyle: options.captionStyle || 'bottom',
-        transcript: sents // Pass transcript for captions
+        title: videoTitle || "Community Highlight Reel"
       });
       pollJobStatus(res.jobId);
     } catch (e) {
@@ -3229,7 +3659,7 @@ export default function App() {
         highlights = JSON.parse(text);
       } catch (e) {
         console.error("Failed to parse highlights JSON:", e);
-        const bullets = text.split(/\d+\.|¢|-/).filter(s => s.trim().length > 10);
+        const bullets = text.split(/\d+\.|Â¢|-/).filter(s => s.trim().length > 10);
         for (let i = 0; i < Math.min(10, bullets.length); i++) {
           highlights.push({
             highlight: bullets[i].trim().split('\n')[0],
@@ -3396,7 +3826,7 @@ export default function App() {
               background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
             }}>
               <h2 style={{ margin: 0, color: 'white', fontSize: '24px' }}>
-                🔍 Investigate: "{investigateWord.text}"
+                ” Investigate: "{investigateWord.text}"
               </h2>
               <button 
                 onClick={() => setInvestigateWord(null)}
@@ -3410,7 +3840,7 @@ export default function App() {
                   borderRadius: '8px'
                 }}
               >
-                ✕
+                âœ•
               </button>
             </div>
 
@@ -3435,7 +3865,7 @@ export default function App() {
                   color: investigateViewMode === 'news' ? 'white' : '#64748b'
                 }}
               >
-                📰 Google News
+                “° Google News
               </button>
               <button
                 onClick={() => setInvestigateViewMode('maps')}
@@ -3450,7 +3880,7 @@ export default function App() {
                   color: investigateViewMode === 'maps' ? 'white' : '#64748b'
                 }}
               >
-                🗺️ Google Maps
+                —ºï¸ Google Maps
               </button>
               <button
                 onClick={() => setInvestigateViewMode('wikipedia')}
@@ -3465,7 +3895,7 @@ export default function App() {
                   color: investigateViewMode === 'wikipedia' ? 'white' : '#64748b'
                 }}
               >
-                📚 Wikipedia
+                “š Wikipedia
               </button>
             </div>
 
@@ -3519,7 +3949,7 @@ export default function App() {
                 className="btn btn-primary"
                 style={{ textDecoration: 'none' }}
               >
-                Open in New Tab ↗
+                Open in New Tab â†—
               </a>
               <button 
                 className="btn btn-ghost" 
@@ -3532,9 +3962,6 @@ export default function App() {
         </div>
       )}
 
-      {/* v5.6: Desktop download banner - only shows in cloud mode */}
-      <DesktopAppBanner />
-      
       <header className="animate-fadeIn">
         <div className="container">
           <div className="wrap">
@@ -3552,23 +3979,28 @@ export default function App() {
               <div className="powered-section">
                 <span className="powered-text">{t.poweredBy}</span>
                 <img src="/secondary.png" alt="BIG" className="secondary-logo-large" />
-                {/* 🚀 NEW: Optimization button */}
-                {optimizationStats && (
+                {/* Feedback button */}
+                <div style={{ marginLeft: '12px', textAlign: 'center' }}>
                   <button
                     className="btn btn-ghost"
-                    onClick={() => setShowOptimizationPanel(!showOptimizationPanel)}
+                    onClick={() => setShowFeedbackModal(true)}
                     style={{
-                      marginLeft: "12px",
-                      fontSize: "13px",
-                      padding: "8px 16px",
-                      background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                      color: "white",
-                      fontWeight: "700"
+                      fontSize: '13px',
+                      padding: '8px 16px',
+                      background: '#1e7f63',
+                      color: 'white',
+                      fontWeight: '600',
+                      borderRadius: '6px',
+                      border: 'none',
+                      cursor: 'pointer'
                     }}
                   >
-                    🚀 {optimizationStats.estimated_savings?.percentage}% Savings
+                    Give Feedback
                   </button>
-                )}
+                  <div style={{ fontSize: '10px', color: '#888', marginTop: '4px' }}>
+                    This app is in BETA
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -3615,7 +4047,7 @@ export default function App() {
                 border: '2px solid #ff4444'
               }}>
                 <h3 style={{ color: '#ff4444', marginBottom: '15px' }}>
-                  🔴 LIVE MODE - Real-time Updates
+                  ”´ LIVE MODE - Real-time Updates
                 </h3>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
@@ -3786,7 +4218,7 @@ export default function App() {
                 className="btn btn-ghost"
                 onClick={() => setTranslation(prev => ({ ...prev, show: false }))}
               >
-                âœ• Close
+                Å“â€¢ Close
               </button>
             </div>
             <div className="translation-text">
@@ -3859,7 +4291,7 @@ export default function App() {
                         gap: '6px'
                       }}
                     >
-                      🔍 Investigate
+                      ” Investigate
                     </button>
                   </div>
                 )}
@@ -4038,7 +4470,7 @@ export default function App() {
             )}
 
             {videoId && (
-              <div id="video-section" className="video-section animate-slideIn">
+              <div className="video-section animate-slideIn">
                 <div style={{ fontWeight: 700, marginBottom: 12 }}>{t.videoPlayer}</div>
                 <iframe
                   ref={playerRef}
@@ -4059,61 +4491,20 @@ export default function App() {
                   {t.createReel}
                 </div>
 
-                {/* Cloud mode warning for video features */}
-                {isCloudMode && (
-                  <div style={{
-                    background: '#f5f0e6',
-                    border: '2px solid #1e7f63',
-                    borderRadius: '12px',
-                    padding: '16px',
-                    marginBottom: '16px',
-                    textAlign: 'center',
-                  }}>
-                    <div style={{ fontSize: '28px', marginBottom: '8px' }}>🎬</div>
-                    <div style={{ fontWeight: '700', color: '#1e7f63', marginBottom: '6px', fontSize: '16px' }}>
-                      Video Features Require Desktop App
-                    </div>
-                    <div style={{ color: '#4a4a4a', fontSize: '14px', marginBottom: '12px', lineHeight: '1.4' }}>
-                      YouTube blocks video downloads from cloud servers.<br/>
-                      Download the free desktop app for full video editing!
-                    </div>
-                    <button 
-                      onClick={() => window.open('https://github.com/amateurmenace/community-highlighter/releases/latest', '_blank')}
-                      style={{
-                        background: '#1e7f63',
-                        color: 'white',
-                        border: 'none',
-                        padding: '12px 24px',
-                        borderRadius: '8px',
-                        fontWeight: '700',
-                        cursor: 'pointer',
-                        fontSize: '15px',
-                        boxShadow: '0 2px 8px rgba(30, 127, 99, 0.3)',
-                      }}
-                    >
-                      ⬇️ Download Desktop App
-                    </button>
-                  </div>
-                )}
-
                 <button
                   className="btn-full-width btn-muted-primary"
                   onClick={() => buildReel('combined')}
-                  disabled={loading.reel || isCloudMode}
-                  title={isCloudMode ? "Desktop app required for video features" : ""}
-                  style={isCloudMode ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                  disabled={loading.reel}
                 >
-                  {isCloudMode ? '🔒 ' : ''}{t.buildReel}
+                  {t.buildReel}
                 </button>
 
                 <button
                   className="btn-full-width btn-muted-social"
                   onClick={() => buildReel('social')}
-                  disabled={loading.reel || isCloudMode}
-                  title={isCloudMode ? "Desktop app required for video features" : ""}
-                  style={isCloudMode ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                  disabled={loading.reel}
                 >
-                  {isCloudMode ? '🔒 ' : ''}Social Media Reel (60s)
+                  Social Media Reel (60s)
                 </button>
 
                 <button
@@ -4143,16 +4534,9 @@ export default function App() {
                 <button
                   type="button"
                   className="btn-full-width btn-muted-ghost"
-                  disabled={isCloudMode}
-                  title={isCloudMode ? "Desktop app required for video downloads" : ""}
-                  style={isCloudMode ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   onClick={async (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (isCloudMode) {
-                      alert("Video downloads require the desktop app. YouTube blocks downloads from cloud servers.");
-                      return;
-                    }
                     if (!videoId) {
                       alert("Please load a video first");
                       return;
@@ -4180,7 +4564,7 @@ export default function App() {
                     }
                   }}
                 >
-                  {isCloudMode ? '🔒 ' : ''}{t.downloadVideo}
+                  {t.downloadVideo}
                 </button>
 
                 <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -4243,13 +4627,13 @@ export default function App() {
                     setForceAssistantOpen(prev => prev + 1);
                   }}
                 >
-                  💬 AI Assistant
+                  ’¬ AI Assistant
                 </button>
                 <button
                   className="btn btn-secondary"
                   onClick={() => setShowKnowledgeBase(!showKnowledgeBase)}
                 >
-                  📸 Knowledge Base
+                  “¸ Knowledge Base
                 </button>
               </div>
             )}
@@ -4296,33 +4680,40 @@ export default function App() {
                 pad={pad}
               />
 
-              {/* NEW DATA VISUALIZATIONS */}
-              <PolicyImpactTracker
-                fullText={fullText}
-              />
-
+              {/* DATA VISUALIZATIONS */}
               <CrossReferenceNetwork
                 fullText={fullText}
                 entities={entities}
               />
 
-              <ActionItemsTimeline
-                fullText={fullText}
-              />
-
-
-              {/* Add this */}
               <ConversationDynamics
                 sents={sents}
                 playerRef={playerRef}
                 videoId={videoId}
               />
 
+              {/* v6.0: NEW FEATURES */}
+              <TopicSubscriptionsPanel
+                transcript={fullText}
+                videoId={videoId}
+                videoTitle={videoTitle}
+              />
 
+              <IssueTimelinePanel
+                transcript={fullText}
+                videoId={videoId}
+                videoTitle={videoTitle}
+                entities={entities}
+              />
 
-              {/* ADD THESE TWO */}
-              <BudgetImpactTracker
-                fullText={fullText}
+              <JargonTranslatorPanel />
+
+              <CrossMeetingAnalysisPanel
+                currentVideoId={videoId}
+                currentTitle={videoTitle}
+                currentTranscript={fullText}
+                currentEntities={entities}
+                currentSummary={summary.para}
               />
 
 
@@ -4330,7 +4721,7 @@ export default function App() {
           </section>
         )}
 
-        {/* 💬 AI Meeting Assistant */}
+        {/* ’¬ AI Meeting Assistant */}
         {showAssistant && videoId && (
           <MeetingAssistant
             videoId={videoId}
@@ -4341,7 +4732,7 @@ export default function App() {
 
       </main>
 
-      {/* 📸 Knowledge Base */}
+      {/* “¸ Knowledge Base */}
       {showKnowledgeBase && (
         <section className="card section" style={{ marginTop: '20px' }}>
           <KnowledgeBase
@@ -4356,6 +4747,8 @@ export default function App() {
         </section>
       )}
 
+      {/* v5.10: Desktop download banner - shows above footer in cloud mode */}
+      <DesktopAppBanner />
 
       <footer className="footer">
         <div className="container">
@@ -4375,12 +4768,36 @@ export default function App() {
             <div className="footer-website">
               <a href="https://weirdmachine.org" target="_blank" rel="noopener noreferrer">weirdmachine.org</a>
             </div>
+            <div style={{ marginTop: '12px' }}>
+              <a 
+                href="https://github.com/amateurmenace/community-highlighter" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 16px',
+                  background: '#24292e',
+                  color: 'white',
+                  borderRadius: '6px',
+                  textDecoration: 'none',
+                  fontSize: '13px',
+                  fontWeight: '500'
+                }}
+              >
+                <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                </svg>
+                View on GitHub
+              </a>
+            </div>
           </div>
         </div>
       </footer>
 
 
-      {/* 🚀 NEW: Optimization Panel */}
+      {/* š€ NEW: Optimization Panel */}
       {showOptimizationPanel && optimizationStats && (
         <OptimizationPanel
           stats={optimizationStats}
@@ -4396,6 +4813,11 @@ export default function App() {
             }
           }}
         />
+      )}
+
+      {/* Feedback Modal */}
+      {showFeedbackModal && (
+        <FeedbackModal onClose={() => setShowFeedbackModal(false)} />
       )}
 
 

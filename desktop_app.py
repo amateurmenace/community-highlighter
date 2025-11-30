@@ -24,7 +24,7 @@ import socket
 
 # Configuration
 APP_NAME = "Community Highlighter"
-APP_VERSION = "5.6"
+APP_VERSION = "6.0"
 DEFAULT_PORT = 8000
 WINDOW_WIDTH = 1400
 WINDOW_HEIGHT = 900

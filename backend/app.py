@@ -47,13 +47,15 @@ LIVE_CHAT_AVAILABLE = False
 
 
 def fix_brooklyn(text):
-    """Replace Brooklyn with Brookline (common transcription error)"""
+    """Replace Brooklyn with Brookline AND fix Martin Luther -> Martin Luther King"""
     if not text:
         return text
     import re
     text = re.sub(r'\bBrooklyn\b', 'Brookline', text)
     text = re.sub(r'\bBROOKLYN\b', 'BROOKLINE', text)
     text = re.sub(r'\bbrooklyn\b', 'brookline', text)
+    # v6.0: Fix Martin Luther truncation - always use full name
+    text = re.sub(r'\bMartin Luther\b(?! King)', 'Martin Luther King', text, flags=re.IGNORECASE)
     return text
 
 
@@ -218,7 +220,7 @@ MEETING_CACHE = {}  # v5.0: Meeting summaries cache  # Cache for transcripts
 
 
 # ============================================================================
-#   NEW: VECTOR DATABASE SETUP (ChromaDB for Knowledge Base)
+# Â  NEW: VECTOR DATABASE SETUP (ChromaDB for Knowledge Base)
 # ============================================================================
 
 # Initialize ChromaDB only if available
@@ -1014,11 +1016,11 @@ async def get_transcript(req: Request):
                             f" STORED {len(transcript_data)} segments (Method: YouTube Data API)"
                         )
                 except Exception as parse_error:
-                    print(f"   Could not parse YouTube Data API VTT: {parse_error}")
+                    print(f"Â   Could not parse YouTube Data API VTT: {parse_error}")
 
                 return Response(content=vtt, media_type="text/vtt")
         except Exception as e:
-            print(f"   YouTube Data API failed: {e}")
+            print(f"Â   YouTube Data API failed: {e}")
 
     # Last resort: yt-dlp
     try:
@@ -1066,10 +1068,10 @@ async def get_transcript(req: Request):
                                             f" STORED {len(transcript_data)} segments (Method: yt-dlp)"
                                         )
                                     else:
-                                        print(f"   VTT parsing returned no data")
+                                        print(f"Â   VTT parsing returned no data")
                                 except Exception as parse_error:
                                     print(
-                                        f"   Could not parse yt-dlp VTT: {parse_error}"
+                                        f"Â   Could not parse yt-dlp VTT: {parse_error}"
                                     )
 
                                 return Response(
@@ -1077,7 +1079,7 @@ async def get_transcript(req: Request):
                                 )
 
     except Exception as e:
-        print(f"   yt-dlp failed: {e}")
+        print(f"Â   yt-dlp failed: {e}")
 
     raise HTTPException(
         status_code=404,
@@ -1187,7 +1189,7 @@ async def summary_ai(req: Request):
                 all_key_points.append(key_points)
 
         if not all_key_points:
-            print("  Key point extraction failed, using fallback")
+            print("Â  Key point extraction failed, using fallback")
             if strategy == "highlights_with_quotes":
                 return {
                     "summarySentences": json.dumps(
@@ -1216,7 +1218,7 @@ async def summary_ai(req: Request):
                             "strategy": strategy,
                         }
                 except json.JSONDecodeError:
-                    print("  JSON parsing failed")
+                    print("Â  JSON parsing failed")
             else:
                 print(f" Generated summary ({len(ai_result)} chars)")
                 return {"summarySentences": ai_result, "strategy": strategy}
@@ -1282,7 +1284,7 @@ TRANSCRIPT:
             if ai_result:
                 return {"summarySentences": ai_result, "strategy": strategy}
 
-    print("  Using fallback")
+    print("Â  Using fallback")
     if strategy == "highlights_with_quotes":
         return {
             "summarySentences": json.dumps(generate_fallback_highlights(transcript)),
@@ -1548,6 +1550,9 @@ Be strict - fewer high-quality entities is better than many low-quality ones."""
                     is_valid = True
             
             if is_valid:
+                # v6.0: Fix Martin Luther -> Martin Luther King truncation
+                if text.lower() == "martin luther":
+                    text = "Martin Luther King"
                 seen.add(text.lower())
                 valid_entities.append({"text": text, "count": count, "type": entity_type})
 
@@ -2011,149 +2016,6 @@ async def get_meeting_efficiency(req: Request):
 # Video processing endpoints
 
 
-
-def get_caption_for_timestamp(transcript, start_time, end_time):
-    """Find transcript text for a given time range"""
-    captions = []
-    for seg in transcript:
-        seg_start = seg.get("start", 0)
-        seg_end = seg_start + seg.get("duration", 0)
-        # Check if segment overlaps with our time range
-        if seg_start < end_time and seg_end > start_time:
-            text = seg.get("text", "").strip()
-            if text:
-                captions.append(text)
-    return " ".join(captions)[:200]  # Limit length
-
-
-def create_caption_filter(text, style="bottom", video_height=1080):
-    """Create FFmpeg drawtext filter for captions"""
-    # Escape special characters for FFmpeg
-    escaped_text = text.replace("'", "'\''").replace(":", "\:")
-    
-    # Position based on style
-    if style == "center":
-        y_pos = "(h-text_h)/2"
-    elif style == "top":
-        y_pos = "50"
-    else:  # bottom
-        y_pos = "h-text_h-50"
-    
-    return f"drawtext=text='{escaped_text}':fontsize=48:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y={y_pos}:font=Arial"
-
-
-def simple_job_with_captions(job_id, vid, clips, format_type="combined", options=None):
-    """Process video clips with optional caption burning"""
-    if options is None:
-        options = {}
-    
-    add_captions = options.get("add_captions", False)
-    caption_style = options.get("caption_style", "bottom")
-    transcript = options.get("transcript", [])
-    
-    print(f"[simple_job_with_captions] Starting: {len(clips)} clips, captions={add_captions}")
-    
-    # If no captions needed, use the regular simple_job
-    if not add_captions:
-        return simple_job(job_id, vid, clips, format_type)
-    
-    job = JOBS[job_id]
-    job["status"] = "running"
-    job["percent"] = 5
-    job["message"] = "Downloading video..."
-
-    work = tempfile.mkdtemp()
-    
-    try:
-        video_file = os.path.join(work, "video.mp4")
-        
-        # Check cache first
-        cached_video = os.path.join(FILES_DIR, f"{vid}.mp4")
-        if os.path.exists(cached_video):
-            video_file = cached_video
-        else:
-            cmd = ["yt-dlp", "-f", "best[ext=mp4]/best", "--no-playlist", "-o", video_file,
-                   f"https://www.youtube.com/watch?v={vid}"]
-            subprocess.run(cmd, capture_output=True, timeout=600)
-        
-        if not os.path.exists(video_file):
-            raise Exception("Failed to download video")
-        
-        job["percent"] = 30
-        job["message"] = f"Processing {len(clips)} clips with captions..."
-        
-        output = os.path.join(FILES_DIR, f"captioned_{job_id[:8]}.mp4")
-        
-        # Process each clip with its caption
-        clip_files = []
-        for i, clip in enumerate(clips[:10]):
-            job["percent"] = 30 + int(50 * i / len(clips))
-            
-            start = clip.get("start", 0)
-            end = clip.get("end", start + 10)
-            duration = end - start
-            
-            # Get caption text for this clip
-            caption_text = clip.get("label", "") or get_caption_for_timestamp(transcript, start, end)
-            
-            clip_file = os.path.join(work, f"clip_{i:03d}.mp4")
-            
-            if caption_text:
-                # Create clip with burned-in caption
-                caption_filter = create_caption_filter(caption_text, caption_style)
-                cmd = [
-                    "ffmpeg", "-i", video_file,
-                    "-ss", str(start), "-t", str(duration),
-                    "-vf", caption_filter,
-                    "-c:v", "libx264", "-preset", "fast", "-c:a", "aac",
-                    clip_file, "-y"
-                ]
-            else:
-                # No caption, just cut
-                cmd = [
-                    "ffmpeg", "-i", video_file,
-                    "-ss", str(start), "-t", str(duration),
-                    "-c:v", "libx264", "-preset", "fast", "-c:a", "aac",
-                    clip_file, "-y"
-                ]
-            
-            subprocess.run(cmd, capture_output=True)
-            
-            if os.path.exists(clip_file):
-                clip_files.append(clip_file)
-        
-        # Concatenate all clips
-        if clip_files:
-            concat_file = os.path.join(work, "concat.txt")
-            with open(concat_file, "w") as f:
-                for cf in clip_files:
-                    f.write(f"file '{cf}'\n")
-            
-            cmd = ["ffmpeg", "-f", "concat", "-safe", "0", "-i", concat_file,
-                   "-c", "copy", output, "-y"]
-            subprocess.run(cmd, capture_output=True)
-        
-        if os.path.exists(output):
-            file_size = os.path.getsize(output)
-            job["status"] = "done"
-            job["message"] = "Ready to download!"
-            job["file"] = f"/files/{os.path.basename(output)}"
-            job["percent"] = 100
-            print(f"[simple_job_with_captions] SUCCESS: {output}")
-        else:
-            raise Exception("Failed to create output")
-            
-    except Exception as e:
-        print(f"[simple_job_with_captions] ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-        job["status"] = "error"
-        job["message"] = str(e)[:200]
-    finally:
-        if work != FILES_DIR:
-            shutil.rmtree(work, ignore_errors=True)
-
-
 def simple_job(job_id, vid, clips, format_type="combined"):
     """Process video clips into various output formats"""
     job = JOBS[job_id]
@@ -2242,8 +2104,6 @@ def simple_job(job_id, vid, clips, format_type="combined"):
 
             if selected_clips:
                 start = selected_clips[0].get("start", 0)
-                # Center-crop to 9:16 instead of letterboxing
-                # This scales up and crops from center to fill the full 9:16 frame
                 cmd = [
                     "ffmpeg",
                     "-i",
@@ -2253,7 +2113,7 @@ def simple_job(job_id, vid, clips, format_type="combined"):
                     "-t",
                     "60",
                     "-vf",
-                    "scale=1920:1080,crop=607:1080:656:0,scale=1080:1920",
+                    "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
                     "-c:v",
                     "libx264",
                     "-preset",
@@ -2263,10 +2123,7 @@ def simple_job(job_id, vid, clips, format_type="combined"):
                     output,
                     "-y",
                 ]
-                print(f"[simple_job] Creating 9:16 center-cropped social reel")
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode != 0:
-                    print(f"[simple_job] FFmpeg social error: {result.stderr[:500]}")
+                subprocess.run(cmd, capture_output=True)
 
         else:
             output = os.path.join(FILES_DIR, f"highlight_{job_id[:8]}.mp4")
@@ -2344,7 +2201,7 @@ def simple_job(job_id, vid, clips, format_type="combined"):
 
 @app.post("/api/render_clips")
 async def render_clips(req: Request):
-    """Render video clips in various formats with optional captions"""
+    """Render video clips in various formats"""
     if CLOUD_MODE:
         return {
             "error": "Video clip download is not available in cloud mode",
@@ -2357,9 +2214,6 @@ async def render_clips(req: Request):
     clips = data.get("clips", [])
     format_type = data.get("format", "combined")
     title = data.get("title", "Highlight Reel")
-    add_captions = data.get("addCaptions", False)
-    caption_style = data.get("captionStyle", "bottom")
-    transcript = data.get("transcript", [])
     
     if not vid:
         return {"error": "No video ID provided", "jobId": None}
@@ -2367,7 +2221,7 @@ async def render_clips(req: Request):
     if not clips:
         return {"error": "No clips provided", "jobId": None}
     
-    print(f"[render_clips] Starting job: {len(clips)} clips, format={format_type}, captions={add_captions}")
+    print(f"[render_clips] Starting job: {len(clips)} clips, format={format_type}")
 
     job_id = str(uuid.uuid4())
     JOBS[job_id] = {
@@ -2376,18 +2230,10 @@ async def render_clips(req: Request):
         "message": f"Starting {format_type} render with {len(clips)} clips..."
     }
 
-    # Pass caption options to simple_job
-    job_options = {
-        "add_captions": add_captions,
-        "caption_style": caption_style,
-        "transcript": transcript,
-        "title": title
-    }
-
     threading.Thread(
-        target=simple_job_with_captions, args=(job_id, vid, clips, format_type, job_options), daemon=True
+        target=simple_job, args=(job_id, vid, clips, format_type), daemon=True
     ).start()
-    return {"jobId": job_id, "format": format_type, "clipCount": len(clips), "captions": add_captions}
+    return {"jobId": job_id, "format": format_type, "clipCount": len(clips)}
 
 
 @app.get("/api/job_status")
@@ -2677,7 +2523,7 @@ async def analyze_chat_sentiment(req: Request):
     url = f"https://www.youtube.com/watch?v={video_id}"
 
     try:
-        print(f"  Analyzing chat sentiment for: {video_id}")
+        print(f"Â  Analyzing chat sentiment for: {video_id}")
         chat = ChatDownloader().get_chat(url, max_messages=max_messages)
 
         sentiments = []
@@ -2832,7 +2678,7 @@ async def chat_statistics(req: Request):
     url = f"https://www.youtube.com/watch?v={video_id}"
 
     try:
-        print(f"  Gathering chat statistics for: {video_id}")
+        print(f"Â  Gathering chat statistics for: {video_id}")
         chat = ChatDownloader().get_chat(url, max_messages=max_messages)
 
         total_messages = 0
@@ -2903,7 +2749,7 @@ async def get_optimization_stats():
             "estimated_savings": {
                 "percentage": 92,
                 "per_video": "$6.00",
-                "description": "Original $6.50/video   $0.50/video",
+                "description": "Original $6.50/video Â  $0.50/video",
             },
         }
     except Exception as e:
@@ -3024,7 +2870,7 @@ async def start_live_monitoring(req: Request):
 
 
 # ============================================================================
-# [*]Å¡â‚¬ NEW: AI MEETING ASSISTANT (RAG-based Chat) (v4.0)
+# [*]Ã…Â¡Ã¢â€šÂ¬ NEW: AI MEETING ASSISTANT (RAG-based Chat) (v4.0)
 # ============================================================================
 
 
@@ -3063,12 +2909,12 @@ async def chat_with_meeting(req: Request):
             # Get transcript from cache or fetch it
             if meeting_id in STORED_TRANSCRIPTS:
                 transcript_data = STORED_TRANSCRIPTS[meeting_id]
-                print(f"✅ Using cached transcript: {len(transcript_data)} segments")
+                print(f"âœ… Using cached transcript: {len(transcript_data)} segments")
             else:
                 try:
                     transcript_data = ytt_api.fetch(meeting_id).to_raw_data()
                     STORED_TRANSCRIPTS[meeting_id] = transcript_data
-                    print(f"✅ Fetched and cached {len(transcript_data)} segments")
+                    print(f"âœ… Fetched and cached {len(transcript_data)} segments")
                 except Exception as e:
                     return {
                         "answer": "I can't access the transcript for this video. Please make sure the video has captions enabled.",
@@ -3116,7 +2962,7 @@ async def chat_with_meeting(req: Request):
                 "we_vs_i": "multiple speakers likely" if we_count > i_count * 2 else "possibly single speaker or interview",
             }
             
-            print(f"📊 Transcript stats: {transcript_stats}")
+            print(f"ðŸ“Š Transcript stats: {transcript_stats}")
         
         else:
             return {
@@ -3138,10 +2984,10 @@ async def chat_with_meeting(req: Request):
                 "\n\n[... end of meeting ...]\n\n" +
                 full_transcript[-third:]
             )
-            print(f"📝 Using condensed transcript: {len(context_transcript)} chars (from {len(full_transcript)})")
+            print(f"ðŸ“ Using condensed transcript: {len(context_transcript)} chars (from {len(full_transcript)})")
         else:
             context_transcript = full_transcript
-            print(f"📝 Using full transcript: {len(context_transcript)} chars")
+            print(f"ðŸ“ Using full transcript: {len(context_transcript)} chars")
 
         # BUILD CONVERSATION CONTEXT
         conv_context = ""
@@ -3198,7 +3044,7 @@ User's question: {query}"""
         )
 
         answer = completion.choices[0].message.content
-        print(f"✅ Generated response: {len(answer)} chars")
+        print(f"âœ… Generated response: {len(answer)} chars")
 
         # Generate contextual follow-up suggestions
         follow_ups = []
@@ -3221,7 +3067,7 @@ User's question: {query}"""
         }
 
     except Exception as e:
-        print(f"❌ Chat error: {e}")
+        print(f"âŒ Chat error: {e}")
         import traceback
         print(traceback.format_exc())
         return {
@@ -3346,7 +3192,7 @@ Rules:
                     # Fallback if AI didn't generate enough questions
                     if len(suggestions) < 3:
                         print(
-                            f"   AI generated only {len(suggestions)} questions, adding fallbacks"
+                            f"Â   AI generated only {len(suggestions)} questions, adding fallbacks"
                         )
                         suggestions.extend(
                             [
@@ -3362,7 +3208,7 @@ Rules:
 
                 except Exception as e:
                     print(
-                        f"   AI suggestion generation failed: {e}, using keyword-based fallback"
+                        f"Â   AI suggestion generation failed: {e}, using keyword-based fallback"
                     )
                     # Fall through to keyword-based method below
 
@@ -3448,7 +3294,7 @@ Rules:
 
         else:
             print(
-                f"   No cached transcript for {meeting_id}, returning generic suggestions"
+                f"Â   No cached transcript for {meeting_id}, returning generic suggestions"
             )
             print(f"   Available cache keys: {list(STORED_TRANSCRIPTS.keys())}")
 
@@ -3482,7 +3328,7 @@ Rules:
 
 
 # ============================================================================
-# [*]Å¡â‚¬ NEW: COMMUNITY KNOWLEDGE BASE (v4.0)
+# [*]Ã…Â¡Ã¢â€šÂ¬ NEW: COMMUNITY KNOWLEDGE BASE (v4.0)
 # ============================================================================
 
 
@@ -3990,6 +3836,250 @@ async def get_clip_preview(req: Request):
         raise HTTPException(500, f"Failed to get preview: {str(e)}")
 
 
+# ============================================================================
+# v6.0: NEW FEATURE ENDPOINTS
+# ============================================================================
+
+# Data storage for new features (in-memory, use database for production)
+TOPIC_SUBSCRIPTIONS = {}  # {user_id: {topic: {email, frequency, created_at}}}
+ISSUE_TIMELINES = {}  # {issue_id: {name, meetings: [{video_id, date, summary}]}}
+JARGON_DICTIONARY = {
+    "TIF": "Tax Increment Financing - A special zone where property tax increases fund local improvements",
+    "CIP": "Capital Improvement Plan - A multi-year plan for major infrastructure investments",
+    "RFP": "Request for Proposal - A formal document asking vendors to submit bids for a project",
+    "variance": "Permission to deviate from zoning rules for a specific property",
+    "setback": "Required distance between a building and property lines",
+    "FAR": "Floor Area Ratio - The ratio of building floor space to lot size",
+    "quorum": "The minimum number of members needed to conduct official business",
+    "motion": "A formal proposal for the group to take action on something",
+    "second": "Support from another member needed before a motion can be discussed",
+    "table": "To postpone discussion of an item to a later time",
+    "amend": "To change or modify a motion before voting on it",
+    "overlay district": "Additional zoning rules layered on top of base zoning",
+    "inclusionary zoning": "Rules requiring new developments to include affordable housing",
+    "PILOT": "Payment In Lieu Of Taxes - Negotiated payments from tax-exempt organizations",
+    "eminent domain": "Government power to take private property for public use with fair compensation",
+}
+
+# Topic Subscriptions
+@app.post("/api/subscriptions/create")
+async def create_subscription(req: Request):
+    data = await req.json()
+    topic = data.get("topic", "").strip()
+    email = data.get("email", "")
+    frequency = data.get("frequency", "instant")
+    user_id = "default_user"
+    
+    if not topic:
+        raise HTTPException(400, "Topic is required")
+    
+    if user_id not in TOPIC_SUBSCRIPTIONS:
+        TOPIC_SUBSCRIPTIONS[user_id] = {}
+    
+    TOPIC_SUBSCRIPTIONS[user_id][topic] = {
+        "email": email,
+        "frequency": frequency,
+        "created_at": datetime.now().isoformat(),
+        "match_count": 0
+    }
+    return {"status": "subscribed", "topic": topic}
+
+@app.get("/api/subscriptions/list")
+async def list_subscriptions():
+    user_id = "default_user"
+    subs = TOPIC_SUBSCRIPTIONS.get(user_id, {})
+    return {"subscriptions": [{"topic": k, **v} for k, v in subs.items()]}
+
+@app.delete("/api/subscriptions/delete")
+async def delete_subscription(req: Request):
+    data = await req.json()
+    topic = data.get("topic")
+    user_id = "default_user"
+    
+    if user_id in TOPIC_SUBSCRIPTIONS and topic in TOPIC_SUBSCRIPTIONS[user_id]:
+        del TOPIC_SUBSCRIPTIONS[user_id][topic]
+    return {"status": "unsubscribed", "topic": topic}
+
+@app.post("/api/subscriptions/check_matches")
+async def check_subscription_matches(req: Request):
+    data = await req.json()
+    transcript = data.get("transcript", "")
+    user_id = "default_user"
+    
+    matches = []
+    subs = TOPIC_SUBSCRIPTIONS.get(user_id, {})
+    
+    for topic, sub_data in subs.items():
+        if topic.lower() in transcript.lower():
+            idx = transcript.lower().find(topic.lower())
+            context = transcript[max(0, idx-50):idx+len(topic)+50]
+            matches.append({"topic": topic, "context": f"...{context}..."})
+            TOPIC_SUBSCRIPTIONS[user_id][topic]["match_count"] = sub_data.get("match_count", 0) + 1
+    
+    return {"matches": matches}
+
+# Issue Timeline
+@app.post("/api/issues/create")
+async def create_issue(req: Request):
+    data = await req.json()
+    name = data.get("name", "").strip()
+    
+    if not name:
+        raise HTTPException(400, "Issue name is required")
+    
+    issue_id = str(uuid.uuid4())[:8]
+    ISSUE_TIMELINES[issue_id] = {
+        "id": issue_id,
+        "name": name,
+        "keywords": data.get("keywords", []),
+        "meetings": [],
+        "created_at": datetime.now().isoformat()
+    }
+    return {"status": "created", "issue_id": issue_id, "name": name}
+
+@app.get("/api/issues/list")
+async def list_issues():
+    return {"issues": list(ISSUE_TIMELINES.values())}
+
+@app.post("/api/issues/add_meeting")
+async def add_meeting_to_issue(req: Request):
+    data = await req.json()
+    issue_id = data.get("issue_id")
+    
+    if issue_id not in ISSUE_TIMELINES:
+        raise HTTPException(404, "Issue not found")
+    
+    meeting = {
+        "video_id": data.get("video_id"),
+        "video_title": data.get("video_title"),
+        "date": datetime.now().isoformat(),
+        "summary": data.get("summary", ""),
+        "decisions": data.get("decisions", [])
+    }
+    ISSUE_TIMELINES[issue_id]["meetings"].append(meeting)
+    return {"status": "added", "issue_id": issue_id}
+
+@app.post("/api/issues/auto_track")
+async def auto_track_issue(req: Request):
+    data = await req.json()
+    issue_id = data.get("issue_id")
+    transcript = data.get("transcript", "")
+    
+    if issue_id not in ISSUE_TIMELINES:
+        raise HTTPException(404, "Issue not found")
+    
+    issue = ISSUE_TIMELINES[issue_id]
+    name_lower = issue["name"].lower()
+    mention_count = transcript.lower().count(name_lower)
+    
+    return {
+        "issue_id": issue_id,
+        "issue_name": issue["name"],
+        "mention_count": mention_count,
+        "ai_summary": f"Issue '{issue['name']}' was mentioned {mention_count} times in this meeting.",
+        "ai_decisions": []
+    }
+
+@app.get("/api/issues/{issue_id}/timeline")
+async def get_issue_timeline(issue_id: str):
+    if issue_id not in ISSUE_TIMELINES:
+        raise HTTPException(404, "Issue not found")
+    return ISSUE_TIMELINES[issue_id]
+
+# Meeting Comparison
+@app.post("/api/compare/meetings")
+async def compare_meetings(req: Request):
+    data = await req.json()
+    meeting1 = data.get("meeting1", {})
+    meeting2 = data.get("meeting2", {})
+    
+    # Extract entities/topics from both meetings
+    entities1 = set(e.get("text", "").lower() for e in meeting1.get("entities", []))
+    entities2 = set(e.get("text", "").lower() for e in meeting2.get("entities", []))
+    
+    new_topics = list(entities1 - entities2)[:15]
+    ongoing_topics = list(entities1 & entities2)[:15]
+    resolved_topics = list(entities2 - entities1)[:15]
+    
+    return {
+        "new_topics": new_topics,
+        "ongoing_topics": ongoing_topics,
+        "resolved_topics": resolved_topics,
+        "evolution_summary": f"The current meeting introduces {len(new_topics)} new topics while {len(ongoing_topics)} topics continue from the previous meeting."
+    }
+
+# Jargon Translator
+@app.post("/api/jargon/explain")
+async def explain_jargon(req: Request):
+    data = await req.json()
+    term = data.get("term", "").strip()
+    
+    if not term:
+        raise HTTPException(400, "Term is required")
+    
+    # Check dictionary first
+    for key, explanation in JARGON_DICTIONARY.items():
+        if key.lower() == term.lower():
+            return {"term": key, "explanation": explanation, "source": "dictionary"}
+    
+    # Fallback explanation
+    return {
+        "term": term,
+        "explanation": f"'{term}' is a civic or government term. For an accurate definition, please consult your local government's glossary or ask the meeting administrator.",
+        "source": "fallback"
+    }
+
+@app.get("/api/jargon/dictionary")
+async def get_jargon_dictionary():
+    return {"terms": [{"term": k, "explanation": v} for k, v in JARGON_DICTIONARY.items()]}
+
+# Knowledge Graph
+@app.post("/api/graph/build")
+async def build_knowledge_graph(req: Request):
+    data = await req.json()
+    meetings_data = data.get("meetings_data", [])
+    
+    nodes = []
+    edges = []
+    entity_meetings = {}
+    
+    for meeting in meetings_data:
+        meeting_id = f"meeting_{meeting.get('video_id')}"
+        nodes.append({"id": meeting_id, "label": meeting.get("title", "Unknown"), "type": "meeting"})
+        
+        for entity in meeting.get("entities", []):
+            entity_text = entity.get("text", "").lower()
+            entity_id = f"entity_{entity_text.replace(' ', '_')}"
+            
+            if entity_id not in entity_meetings:
+                entity_meetings[entity_id] = {"text": entity.get("text"), "meetings": []}
+                nodes.append({"id": entity_id, "label": entity.get("text"), "type": entity.get("type", "unknown")})
+            
+            entity_meetings[entity_id]["meetings"].append(meeting_id)
+            edges.append({"source": meeting_id, "target": entity_id})
+    
+    # Find shared entities
+    shared_entities = []
+    for entity_id, data in entity_meetings.items():
+        if len(data["meetings"]) > 1:
+            shared_entities.append({"name": data["text"], "meeting_count": len(data["meetings"])})
+    
+    cross_connections = sum(1 for e in entity_meetings.values() if len(e["meetings"]) > 1)
+    
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "shared_entities": sorted(shared_entities, key=lambda x: x["meeting_count"], reverse=True),
+        "stats": {
+            "total_nodes": len(nodes),
+            "total_edges": len(edges),
+            "cross_meeting_connections": cross_connections
+        }
+    }
+
+# ============================================================================
+# END v6.0 NEW FEATURE ENDPOINTS
+# ============================================================================
 
 
 # ============================================================================

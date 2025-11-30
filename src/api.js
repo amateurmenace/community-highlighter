@@ -1,8 +1,8 @@
 // ============================================================================
 // api.js - Community Highlighter API Client v4.0
 // ============================================================================
-// Ã¢Å“â€¦ All existing functions preserved
-// Ã¢Å“â€¦ New functions for enhanced features added
+// ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ All existing functions preserved
+// ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ New functions for enhanced features added
 // ============================================================================
 
 const BACKEND_URL = ""; // v5.0: Use relative URLs for deployment
@@ -202,7 +202,7 @@ export async function apiClearCache(videoId = null) {
 }
 
 // ============================================================================
-// Ã°Å¸â€Â´ NEW: LIVE MEETING MODE APIs
+// ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â´ NEW: LIVE MEETING MODE APIs
 // ============================================================================
 
 /**
@@ -224,7 +224,7 @@ export async function apiStartLiveMonitoring(data) {
 }
 
 // ============================================================================
-// Ã°Å¸â€™Â¬ NEW: AI MEETING ASSISTANT APIs
+// ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â¬ NEW: AI MEETING ASSISTANT APIs
 // ============================================================================
 
 /**
@@ -264,7 +264,7 @@ export async function apiChatSuggestions(data) {
 }
 
 // ============================================================================
-// Ã°Å¸Ââ€ºÃ¯Â¸Â NEW: KNOWLEDGE BASE APIs
+// ÃƒÂ°Ã…Â¸Ã‚ÂÃ¢â‚¬ÂºÃƒÂ¯Ã‚Â¸Ã‚Â NEW: KNOWLEDGE BASE APIs
 // ============================================================================
 
 /**
@@ -335,7 +335,7 @@ export async function apiKnowledgeBaseStats() {
 }
 
 // ============================================================================
-// Ã°Å¸â€œÅ½ NEW: CLIP PREVIEW API
+// ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã…Â½ NEW: CLIP PREVIEW API
 // ============================================================================
 
 /**
@@ -357,7 +357,7 @@ export async function apiClipPreview(data) {
 }
 
 // ============================================================================
-// Ã°Å¸â€™Â¬ LIVE CHAT APIs (PRESERVED)
+// ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â¬ LIVE CHAT APIs (PRESERVED)
 // ============================================================================
 
 export async function apiLiveChatMessages(data) {
@@ -477,4 +477,127 @@ export async function apiCall(endpoint, options = {}) {
   
   const response = await fetch(url, config);
   return handleApiError(response, `API call to ${endpoint} failed`);
+}
+
+// ============================================================================
+// v6.0: NEW FEATURE API CALLS
+// ============================================================================
+
+// Topic Subscriptions
+export async function apiCreateSubscription(data) {
+  const res = await fetch(`${BACKEND_URL}/api/subscriptions/create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function apiListSubscriptions() {
+  const res = await fetch(`${BACKEND_URL}/api/subscriptions/list`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function apiDeleteSubscription(data) {
+  const res = await fetch(`${BACKEND_URL}/api/subscriptions/delete`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function apiCheckSubscriptionMatches(data) {
+  const res = await fetch(`${BACKEND_URL}/api/subscriptions/check_matches`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// Issue Timeline
+export async function apiCreateIssue(data) {
+  const res = await fetch(`${BACKEND_URL}/api/issues/create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function apiListIssues() {
+  const res = await fetch(`${BACKEND_URL}/api/issues/list`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function apiAddMeetingToIssue(data) {
+  const res = await fetch(`${BACKEND_URL}/api/issues/add_meeting`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function apiAutoTrackIssue(data) {
+  const res = await fetch(`${BACKEND_URL}/api/issues/auto_track`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function apiGetIssueTimeline(issueId) {
+  const res = await fetch(`${BACKEND_URL}/api/issues/${issueId}/timeline`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// Meeting Comparison
+export async function apiCompareMeetings(data) {
+  const res = await fetch(`${BACKEND_URL}/api/compare/meetings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// Jargon Translator
+export async function apiExplainJargon(data) {
+  const res = await fetch(`${BACKEND_URL}/api/jargon/explain`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function apiGetJargonDictionary() {
+  const res = await fetch(`${BACKEND_URL}/api/jargon/dictionary`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// Knowledge Graph
+export async function apiBuildKnowledgeGraph(data) {
+  const res = await fetch(`${BACKEND_URL}/api/graph/build`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }
