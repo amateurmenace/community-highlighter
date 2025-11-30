@@ -45,20 +45,6 @@ except ImportError:
 # Live Chat Support - disabled in v5.2
 LIVE_CHAT_AVAILABLE = False
 
-
-def fix_brooklyn(text):
-    """Replace Brooklyn with Brookline AND fix Martin Luther -> Martin Luther King"""
-    if not text:
-        return text
-    import re
-    text = re.sub(r'\bBrooklyn\b', 'Brookline', text)
-    text = re.sub(r'\bBROOKLYN\b', 'BROOKLINE', text)
-    text = re.sub(r'\bbrooklyn\b', 'brookline', text)
-    # v6.0: Fix Martin Luther truncation - always use full name
-    text = re.sub(r'\bMartin Luther\b(?! King)', 'Martin Luther King', text, flags=re.IGNORECASE)
-    return text
-
-
 # AI Optimization Support (optional)
 try:
     from ai_cache import cached_ai_analysis, get_cache_stats, clear_cache
@@ -106,16 +92,6 @@ else:
     ytt_api = YouTubeTranscriptApi()
     PROXY_ENABLED = False
 
-# Cloud deployment mode - disables video download features (yt-dlp blocked by YouTube)
-# Set CLOUD_MODE=true in Render to enable this
-CLOUD_MODE = os.getenv("CLOUD_MODE", "false").lower() == "true"
-if CLOUD_MODE:
-    print("[!] CLOUD_MODE enabled - video download/clip features disabled")
-    print("    (Transcripts, AI analysis, and all analytics still work!)")
-
-
-# Define BASE_DIR early for static files
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = FastAPI()
 app.add_middleware(
@@ -126,86 +102,28 @@ app.add_middleware(
 )
 
 # Serve static files from React build (for production)
-# Check multiple possible locations for dist folder
-def find_dist_dir():
-    """Find the dist directory in various possible locations"""
-    # Get the directory containing this script
-    script_dir = BASE_DIR
+if os.path.exists("dist"):
+    app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
     
-    candidates = [
-        os.path.join(script_dir, "dist"),                    # Same dir as app.py (backend/dist)
-        os.path.join(os.path.dirname(script_dir), "dist"),   # Parent dir (community-highlighter-V21/dist)
-        os.path.abspath("dist"),                              # Current working dir
-        os.path.join(script_dir, "..", "dist"),              # Relative parent
-    ]
+    @app.get("/")
+    async def serve_react_app():
+        return FileResponse("dist/index.html")
     
-    print(f"[DEBUG] Script directory: {script_dir}")
-    print(f"[DEBUG] Searching for dist folder in:")
-    
-    for candidate in candidates:
-        abs_candidate = os.path.abspath(candidate)
-        exists = os.path.exists(abs_candidate)
-        has_assets = os.path.exists(os.path.join(abs_candidate, "assets")) if exists else False
-        print(f"  - {abs_candidate} (exists={exists}, has_assets={has_assets})")
+    @app.get("/{full_path:path}")
+    async def serve_react_app_catchall(full_path: str):
+        # Check if it's an API route
+        if full_path.startswith("api/"):
+            raise HTTPException(404, "API endpoint not found")
         
-        if exists and has_assets:
-            # List the assets to verify
-            assets_dir = os.path.join(abs_candidate, "assets")
-            try:
-                files = os.listdir(assets_dir)
-                print(f"    Found {len(files)} files in assets/")
-                for f in files[:5]:  # Show first 5
-                    print(f"      - {f}")
-                if len(files) > 5:
-                    print(f"      ... and {len(files) - 5} more")
-            except Exception as e:
-                print(f"    Error listing assets: {e}")
-            return abs_candidate
-    
-    return None
-
-DIST_DIR = find_dist_dir()
-
-if DIST_DIR:
-    print(f"[OK] Using dist folder: {DIST_DIR}")
-    DIST_ASSETS_DIR = os.path.join(DIST_DIR, "assets")
-    
-    # Mount assets FIRST
-    try:
-        # List what files exist in assets
-        print(f"[DEBUG] Assets directory: {DIST_ASSETS_DIR}")
-        if os.path.exists(DIST_ASSETS_DIR):
-            asset_files = os.listdir(DIST_ASSETS_DIR)
-            print(f"[DEBUG] Found {len(asset_files)} asset files:")
-            for f in sorted(asset_files)[:10]:
-                fpath = os.path.join(DIST_ASSETS_DIR, f)
-                fsize = os.path.getsize(fpath) if os.path.isfile(fpath) else 0
-                print(f"        - {f} ({fsize:,} bytes)")
-            if len(asset_files) > 10:
-                print(f"        ... and {len(asset_files) - 10} more files")
-        else:
-            print(f"[ERROR] Assets directory does not exist!")
+        # Check if it's a static file (logo, favicon, etc.)
+        static_path = os.path.join("dist", full_path)
+        if os.path.isfile(static_path):
+            return FileResponse(static_path)
         
-        app.mount("/assets", StaticFiles(directory=DIST_ASSETS_DIR), name="assets")
-        print(f"[OK] Mounted /assets -> {DIST_ASSETS_DIR}")
-    except Exception as e:
-        print(f"[ERROR] Failed to mount assets: {e}")
-        import traceback
-        traceback.print_exc()
-    
-    # Also mount the whole dist folder for other static files (favicon, etc.)
-    try:
-        app.mount("/static", StaticFiles(directory=DIST_DIR), name="static")
-        print(f"[OK] Mounted /static -> {DIST_DIR}")
-    except Exception as e:
-        print(f"[ERROR] Failed to mount static: {e}")
-    
-    print("[OK] React catch-all routes will be registered at end of file")
-else:
-    print("[!] No dist folder found - frontend not available")
-    print("[!] Make sure to run 'npm run build' from the project root")
-    print(f"[!] BASE_DIR is: {BASE_DIR}")
+        # Otherwise serve the React app
+        return FileResponse("dist/index.html")
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FILES_DIR = os.path.join(BASE_DIR, "cache")
 os.makedirs(FILES_DIR, exist_ok=True)
 
@@ -220,7 +138,7 @@ MEETING_CACHE = {}  # v5.0: Meeting summaries cache  # Cache for transcripts
 
 
 # ============================================================================
-# Â  NEW: VECTOR DATABASE SETUP (ChromaDB for Knowledge Base)
+#   NEW: VECTOR DATABASE SETUP (ChromaDB for Knowledge Base)
 # ============================================================================
 
 # Initialize ChromaDB only if available
@@ -788,17 +706,10 @@ def get_video_id(url):
 
 
 @app.get("/")
-async def root():
-    """Serve React app at root"""
-    if DIST_DIR:
-        index_path = os.path.join(DIST_DIR, "index.html")
-        if os.path.exists(index_path):
-            return FileResponse(index_path)
-    # Fallback to API info if no frontend
+def root():
     return {
         "message": "Community Highlighter API v5.0 - Enhanced AI Assistant",
         "status": "running",
-        "note": "No frontend dist folder found"
     }
 
 
@@ -807,67 +718,11 @@ async def health_check():
     """Health check endpoint for deployment monitoring"""
     return {
         "status": "healthy",
-        "version": "5.5",
-        "cloud_mode": CLOUD_MODE,
-        "proxy_enabled": PROXY_ENABLED,
+        "version": "5.0",
         "features": {
-            "transcripts": True,
             "ai_assistant": bool(OPENAI_API_KEY),
-            "ai_summaries": bool(OPENAI_API_KEY),
-            "entity_extraction": bool(OPENAI_API_KEY),
-            "word_frequency": True,
-            "sentiment_analysis": True,
-            "knowledge_base": CHROMADB_AVAILABLE,
-            "video_clips": not CLOUD_MODE,
-            "video_download": not CLOUD_MODE,
+            "knowledge_base": True,
             "live_mode": False
-        },
-        "notes": "Video download features disabled in cloud mode (YouTube blocks cloud IPs)" if CLOUD_MODE else None
-    }
-
-
-@app.get("/api/system/status")
-async def system_status():
-    """Detailed system status including desktop download information"""
-    return {
-        "version": "5.5",
-        "environment": "cloud" if CLOUD_MODE else "desktop",
-        "cloud_mode": CLOUD_MODE,
-        "proxy_enabled": PROXY_ENABLED,
-        "features": {
-            "transcripts": {"available": True, "description": "Fetch YouTube video transcripts"},
-            "ai_analysis": {"available": bool(OPENAI_API_KEY), "description": "AI-powered summaries and insights"},
-            "entity_extraction": {"available": bool(OPENAI_API_KEY), "description": "Extract people, places, organizations"},
-            "word_frequency": {"available": True, "description": "Analyze common words and phrases"},
-            "sentiment_analysis": {"available": True, "description": "Analyze sentiment over time"},
-            "action_items": {"available": bool(OPENAI_API_KEY), "description": "Extract action items and decisions"},
-            "knowledge_base": {"available": CHROMADB_AVAILABLE, "description": "Compare multiple meetings"},
-            "video_clips": {
-                "available": not CLOUD_MODE,
-                "description": "Download and create video clips",
-                "cloud_note": "Requires desktop app - YouTube blocks cloud servers" if CLOUD_MODE else None
-            },
-            "highlight_reels": {
-                "available": not CLOUD_MODE,
-                "description": "Create highlight compilation videos",
-                "cloud_note": "Requires desktop app - YouTube blocks cloud servers" if CLOUD_MODE else None
-            }
-        },
-        "desktop_app": {
-            "required_for": ["video_clips", "highlight_reels"] if CLOUD_MODE else [],
-            "download_url": "https://github.com/amateurmenace/community-highlighter/releases",
-            "platforms": {
-                "mac": {
-                    "name": "macOS",
-                    "filename": "CommunityHighlighter-mac.zip",
-                    "requirements": "macOS 10.15 or later"
-                },
-                "windows": {
-                    "name": "Windows",
-                    "filename": "CommunityHighlighter-windows.zip",
-                    "requirements": "Windows 10 or later"
-                }
-            }
         }
     }
 
@@ -969,20 +824,26 @@ async def get_transcript(req: Request):
                 await asyncio.sleep(wait_time)
             
             print("   Trying YouTubeTranscriptApi...")
-            if PROXY_ENABLED:
-                print("   Using Webshare residential proxy")
-            
-            # New v1.0+ API: use fetch() directly, returns FetchedTranscript object
-            # Convert to dict list with .to_raw_data()
-            fetched_transcript = ytt_api.fetch(video_id, languages=['en'])
-            transcript_data = fetched_transcript.to_raw_data()
+            transcript_list = ytt_api.list_transcripts(video_id)
 
-            # Store for AI assistant
-            STORED_TRANSCRIPTS[video_id] = transcript_data
-            print(f"[OK] STORED {len(transcript_data)} segments (YouTubeTranscriptApi)")
+            transcript = None
+            for t in transcript_list:
+                if t.language_code.startswith("en"):
+                    transcript = t
+                    break
 
-            vtt = to_vtt(transcript_data)
-            return Response(content=vtt, media_type="text/vtt")
+            if not transcript:
+                transcript = next(iter(transcript_list))
+
+            if transcript:
+                transcript_data = transcript.fetch()
+
+                # Store for AI assistant
+                STORED_TRANSCRIPTS[video_id] = transcript_data
+                print(f"[OK] STORED {len(transcript_data)} segments (YouTubeTranscriptApi)")
+
+                vtt = to_vtt(transcript_data)
+                return Response(content=vtt, media_type="text/vtt")
 
         except Exception as e:
             last_error = e
@@ -1016,11 +877,11 @@ async def get_transcript(req: Request):
                             f" STORED {len(transcript_data)} segments (Method: YouTube Data API)"
                         )
                 except Exception as parse_error:
-                    print(f"Â   Could not parse YouTube Data API VTT: {parse_error}")
+                    print(f"   Could not parse YouTube Data API VTT: {parse_error}")
 
                 return Response(content=vtt, media_type="text/vtt")
         except Exception as e:
-            print(f"Â   YouTube Data API failed: {e}")
+            print(f"   YouTube Data API failed: {e}")
 
     # Last resort: yt-dlp
     try:
@@ -1032,12 +893,6 @@ async def get_transcript(req: Request):
             "skip_download": True,
             "quiet": True,
         }
-        
-        # Add proxy if available
-        if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
-            proxy_url = f"http://{WEBSHARE_PROXY_USERNAME}:{WEBSHARE_PROXY_PASSWORD}@p.webshare.io:80"
-            ydl_opts["proxy"] = proxy_url
-            print("   Using Webshare proxy for yt-dlp")
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(
@@ -1057,17 +912,11 @@ async def get_transcript(req: Request):
                             break
 
                     if vtt_url:
-                        # Create httpx client, with proxy if available
-                        client_kwargs = {}
-                        if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
-                            proxy_url = f"http://{WEBSHARE_PROXY_USERNAME}:{WEBSHARE_PROXY_PASSWORD}@p.webshare.io:80"
-                            client_kwargs["proxies"] = {"http://": proxy_url, "https://": proxy_url}
-                        
-                        async with httpx.AsyncClient(**client_kwargs) as client:
+                        async with httpx.AsyncClient() as client:
                             resp = await client.get(vtt_url)
                             if resp.status_code == 200:
                                 vtt_content = resp.text
-                                print(f"  Got VTT via yt-dlp")
+                                print(f" Got VTT via yt-dlp")
 
                                 #  CRITICAL: Parse and store for AI assistant
                                 try:
@@ -1080,10 +929,10 @@ async def get_transcript(req: Request):
                                             f" STORED {len(transcript_data)} segments (Method: yt-dlp)"
                                         )
                                     else:
-                                        print(f"Â   VTT parsing returned no data")
+                                        print(f"   VTT parsing returned no data")
                                 except Exception as parse_error:
                                     print(
-                                        f"Â   Could not parse yt-dlp VTT: {parse_error}"
+                                        f"   Could not parse yt-dlp VTT: {parse_error}"
                                     )
 
                                 return Response(
@@ -1091,7 +940,7 @@ async def get_transcript(req: Request):
                                 )
 
     except Exception as e:
-        print(f"Â   yt-dlp failed: {e}")
+        print(f"   yt-dlp failed: {e}")
 
     raise HTTPException(
         status_code=404,
@@ -1166,7 +1015,7 @@ async def wordfreq(req: Request):
     word_counts = Counter(w for w in words if w not in stop_words)
 
     top_words = [
-        {"text": fix_brooklyn(word), "count": count} for word, count in word_counts.most_common(50)
+        {"text": word, "count": count} for word, count in word_counts.most_common(50)
     ]
 
     return {"words": top_words}
@@ -1201,7 +1050,7 @@ async def summary_ai(req: Request):
                 all_key_points.append(key_points)
 
         if not all_key_points:
-            print("Â  Key point extraction failed, using fallback")
+            print("  Key point extraction failed, using fallback")
             if strategy == "highlights_with_quotes":
                 return {
                     "summarySentences": json.dumps(
@@ -1230,7 +1079,7 @@ async def summary_ai(req: Request):
                             "strategy": strategy,
                         }
                 except json.JSONDecodeError:
-                    print("Â  JSON parsing failed")
+                    print("  JSON parsing failed")
             else:
                 print(f" Generated summary ({len(ai_result)} chars)")
                 return {"summarySentences": ai_result, "strategy": strategy}
@@ -1296,7 +1145,7 @@ TRANSCRIPT:
             if ai_result:
                 return {"summarySentences": ai_result, "strategy": strategy}
 
-    print("Â  Using fallback")
+    print("  Using fallback")
     if strategy == "highlights_with_quotes":
         return {
             "summarySentences": json.dumps(generate_fallback_highlights(transcript)),
@@ -1411,11 +1260,6 @@ async def get_metadata(req: Request):
 
     try:
         ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True}
-        
-        # Add proxy if available
-        if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
-            proxy_url = f"http://{WEBSHARE_PROXY_USERNAME}:{WEBSHARE_PROXY_PASSWORD}@p.webshare.io:80"
-            ydl_opts["proxy"] = proxy_url
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(
@@ -1458,29 +1302,21 @@ Extract ONLY high-quality, properly named entities.
 
 STRICT RULES:
 
-1. PEOPLE - MUST EITHER have first AND last name or a formal title 
-   YES: "John Smith", "President Trump", "Dr. Michael Chen", "Commissioner Garcia"
+1. PEOPLE - MUST have first AND last name
+   YES: "John Smith", "Mayor Sarah Johnson", "Dr. Michael Chen"
    NO: "John", "the mayor", "someone", single names
 
 2. PLACES - MUST be specific named locations  
-   YES: "Brookline Town Hall", "Harvard Street", "Lincoln Park", "Washington D.C.", "Olmstead Road"
+   YES: "Springfield City Hall", "Oak Street", "Lincoln Park", "Washington D.C."
    NO: "the building", "downtown", "a park"
 
 3. ORGANIZATIONS - MUST be official names
-   YES: "Google", "Department of Transportation", "Brookline School Committee", "Brookline Select Board", "ICE", "Flock"
+   YES: "Google", "Department of Transportation", "Springfield School Board"
    NO: "the department", "a company", "the board"
 
 4. TECHNOLOGY - MUST be specific product names
-   YES: "Microsoft Teams", "Zoom", "iPhone", "Flock", "AI", "Surveillance", "iPhone", "Smartphones", "Computer"
-   NO: "Internet", "software", "device"
-
-5. CULTURALLY SIGNIFICANT ENTITIES - Include names of landmarks, historical sites, well-known public figures, major events, and widely recognized organizations relevant to civic contexts, as well as items in the current news.
-   YES: "Statue of Liberty", "Martin Luther King", "ICE", "Surveillance", "Capitalism","World War II", "United Nations", "Social Media", Popular Platforms like "Facebook" and "TikTok"
-   NO: Generic or vague references like "a monument", "a leader", "an event"
-
-6. WHENEVER THE TRANSCRIPT MENTIONS "BROOKLYN" ALWAYS READ IT AND TAG IT AS "BROOKLINE" and make sure all outputs respell it to Brookline.
-
-7. If there's even a single entry of the work "Flock" or "ICE" include them as returns.
+   YES: "Microsoft Teams", "Zoom", "iPhone"
+   NO: "software", "the app", "technology"
 
 NEVER include:
 - Single first names only
@@ -1567,9 +1403,6 @@ Be strict - fewer high-quality entities is better than many low-quality ones."""
                     is_valid = True
             
             if is_valid:
-                # v6.0: Fix Martin Luther -> Martin Luther King truncation
-                if text.lower() == "martin luther":
-                    text = "Martin Luther King"
                 seen.add(text.lower())
                 valid_entities.append({"text": text, "count": count, "type": entity_type})
 
@@ -1863,21 +1696,6 @@ async def get_budget_impact(req: Request):
                 }
             )
 
-        # Check for thousands
-        thousands = re.findall(dollar_patterns[0], sent, re.IGNORECASE)
-        for amount in thousands:
-            amount_clean = amount.replace(",", "")
-            value = float(amount_clean) * 1_000
-            category = categorize_budget_item(sent_lower)
-            budget_items.append(
-                {
-                    "amount": value,
-                    "display": f"${amount_clean}K",
-                    "category": category,
-                    "context": sent.strip()[:100],
-                }
-            )
-
         # Check for regular dollars (only if > $1000)
         regular = re.findall(dollar_patterns[2], sent, re.IGNORECASE)
         for amount in regular:
@@ -2033,92 +1851,30 @@ async def get_meeting_efficiency(req: Request):
 # Video processing endpoints
 
 
-def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True, transcript_data=None):
-    """Process video clips into various output formats with optional captions"""
+def simple_job(job_id, vid, clips, format_type="combined"):
+    """Process video clips"""
     job = JOBS[job_id]
     job["status"] = "running"
     job["percent"] = 5
-    job["message"] = "Downloading video from YouTube..."
+    job["message"] = "Downloading video..."
 
     work = tempfile.mkdtemp()
-    print(f"[simple_job] Starting job {job_id}: {len(clips)} clips, format={format_type}, captions={captions_enabled}")
-
-    def get_transcript_for_timerange(start, end, transcript):
-        """Get transcript segments that fall within a time range"""
-        if not transcript:
-            return []
-        segments = []
-        for seg in transcript:
-            seg_start = seg.get('start', 0)
-            seg_end = seg_start + seg.get('duration', 0)
-            # Check if segment overlaps with our range
-            if seg_start < end and seg_end > start:
-                segments.append({
-                    'start': max(0, seg_start - start),  # Relative to clip start
-                    'end': min(end - start, seg_end - start),
-                    'text': seg.get('text', '')
-                })
-        return segments
-
-    def create_srt_file(segments, output_path):
-        """Create an SRT subtitle file from transcript segments"""
-        with open(output_path, 'w', encoding='utf-8') as f:
-            for i, seg in enumerate(segments):
-                start_time = seg['start']
-                end_time = seg['end']
-                text = seg['text'].strip()
-                
-                if not text:
-                    continue
-                
-                # Format timestamps for SRT (HH:MM:SS,mmm)
-                def format_srt_time(seconds):
-                    h = int(seconds // 3600)
-                    m = int((seconds % 3600) // 60)
-                    s = int(seconds % 60)
-                    ms = int((seconds % 1) * 1000)
-                    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-                
-                f.write(f"{i + 1}\n")
-                f.write(f"{format_srt_time(start_time)} --> {format_srt_time(end_time)}\n")
-                f.write(f"{text}\n\n")
-
-    def escape_ffmpeg_text(text):
-        """Escape special characters for FFmpeg drawtext filter"""
-        # Escape special chars: \, ', :, %
-        text = text.replace('\\', '\\\\')
-        text = text.replace("'", "'\\''")
-        text = text.replace(':', '\\:')
-        text = text.replace('%', '\\%')
-        return text
 
     try:
         video_file = os.path.join(work, "video.mp4")
-        
-        # Check if we already have the video cached
-        cached_video = os.path.join(FILES_DIR, f"{vid}.mp4")
-        if os.path.exists(cached_video):
-            print(f"[simple_job] Using cached video: {cached_video}")
-            video_file = cached_video
-        else:
-            cmd = [
-                "yt-dlp",
-                "-f", "best[ext=mp4]/best",
-                "--no-playlist",
-                "-o", video_file,
-                f"https://www.youtube.com/watch?v={vid}",
-            ]
-            print(f"[simple_job] Downloading: {' '.join(cmd)}")
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-            
-            if result.returncode != 0:
-                print(f"[simple_job] yt-dlp error: {result.stderr}")
-                raise Exception(f"Failed to download video: {result.stderr[:200]}")
+        cmd = [
+            "yt-dlp",
+            "-f",
+            "best[ext=mp4]",
+            "-o",
+            video_file,
+            f"https://www.youtube.com/watch?v={vid}",
+        ]
+        subprocess.run(cmd, capture_output=True)
 
         if not os.path.exists(video_file):
-            raise Exception("Video file not found after download")
-        
-        print(f"[simple_job] Video ready: {video_file}")
+            raise Exception("Failed to download video")
+
         job["percent"] = 30
         job["message"] = f"Processing {len(clips)} clips..."
 
@@ -2131,43 +1887,24 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     start = clip.get("start", 0)
                     end = clip.get("end", start + 10)
                     duration = end - start
-                    highlight_text = clip.get("highlight", "")
 
-                    # Build FFmpeg filter for captions and highlight text
-                    vf_filters = []
-                    
-                    if captions_enabled and transcript_data:
-                        # Get transcript for this clip and create SRT
-                        clip_transcript = get_transcript_for_timerange(start, end, transcript_data)
-                        if clip_transcript:
-                            srt_file = os.path.join(work, f"clip_{i+1:03d}.srt")
-                            create_srt_file(clip_transcript, srt_file)
-                            # Escape path for FFmpeg
-                            srt_escaped = srt_file.replace('\\', '/').replace(':', '\\:')
-                            vf_filters.append(f"subtitles='{srt_escaped}':force_style='FontSize=20,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2,Shadow=1,MarginV=30'")
-                    
-                    if captions_enabled and highlight_text:
-                        # Add highlight text at top - yellow, bold
-                        escaped_text = escape_ffmpeg_text(highlight_text)
-                        vf_filters.append(f"drawtext=text='{escaped_text}':fontsize=24:fontcolor=yellow:borderw=3:bordercolor=black:x=(w-text_w)/2:y=40:font=Arial")
-
-                    if vf_filters:
-                        cmd = [
-                            "ffmpeg", "-i", video_file,
-                            "-ss", str(start), "-t", str(duration),
-                            "-vf", ",".join(vf_filters),
-                            "-c:v", "libx264", "-preset", "fast",
-                            "-c:a", "aac",
-                            clip_file, "-y"
-                        ]
-                    else:
-                        cmd = [
-                            "ffmpeg", "-i", video_file,
-                            "-ss", str(start), "-t", str(duration),
-                            "-c:v", "libx264", "-preset", "fast",
-                            "-c:a", "aac",
-                            clip_file, "-y"
-                        ]
+                    cmd = [
+                        "ffmpeg",
+                        "-i",
+                        video_file,
+                        "-ss",
+                        str(start),
+                        "-t",
+                        str(duration),
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "fast",
+                        "-c:a",
+                        "aac",
+                        clip_file,
+                        "-y",
+                    ]
                     subprocess.run(cmd, capture_output=True)
 
                     if os.path.exists(clip_file):
@@ -2188,478 +1925,152 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     break
 
             if selected_clips:
-                # First extract clips with captions, then concatenate
-                clip_files = []
-                running_time = 0
-                
-                for i, clip in enumerate(selected_clips):
-                    job["percent"] = 30 + int(40 * i / len(selected_clips))
-                    clip_file = os.path.join(work, f"social_clip_{i}.mp4")
-                    start = clip.get("start", 0)
-                    end = clip.get("end", start + 15)
-                    duration = end - start
-                    highlight_text = clip.get("highlight", "")
-                    
-                    # Build filter chain
-                    vf_filters = ["scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2"]
-                    
-                    if captions_enabled and transcript_data:
-                        clip_transcript = get_transcript_for_timerange(start, end, transcript_data)
-                        if clip_transcript:
-                            srt_file = os.path.join(work, f"social_{i}.srt")
-                            create_srt_file(clip_transcript, srt_file)
-                            srt_escaped = srt_file.replace('\\', '/').replace(':', '\\:')
-                            vf_filters.append(f"subtitles='{srt_escaped}':force_style='FontSize=28,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=3,Shadow=2,MarginV=120'")
-                    
-                    if captions_enabled and highlight_text:
-                        escaped_text = escape_ffmpeg_text(highlight_text)
-                        # For vertical video, position text carefully
-                        vf_filters.append(f"drawtext=text='{escaped_text}':fontsize=32:fontcolor=yellow:borderw=4:bordercolor=black:x=(w-text_w)/2:y=100:font=Arial")
-                    
-                    cmd = [
-                        "ffmpeg", "-i", video_file,
-                        "-ss", str(start), "-t", str(duration),
-                        "-vf", ",".join(vf_filters),
-                        "-c:v", "libx264", "-preset", "fast",
-                        "-c:a", "aac",
-                        clip_file, "-y"
-                    ]
-                    subprocess.run(cmd, capture_output=True)
-                    
-                    if os.path.exists(clip_file):
-                        clip_files.append(clip_file)
-                        running_time += duration
-                
-                # Concatenate clips
-                if clip_files:
-                    concat_file = os.path.join(work, "social_concat.txt")
-                    with open(concat_file, "w") as f:
-                        for cf in clip_files:
-                            f.write(f"file '{cf}'\n")
-                    
-                    cmd = [
-                        "ffmpeg", "-f", "concat", "-safe", "0",
-                        "-i", concat_file,
-                        "-c", "copy",
-                        output, "-y"
-                    ]
-                    result = subprocess.run(cmd, capture_output=True)
-                    
-                    # If concat copy fails, try re-encoding
-                    if not os.path.exists(output) or os.path.getsize(output) == 0:
-                        cmd = [
-                            "ffmpeg", "-f", "concat", "-safe", "0",
-                            "-i", concat_file,
-                            "-c:v", "libx264", "-preset", "fast",
-                            "-c:a", "aac",
-                            output, "-y"
-                        ]
-                        subprocess.run(cmd, capture_output=True)
+                start = selected_clips[0].get("start", 0)
+                cmd = [
+                    "ffmpeg",
+                    "-i",
+                    video_file,
+                    "-ss",
+                    str(start),
+                    "-t",
+                    "60",
+                    "-vf",
+                    "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "fast",
+                    "-c:a",
+                    "aac",
+                    output,
+                    "-y",
+                ]
+                subprocess.run(cmd, capture_output=True)
 
-        else:  # combined / default
+        else:
             output = os.path.join(FILES_DIR, f"highlight_{job_id[:8]}.mp4")
             if clips:
                 concat_file = os.path.join(work, "concat.txt")
-                clip_files_for_concat = []
-                running_time = 0
-                
-                for i, clip in enumerate(clips[:10]):
-                    job["percent"] = 30 + int(50 * i / len(clips[:10]))
-                    start = clip.get("start", 0)
-                    end = clip.get("end", start + 10)
-                    duration = end - start
-                    highlight_text = clip.get("highlight", "")
-                    
-                    if captions_enabled and (transcript_data or highlight_text):
-                        # Need to re-encode to add captions/text
+                with open(concat_file, "w") as f:
+                    for i, clip in enumerate(clips[:10]):
                         clip_file = os.path.join(work, f"temp_{i}.mp4")
-                        vf_filters = []
-                        
-                        if transcript_data:
-                            clip_transcript = get_transcript_for_timerange(start, end, transcript_data)
-                            if clip_transcript:
-                                srt_file = os.path.join(work, f"srt_{i}.srt")
-                                create_srt_file(clip_transcript, srt_file)
-                                srt_escaped = srt_file.replace('\\', '/').replace(':', '\\:')
-                                # Captions at bottom, not too big
-                                vf_filters.append(f"subtitles='{srt_escaped}':force_style='FontSize=18,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2,Shadow=1,MarginV=25'")
-                        
-                        if highlight_text:
-                            escaped_text = escape_ffmpeg_text(highlight_text)
-                            # Highlight text at top in yellow
-                            vf_filters.append(f"drawtext=text='{escaped_text}':fontsize=22:fontcolor=yellow:borderw=3:bordercolor=black:x=(w-text_w)/2:y=30:font=Arial")
-                        
-                        if vf_filters:
-                            cmd = [
-                                "ffmpeg", "-i", video_file,
-                                "-ss", str(start), "-t", str(duration),
-                                "-vf", ",".join(vf_filters),
-                                "-c:v", "libx264", "-preset", "fast",
-                                "-c:a", "aac",
-                                clip_file, "-y"
-                            ]
-                        else:
-                            cmd = [
-                                "ffmpeg", "-i", video_file,
-                                "-ss", str(start), "-t", str(duration),
-                                "-c:v", "libx264", "-preset", "fast",
-                                "-c:a", "aac",
-                                clip_file, "-y"
-                            ]
-                        subprocess.run(cmd, capture_output=True)
-                    else:
-                        # Fast copy without captions
-                        clip_file = os.path.join(work, f"temp_{i}.mp4")
+                        start = clip.get("start", 0)
+                        end = clip.get("end", start + 10)
+                        duration = end - start
+
                         cmd = [
-                            "ffmpeg", "-i", video_file,
-                            "-ss", str(start), "-t", str(duration),
-                            "-c", "copy",
-                            clip_file, "-y"
+                            "ffmpeg",
+                            "-i",
+                            video_file,
+                            "-ss",
+                            str(start),
+                            "-t",
+                            str(duration),
+                            "-c",
+                            "copy",
+                            clip_file,
+                            "-y",
                         ]
                         subprocess.run(cmd, capture_output=True)
 
-                    if os.path.exists(clip_file):
-                        clip_files_for_concat.append(clip_file)
+                        if os.path.exists(clip_file):
+                            f.write(f"file '{clip_file}'\n")
 
-                # Write concat file
-                with open(concat_file, "w") as f:
-                    for cf in clip_files_for_concat:
-                        f.write(f"file '{cf}'\n")
-
-                if captions_enabled:
-                    # Re-encode for consistent output
-                    cmd = [
-                        "ffmpeg", "-f", "concat", "-safe", "0",
-                        "-i", concat_file,
-                        "-c:v", "libx264", "-preset", "fast",
-                        "-c:a", "aac",
-                        output, "-y"
-                    ]
-                else:
-                    cmd = [
-                        "ffmpeg", "-f", "concat", "-safe", "0",
-                        "-i", concat_file,
-                        "-c", "copy",
-                        output, "-y"
-                    ]
+                cmd = [
+                    "ffmpeg",
+                    "-f",
+                    "concat",
+                    "-safe",
+                    "0",
+                    "-i",
+                    concat_file,
+                    "-c",
+                    "copy",
+                    output,
+                    "-y",
+                ]
                 subprocess.run(cmd, capture_output=True)
 
         if os.path.exists(output):
-            file_size = os.path.getsize(output)
-            print(f"[simple_job] SUCCESS! Output: {output} ({file_size / 1024 / 1024:.1f} MB)")
             job["status"] = "done"
             job["message"] = "Ready to download!"
             job["file"] = f"/files/{os.path.basename(output)}"
             job["zip"] = f"/files/{os.path.basename(output)}"
             job["percent"] = 100
-            job["fileSize"] = file_size
         else:
-            print(f"[simple_job] ERROR: Output file not found: {output}")
-            raise Exception("Failed to create output file")
+            raise Exception("Failed to create output")
 
-    except subprocess.TimeoutExpired as e:
-        print(f"[simple_job] TIMEOUT: {e}")
-        job["status"] = "error"
-        job["message"] = "Video processing timed out"
     except Exception as e:
-        print(f"[simple_job] ERROR: {e}")
-        import traceback
-        traceback.print_exc()
         job["status"] = "error"
         job["message"] = str(e)[:200]
+        print(f"Job error: {e}")
     finally:
-        # Clean up temp directory but keep output
-        if work and os.path.exists(work) and work != FILES_DIR:
-            shutil.rmtree(work, ignore_errors=True)
-        print(f"[simple_job] Job {job_id} final status: {job.get('status')}")
+        shutil.rmtree(work, ignore_errors=True)
 
 
 @app.post("/api/render_clips")
 async def render_clips(req: Request):
-    """Render video clips in various formats"""
-    if CLOUD_MODE:
-        return {
-            "error": "Video clip download is not available in cloud mode",
-            "message": "YouTube blocks video downloads from cloud servers. Run the desktop app for this feature.",
-            "jobId": None
-        }
-    
     data = await req.json()
     vid = data.get("videoId", "")
     clips = data.get("clips", [])
     format_type = data.get("format", "combined")
-    title = data.get("title", "Highlight Reel")
-    
-    if not vid:
-        return {"error": "No video ID provided", "jobId": None}
-    
-    if not clips:
-        return {"error": "No clips provided", "jobId": None}
-    
-    print(f"[render_clips] Starting job: {len(clips)} clips, format={format_type}")
 
     job_id = str(uuid.uuid4())
-    JOBS[job_id] = {
-        "status": "queued", 
-        "percent": 0, 
-        "message": f"Starting {format_type} render with {len(clips)} clips..."
-    }
+    JOBS[job_id] = {"status": "queued", "percent": 0, "message": "Starting..."}
 
     threading.Thread(
         target=simple_job, args=(job_id, vid, clips, format_type), daemon=True
     ).start()
-    return {"jobId": job_id, "format": format_type, "clipCount": len(clips)}
+    return {"jobId": job_id}
 
 
 @app.get("/api/job_status")
-async def job_status(jobId: str = None):
-    """Get job status - supports both query param and listing all jobs"""
-    print(f"[job_status] Checking job: {jobId}, Available jobs: {list(JOBS.keys())}")
-    if not jobId:
-        return {"jobs": list(JOBS.keys()), "count": len(JOBS)}
-    result = JOBS.get(jobId, {"status": "error", "message": f"Unknown job: {jobId}"})
-    print(f"[job_status] Result for {jobId}: {result}")
-    return result
-
-
-@app.get("/api/job/{job_id}")
-async def job_status_by_path(job_id: str):
-    """Alternative endpoint with path parameter"""
-    print(f"[job_status_by_path] Checking job: {job_id}")
-    return JOBS.get(job_id, {"status": "error", "message": f"Unknown job: {job_id}"})
+async def job_status(jobId: str):
+    return JOBS.get(jobId, {"status": "error", "message": "Unknown job"})
 
 
 @app.post("/api/download_mp4")
 async def download_mp4(req: Request):
-    """Download full video from YouTube"""
-    if CLOUD_MODE:
-        return {
-            "error": "Video download not available in cloud mode",
-            "message": "YouTube blocks downloads from cloud servers. Run the desktop app for this feature."
-        }
-    
     data = await req.json()
     vid = data.get("videoId", "")
-    
-    if not vid:
-        return {"error": "No video ID provided"}
-    
-    print(f"[download_mp4] Starting download for video: {vid}")
-    
+
     output = os.path.join(FILES_DIR, f"{vid}.mp4")
-    
-    # Check if already downloaded
-    if os.path.exists(output):
-        print(f"[download_mp4] Video already exists: {output}")
-        return {"file": f"/files/{os.path.basename(output)}", "cached": True}
-    
-    # Download with yt-dlp
-    try:
+    if not os.path.exists(output):
         cmd = [
             "yt-dlp",
-            "-f", "best[ext=mp4]/best",
-            "--no-playlist",
-            "-o", output,
+            "-f",
+            "best",
+            "-o",
+            output,
             f"https://www.youtube.com/watch?v={vid}",
         ]
-        print(f"[download_mp4] Running: {' '.join(cmd)}")
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        
-        if result.returncode != 0:
-            print(f"[download_mp4] yt-dlp error: {result.stderr}")
-            return {"error": f"Download failed: {result.stderr[:200]}"}
-        
-        if os.path.exists(output):
-            file_size = os.path.getsize(output)
-            print(f"[download_mp4] Success! File size: {file_size / 1024 / 1024:.1f} MB")
-            return {"file": f"/files/{os.path.basename(output)}", "size": file_size}
-        else:
-            return {"error": "Download completed but file not found"}
-            
-    except subprocess.TimeoutExpired:
-        return {"error": "Download timed out after 10 minutes"}
-    except Exception as e:
-        print(f"[download_mp4] Exception: {e}")
-        return {"error": str(e)}
+        subprocess.run(cmd, capture_output=True)
 
+    if os.path.exists(output):
+        return {"file": f"/files/{os.path.basename(output)}"}
 
-def find_quote_timestamp(quote: str, transcript_cache: dict, video_id: str) -> tuple:
-    """Find the timestamp of a quote in the transcript"""
-    # Get cached transcript or fetch it
-    if video_id not in transcript_cache:
-        return None, None
-    
-    transcript = transcript_cache[video_id]
-    if not transcript:
-        return None, None
-    
-    # Clean the quote for matching
-    quote_clean = quote.lower().strip()
-    quote_words = quote_clean.split()[:8]  # Use first 8 words for matching
-    search_phrase = ' '.join(quote_words)
-    
-    best_match_time = None
-    best_match_score = 0
-    
-    for segment in transcript:
-        text = segment.get('text', '').lower()
-        start_time = segment.get('start', 0)
-        
-        # Check if quote words appear in this segment
-        if search_phrase in text or all(w in text for w in quote_words[:4]):
-            # Good match found
-            return start_time, start_time + segment.get('duration', 10)
-        
-        # Partial match scoring
-        matches = sum(1 for w in quote_words if w in text)
-        if matches > best_match_score:
-            best_match_score = matches
-            best_match_time = start_time
-    
-    # Return best partial match if no exact match
-    if best_match_time is not None and best_match_score >= 2:
-        return best_match_time, best_match_time + 15
-    
-    return None, None
+    raise HTTPException(500, "Download failed")
 
 
 @app.post("/api/highlight_reel")
 async def highlight_reel(req: Request):
-    """Create highlight reel from quotes - finds actual timestamps in transcript"""
-    if CLOUD_MODE:
-        return {
-            "error": "Video clip download is not available in cloud mode",
-            "message": "YouTube blocks video downloads from cloud servers. Run the desktop app for this feature.",
-            "jobId": None
-        }
-    
+    """Create highlight reel from quotes"""
     data = await req.json()
     vid = data.get("videoId", "")
     quotes = data.get("quotes", [])
-    highlights = data.get("highlights", [])  # Highlight labels for text overlay
-    pad = data.get("pad", 3)  # seconds of padding before/after
+    pad = data.get("pad", 2)
     format_type = data.get("format", "combined")
-    transcript_data = data.get("transcript", [])  # Can pass transcript directly
-    captions_enabled = data.get("captions", True)  # Whether to add captions
-    
-    if not vid:
-        return {"error": "No video ID provided", "jobId": None}
-    
-    if not quotes:
-        return {"error": "No quotes provided", "jobId": None}
-    
-    # Try to get transcript if not provided
-    if not transcript_data:
-        # Check cache
-        cache_key = f"transcript_{vid}"
-        if cache_key in TRANSCRIPT_CACHE:
-            transcript_data = TRANSCRIPT_CACHE[cache_key]
-        else:
-            # Try to fetch transcript
-            try:
-                from youtube_transcript_api import YouTubeTranscriptApi
-                transcript_data = YouTubeTranscriptApi.get_transcript(vid)
-                TRANSCRIPT_CACHE[cache_key] = transcript_data
-            except Exception as e:
-                print(f"Could not fetch transcript for timestamp matching: {e}")
-    
-    # Build clips by finding quote timestamps for ALL quotes
-    all_clips = []
-    transcript_cache = {vid: transcript_data} if transcript_data else {}
-    
-    print(f"[highlight_reel] Processing {len(quotes)} quotes to find timestamps...")
-    
-    for i, quote in enumerate(quotes):
-        start_time, end_time = find_quote_timestamp(quote, transcript_cache, vid)
-        
-        highlight_label = highlights[i] if i < len(highlights) else ""
-        
-        if start_time is not None:
-            # Apply padding
-            clip_start = max(0, start_time - pad)
-            clip_end = end_time + pad
-            all_clips.append({
-                "start": clip_start,
-                "end": clip_end,
-                "label": quote[:60],
-                "highlight": highlight_label[:80],  # Highlight text for overlay
-                "quote_start": start_time,  # Original start for caption timing
-                "quote_end": end_time,
-                "original_index": i
-            })
-        else:
-            print(f"Could not find timestamp for quote: {quote[:50]}...")
-    
-    # Select 5 evenly spread clips from throughout the video
-    if len(all_clips) > 5:
-        # Sort by timestamp
-        all_clips.sort(key=lambda c: c["start"])
-        
-        # Select evenly distributed clips
-        total = len(all_clips)
-        step = total / 5
-        selected_indices = [int(i * step) for i in range(5)]
-        
-        # Make sure we don't go out of bounds and get unique indices
-        selected_indices = list(set(min(idx, total - 1) for idx in selected_indices))
-        selected_indices.sort()
-        
-        # If we don't have 5 unique indices, add more
-        while len(selected_indices) < 5 and len(selected_indices) < total:
-            for idx in range(total):
-                if idx not in selected_indices:
-                    selected_indices.append(idx)
-                    selected_indices.sort()
-                    break
-        
-        clips = [all_clips[i] for i in selected_indices[:5]]
-        print(f"[highlight_reel] Selected {len(clips)} spread-out clips from {len(all_clips)} total")
-    else:
-        clips = all_clips
-    
-    # Sort final clips by timestamp for proper video order
-    clips.sort(key=lambda c: c["start"])
-    
-    if not clips:
-        # Fallback: create clips at regular intervals if no matches found
-        print("Warning: No quote timestamps found, using fallback intervals")
-        import random
-        
-        # Get video duration estimate from transcript
-        video_duration = 0
-        if transcript_data:
-            last_segment = transcript_data[-1] if transcript_data else None
-            if last_segment:
-                video_duration = last_segment.get('start', 0) + last_segment.get('duration', 0)
-        
-        if video_duration == 0:
-            video_duration = 3600  # Default 1 hour
-        
-        # Create evenly spaced fallback clips
-        interval = video_duration / 6  # 5 clips means 6 segments
-        for i in range(5):
-            start = int(interval * (i + 0.5))  # Middle of each segment
-            highlight_label = highlights[i] if i < len(highlights) else ""
-            quote = quotes[i] if i < len(quotes) else ""
-            clips.append({
-                "start": start,
-                "end": start + 20,
-                "label": quote[:60] if quote else f"Highlight {i+1}",
-                "highlight": highlight_label[:80],
-                "quote_start": start,
-                "quote_end": start + 15
-            })
-    
-    print(f"[highlight_reel] Creating reel with {len(clips)} clips, captions={captions_enabled}")
-    for i, clip in enumerate(clips):
-        print(f"  Clip {i+1}: {clip['start']:.1f}s - {clip['end']:.1f}s | {clip.get('highlight', '')[:40]}...")
-    
+
+    clips = []
+    for i, quote in enumerate(quotes[:10]):
+        start = i * 30
+        clips.append({"start": start, "end": start + 15, "label": quote[:60]})
+
     job_id = str(uuid.uuid4())
-    JOBS[job_id] = {"status": "queued", "percent": 0, "message": f"Building reel from {len(clips)} clips..."}
-    
+    JOBS[job_id] = {"status": "queued", "percent": 0, "message": "Building reel..."}
+
     threading.Thread(
-        target=simple_job, args=(job_id, vid, clips, format_type, captions_enabled, transcript_data), daemon=True
+        target=simple_job, args=(job_id, vid, clips, format_type), daemon=True
     ).start()
     return {"jobId": job_id}
 
@@ -2758,7 +2169,7 @@ async def analyze_chat_sentiment(req: Request):
     url = f"https://www.youtube.com/watch?v={video_id}"
 
     try:
-        print(f"Â  Analyzing chat sentiment for: {video_id}")
+        print(f"  Analyzing chat sentiment for: {video_id}")
         chat = ChatDownloader().get_chat(url, max_messages=max_messages)
 
         sentiments = []
@@ -2913,7 +2324,7 @@ async def chat_statistics(req: Request):
     url = f"https://www.youtube.com/watch?v={video_id}"
 
     try:
-        print(f"Â  Gathering chat statistics for: {video_id}")
+        print(f"  Gathering chat statistics for: {video_id}")
         chat = ChatDownloader().get_chat(url, max_messages=max_messages)
 
         total_messages = 0
@@ -2984,7 +2395,7 @@ async def get_optimization_stats():
             "estimated_savings": {
                 "percentage": 92,
                 "per_video": "$6.00",
-                "description": "Original $6.50/video Â  $0.50/video",
+                "description": "Original $6.50/video   $0.50/video",
             },
         }
     except Exception as e:
@@ -3061,7 +2472,7 @@ async def start_live_monitoring(req: Request):
         while meeting_id in live_manager.active_connections:
             try:
                 # Get latest transcript segment
-                transcript = ytt_api.fetch(video_id).to_raw_data()
+                transcript = ytt_api.fetch(video_id)
 
                 # Find new segments
                 new_segments = [s for s in transcript if s["start"] > last_position]
@@ -3105,7 +2516,7 @@ async def start_live_monitoring(req: Request):
 
 
 # ============================================================================
-# [*]Ã…Â¡Ã¢â€šÂ¬ NEW: AI MEETING ASSISTANT (RAG-based Chat) (v4.0)
+# [*]Å¡â‚¬ NEW: AI MEETING ASSISTANT (RAG-based Chat) (v4.0)
 # ============================================================================
 
 
@@ -3144,12 +2555,12 @@ async def chat_with_meeting(req: Request):
             # Get transcript from cache or fetch it
             if meeting_id in STORED_TRANSCRIPTS:
                 transcript_data = STORED_TRANSCRIPTS[meeting_id]
-                print(f"âœ… Using cached transcript: {len(transcript_data)} segments")
+                print(f"✅ Using cached transcript: {len(transcript_data)} segments")
             else:
                 try:
-                    transcript_data = ytt_api.fetch(meeting_id).to_raw_data()
+                    transcript_data = ytt_api.fetch(meeting_id)
                     STORED_TRANSCRIPTS[meeting_id] = transcript_data
-                    print(f"âœ… Fetched and cached {len(transcript_data)} segments")
+                    print(f"✅ Fetched and cached {len(transcript_data)} segments")
                 except Exception as e:
                     return {
                         "answer": "I can't access the transcript for this video. Please make sure the video has captions enabled.",
@@ -3197,7 +2608,7 @@ async def chat_with_meeting(req: Request):
                 "we_vs_i": "multiple speakers likely" if we_count > i_count * 2 else "possibly single speaker or interview",
             }
             
-            print(f"ðŸ“Š Transcript stats: {transcript_stats}")
+            print(f"📊 Transcript stats: {transcript_stats}")
         
         else:
             return {
@@ -3219,10 +2630,10 @@ async def chat_with_meeting(req: Request):
                 "\n\n[... end of meeting ...]\n\n" +
                 full_transcript[-third:]
             )
-            print(f"ðŸ“ Using condensed transcript: {len(context_transcript)} chars (from {len(full_transcript)})")
+            print(f"📝 Using condensed transcript: {len(context_transcript)} chars (from {len(full_transcript)})")
         else:
             context_transcript = full_transcript
-            print(f"ðŸ“ Using full transcript: {len(context_transcript)} chars")
+            print(f"📝 Using full transcript: {len(context_transcript)} chars")
 
         # BUILD CONVERSATION CONTEXT
         conv_context = ""
@@ -3279,7 +2690,7 @@ User's question: {query}"""
         )
 
         answer = completion.choices[0].message.content
-        print(f"âœ… Generated response: {len(answer)} chars")
+        print(f"✅ Generated response: {len(answer)} chars")
 
         # Generate contextual follow-up suggestions
         follow_ups = []
@@ -3302,7 +2713,7 @@ User's question: {query}"""
         }
 
     except Exception as e:
-        print(f"âŒ Chat error: {e}")
+        print(f"❌ Chat error: {e}")
         import traceback
         print(traceback.format_exc())
         return {
@@ -3427,7 +2838,7 @@ Rules:
                     # Fallback if AI didn't generate enough questions
                     if len(suggestions) < 3:
                         print(
-                            f"Â   AI generated only {len(suggestions)} questions, adding fallbacks"
+                            f"   AI generated only {len(suggestions)} questions, adding fallbacks"
                         )
                         suggestions.extend(
                             [
@@ -3443,7 +2854,7 @@ Rules:
 
                 except Exception as e:
                     print(
-                        f"Â   AI suggestion generation failed: {e}, using keyword-based fallback"
+                        f"   AI suggestion generation failed: {e}, using keyword-based fallback"
                     )
                     # Fall through to keyword-based method below
 
@@ -3529,7 +2940,7 @@ Rules:
 
         else:
             print(
-                f"Â   No cached transcript for {meeting_id}, returning generic suggestions"
+                f"   No cached transcript for {meeting_id}, returning generic suggestions"
             )
             print(f"   Available cache keys: {list(STORED_TRANSCRIPTS.keys())}")
 
@@ -3563,7 +2974,7 @@ Rules:
 
 
 # ============================================================================
-# [*]Ã…Â¡Ã¢â€šÂ¬ NEW: COMMUNITY KNOWLEDGE BASE (v4.0)
+# [*]Å¡â‚¬ NEW: COMMUNITY KNOWLEDGE BASE (v4.0)
 # ============================================================================
 
 
@@ -3581,7 +2992,7 @@ async def add_meeting_to_knowledge_base(req: Request):
         # Get transcript
         transcript_text = ""
         try:
-            transcript = ytt_api.fetch(video_id).to_raw_data()
+            transcript = ytt_api.fetch(video_id)
             vtt = ["WEBVTT", "", ""]
             for i, entry in enumerate(transcript):
                 start = entry["start"]
@@ -3603,10 +3014,6 @@ async def add_meeting_to_knowledge_base(req: Request):
         meta = {}
         try:
             ydl_opts = {"quiet": True, "no_warnings": True}
-            # Add proxy if available (for cloud deployment)
-            if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
-                proxy_url = f"http://{WEBSHARE_PROXY_USERNAME}:{WEBSHARE_PROXY_PASSWORD}@p.webshare.io:80"
-                ydl_opts["proxy"] = proxy_url
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(
                     f"https://youtube.com/watch?v={video_id}", download=False
@@ -3891,17 +3298,13 @@ async def compare_two_meetings(req: Request):
                 transcripts[mid] = STORED_TRANSCRIPTS[mid]
             else:
                 try:
-                    transcripts[mid] = ytt_api.fetch(mid).to_raw_data()
+                    transcripts[mid] = ytt_api.fetch(mid)
                     STORED_TRANSCRIPTS[mid] = transcripts[mid]
                 except Exception as e:
                     raise HTTPException(400, f"Could not get transcript for {mid}: {e}")
             
             try:
                 ydl_opts = {"quiet": True, "no_warnings": True}
-                # Add proxy if available (for cloud deployment)
-                if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
-                    proxy_url = f"http://{WEBSHARE_PROXY_USERNAME}:{WEBSHARE_PROXY_PASSWORD}@p.webshare.io:80"
-                    ydl_opts["proxy"] = proxy_url
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(f"https://youtube.com/watch?v={mid}", download=False)
                     metadata[mid] = {
@@ -4022,9 +3425,6 @@ async def get_conversation_starters():
 @app.post("/api/clip/preview")
 async def get_clip_preview(req: Request):
     """Get preview data for a clip (thumbnail and text snippet)"""
-    if CLOUD_MODE:
-        return {"error": "Clip preview not available in cloud mode", "frames": [], "transcript_snippet": ""}
-    
     data = await req.json()
     video_id = data.get("videoId")
     start_time = data.get("startTime", 0)
@@ -4038,10 +3438,6 @@ async def get_clip_preview(req: Request):
         meta = {}
         try:
             ydl_opts = {"quiet": True, "no_warnings": True}
-            # Add proxy if available
-            if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
-                proxy_url = f"http://{WEBSHARE_PROXY_USERNAME}:{WEBSHARE_PROXY_PASSWORD}@p.webshare.io:80"
-                ydl_opts["proxy"] = proxy_url
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(
                     f"https://youtube.com/watch?v={video_id}", download=False
@@ -4057,7 +3453,7 @@ async def get_clip_preview(req: Request):
         # Get transcript segment for the clip
         preview_text = ""
         try:
-            transcript = ytt_api.fetch(video_id).to_raw_data()
+            transcript = ytt_api.fetch(video_id)
             for entry in transcript:
                 if start_time <= entry["start"] <= end_time:
                     preview_text += clean_text(entry["text"]) + " "
@@ -4081,285 +3477,6 @@ async def get_clip_preview(req: Request):
     except Exception as e:
         print(f" Preview error: {e}")
         raise HTTPException(500, f"Failed to get preview: {str(e)}")
-
-
-# ============================================================================
-# v6.0: NEW FEATURE ENDPOINTS
-# ============================================================================
-
-# Data storage for new features (in-memory, use database for production)
-TOPIC_SUBSCRIPTIONS = {}  # {user_id: {topic: {email, frequency, created_at}}}
-ISSUE_TIMELINES = {}  # {issue_id: {name, meetings: [{video_id, date, summary}]}}
-JARGON_DICTIONARY = {
-    "TIF": "Tax Increment Financing - A special zone where property tax increases fund local improvements",
-    "CIP": "Capital Improvement Plan - A multi-year plan for major infrastructure investments",
-    "RFP": "Request for Proposal - A formal document asking vendors to submit bids for a project",
-    "variance": "Permission to deviate from zoning rules for a specific property",
-    "setback": "Required distance between a building and property lines",
-    "FAR": "Floor Area Ratio - The ratio of building floor space to lot size",
-    "quorum": "The minimum number of members needed to conduct official business",
-    "motion": "A formal proposal for the group to take action on something",
-    "second": "Support from another member needed before a motion can be discussed",
-    "table": "To postpone discussion of an item to a later time",
-    "amend": "To change or modify a motion before voting on it",
-    "overlay district": "Additional zoning rules layered on top of base zoning",
-    "inclusionary zoning": "Rules requiring new developments to include affordable housing",
-    "PILOT": "Payment In Lieu Of Taxes - Negotiated payments from tax-exempt organizations",
-    "eminent domain": "Government power to take private property for public use with fair compensation",
-}
-
-# Topic Subscriptions
-@app.post("/api/subscriptions/create")
-async def create_subscription(req: Request):
-    data = await req.json()
-    topic = data.get("topic", "").strip()
-    email = data.get("email", "")
-    frequency = data.get("frequency", "instant")
-    user_id = "default_user"
-    
-    if not topic:
-        raise HTTPException(400, "Topic is required")
-    
-    if user_id not in TOPIC_SUBSCRIPTIONS:
-        TOPIC_SUBSCRIPTIONS[user_id] = {}
-    
-    TOPIC_SUBSCRIPTIONS[user_id][topic] = {
-        "email": email,
-        "frequency": frequency,
-        "created_at": datetime.now().isoformat(),
-        "match_count": 0
-    }
-    return {"status": "subscribed", "topic": topic}
-
-@app.get("/api/subscriptions/list")
-async def list_subscriptions():
-    user_id = "default_user"
-    subs = TOPIC_SUBSCRIPTIONS.get(user_id, {})
-    return {"subscriptions": [{"topic": k, **v} for k, v in subs.items()]}
-
-@app.delete("/api/subscriptions/delete")
-async def delete_subscription(req: Request):
-    data = await req.json()
-    topic = data.get("topic")
-    user_id = "default_user"
-    
-    if user_id in TOPIC_SUBSCRIPTIONS and topic in TOPIC_SUBSCRIPTIONS[user_id]:
-        del TOPIC_SUBSCRIPTIONS[user_id][topic]
-    return {"status": "unsubscribed", "topic": topic}
-
-@app.post("/api/subscriptions/check_matches")
-async def check_subscription_matches(req: Request):
-    data = await req.json()
-    transcript = data.get("transcript", "")
-    user_id = "default_user"
-    
-    matches = []
-    subs = TOPIC_SUBSCRIPTIONS.get(user_id, {})
-    
-    for topic, sub_data in subs.items():
-        if topic.lower() in transcript.lower():
-            idx = transcript.lower().find(topic.lower())
-            context = transcript[max(0, idx-50):idx+len(topic)+50]
-            matches.append({"topic": topic, "context": f"...{context}..."})
-            TOPIC_SUBSCRIPTIONS[user_id][topic]["match_count"] = sub_data.get("match_count", 0) + 1
-    
-    return {"matches": matches}
-
-# Issue Timeline
-@app.post("/api/issues/create")
-async def create_issue(req: Request):
-    data = await req.json()
-    name = data.get("name", "").strip()
-    
-    if not name:
-        raise HTTPException(400, "Issue name is required")
-    
-    issue_id = str(uuid.uuid4())[:8]
-    ISSUE_TIMELINES[issue_id] = {
-        "id": issue_id,
-        "name": name,
-        "keywords": data.get("keywords", []),
-        "meetings": [],
-        "created_at": datetime.now().isoformat()
-    }
-    return {"status": "created", "issue_id": issue_id, "name": name}
-
-@app.get("/api/issues/list")
-async def list_issues():
-    return {"issues": list(ISSUE_TIMELINES.values())}
-
-@app.post("/api/issues/add_meeting")
-async def add_meeting_to_issue(req: Request):
-    data = await req.json()
-    issue_id = data.get("issue_id")
-    
-    if issue_id not in ISSUE_TIMELINES:
-        raise HTTPException(404, "Issue not found")
-    
-    meeting = {
-        "video_id": data.get("video_id"),
-        "video_title": data.get("video_title"),
-        "date": datetime.now().isoformat(),
-        "summary": data.get("summary", ""),
-        "decisions": data.get("decisions", [])
-    }
-    ISSUE_TIMELINES[issue_id]["meetings"].append(meeting)
-    return {"status": "added", "issue_id": issue_id}
-
-@app.post("/api/issues/auto_track")
-async def auto_track_issue(req: Request):
-    data = await req.json()
-    issue_id = data.get("issue_id")
-    transcript = data.get("transcript", "")
-    
-    if issue_id not in ISSUE_TIMELINES:
-        raise HTTPException(404, "Issue not found")
-    
-    issue = ISSUE_TIMELINES[issue_id]
-    name_lower = issue["name"].lower()
-    mention_count = transcript.lower().count(name_lower)
-    
-    return {
-        "issue_id": issue_id,
-        "issue_name": issue["name"],
-        "mention_count": mention_count,
-        "ai_summary": f"Issue '{issue['name']}' was mentioned {mention_count} times in this meeting.",
-        "ai_decisions": []
-    }
-
-@app.get("/api/issues/{issue_id}/timeline")
-async def get_issue_timeline(issue_id: str):
-    if issue_id not in ISSUE_TIMELINES:
-        raise HTTPException(404, "Issue not found")
-    return ISSUE_TIMELINES[issue_id]
-
-# Meeting Comparison
-@app.post("/api/compare/meetings")
-async def compare_meetings(req: Request):
-    data = await req.json()
-    meeting1 = data.get("meeting1", {})
-    meeting2 = data.get("meeting2", {})
-    
-    # Extract entities/topics from both meetings
-    entities1 = set(e.get("text", "").lower() for e in meeting1.get("entities", []))
-    entities2 = set(e.get("text", "").lower() for e in meeting2.get("entities", []))
-    
-    new_topics = list(entities1 - entities2)[:15]
-    ongoing_topics = list(entities1 & entities2)[:15]
-    resolved_topics = list(entities2 - entities1)[:15]
-    
-    return {
-        "new_topics": new_topics,
-        "ongoing_topics": ongoing_topics,
-        "resolved_topics": resolved_topics,
-        "evolution_summary": f"The current meeting introduces {len(new_topics)} new topics while {len(ongoing_topics)} topics continue from the previous meeting."
-    }
-
-# Jargon Translator
-@app.post("/api/jargon/explain")
-async def explain_jargon(req: Request):
-    data = await req.json()
-    term = data.get("term", "").strip()
-    
-    if not term:
-        raise HTTPException(400, "Term is required")
-    
-    # Check dictionary first
-    for key, explanation in JARGON_DICTIONARY.items():
-        if key.lower() == term.lower():
-            return {"term": key, "explanation": explanation, "source": "dictionary"}
-    
-    # Fallback explanation
-    return {
-        "term": term,
-        "explanation": f"'{term}' is a civic or government term. For an accurate definition, please consult your local government's glossary or ask the meeting administrator.",
-        "source": "fallback"
-    }
-
-@app.get("/api/jargon/dictionary")
-async def get_jargon_dictionary():
-    return {"terms": [{"term": k, "explanation": v} for k, v in JARGON_DICTIONARY.items()]}
-
-# Knowledge Graph
-@app.post("/api/graph/build")
-async def build_knowledge_graph(req: Request):
-    data = await req.json()
-    meetings_data = data.get("meetings_data", [])
-    
-    nodes = []
-    edges = []
-    entity_meetings = {}
-    
-    for meeting in meetings_data:
-        meeting_id = f"meeting_{meeting.get('video_id')}"
-        nodes.append({"id": meeting_id, "label": meeting.get("title", "Unknown"), "type": "meeting"})
-        
-        for entity in meeting.get("entities", []):
-            entity_text = entity.get("text", "").lower()
-            entity_id = f"entity_{entity_text.replace(' ', '_')}"
-            
-            if entity_id not in entity_meetings:
-                entity_meetings[entity_id] = {"text": entity.get("text"), "meetings": []}
-                nodes.append({"id": entity_id, "label": entity.get("text"), "type": entity.get("type", "unknown")})
-            
-            entity_meetings[entity_id]["meetings"].append(meeting_id)
-            edges.append({"source": meeting_id, "target": entity_id})
-    
-    # Find shared entities
-    shared_entities = []
-    for entity_id, data in entity_meetings.items():
-        if len(data["meetings"]) > 1:
-            shared_entities.append({"name": data["text"], "meeting_count": len(data["meetings"])})
-    
-    cross_connections = sum(1 for e in entity_meetings.values() if len(e["meetings"]) > 1)
-    
-    return {
-        "nodes": nodes,
-        "edges": edges,
-        "shared_entities": sorted(shared_entities, key=lambda x: x["meeting_count"], reverse=True),
-        "stats": {
-            "total_nodes": len(nodes),
-            "total_edges": len(edges),
-            "cross_meeting_connections": cross_connections
-        }
-    }
-
-# ============================================================================
-# END v6.0 NEW FEATURE ENDPOINTS
-# ============================================================================
-
-
-# ============================================================================
-# CATCH-ALL ROUTES FOR REACT SPA (must be LAST after all API routes)
-# ============================================================================
-
-# Only add catch-all if DIST_DIR exists
-if DIST_DIR:
-    @app.get("/")
-    async def serve_react_app_root():
-        """Serve React app at root"""
-        return FileResponse(os.path.join(DIST_DIR, "index.html"))
-    
-    @app.get("/{full_path:path}")
-    async def serve_react_app_catchall(full_path: str):
-        """Catch-all for React SPA routing - must be LAST route"""
-        # Don't catch API routes - they should 404 normally
-        if full_path.startswith("api/"):
-            raise HTTPException(404, f"API endpoint not found: /{full_path}")
-        
-        # Don't catch file routes
-        if full_path.startswith("files/"):
-            raise HTTPException(404, f"File not found: /{full_path}")
-        
-        # Check if it's a static file (logo, favicon, etc.)
-        static_path = os.path.join(DIST_DIR, full_path)
-        if os.path.isfile(static_path):
-            return FileResponse(static_path)
-        
-        # Otherwise serve the React app for client-side routing
-        return FileResponse(os.path.join(DIST_DIR, "index.html"))
-    
-    print("[OK] React catch-all routes registered (at end of file)")
 
 
 if __name__ == "__main__":
