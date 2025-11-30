@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
 """
-Community Highlighter - Desktop App Launcher
-============================================
+Community Highlighter - Desktop App
+===================================
 
-This script runs the Community Highlighter as a desktop application.
-All features work including video clip downloads (no YouTube blocking).
+Run this script to launch Community Highlighter as a desktop application.
+All features including video clip downloads work in desktop mode.
 
 Usage:
     python desktop_app.py
 
 Requirements:
-    pip install pywebview
-
-First-time setup:
-    1. Make sure you have a .env file with your API keys
-    2. Run: npm run build (to build the frontend)
-    3. Run: python desktop_app.py
+    pip install pywebview  (optional, for native window)
+    
+If pywebview is not installed, the app opens in your default browser.
 """
 
 import os
@@ -23,108 +20,162 @@ import sys
 import time
 import threading
 import webbrowser
+import socket
 
-# Ensure we're in the right directory
-script_dir = os.path.dirname(os.path.abspath(__file__))
-os.chdir(script_dir)
+# Configuration
+APP_NAME = "Community Highlighter"
+APP_VERSION = "6.0"
+DEFAULT_PORT = 8000
+WINDOW_WIDTH = 1400
+WINDOW_HEIGHT = 900
 
-# Set environment to disable cloud mode (enable all features)
-os.environ["CLOUD_MODE"] = "false"
+def setup_environment():
+    """Configure environment for desktop mode"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(script_dir)
+    
+    # Ensure desktop mode (enables all features)
+    os.environ["CLOUD_MODE"] = "false"
+    
+    # Add directories to Python path
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
+    
+    backend_dir = os.path.join(script_dir, "backend")
+    if os.path.exists(backend_dir) and backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+    
+    return script_dir
 
-# Check for required packages
-try:
-    import uvicorn
-except ImportError:
-    print("Missing uvicorn. Install with: pip install uvicorn")
+def find_app_module(script_dir):
+    """Find and import the FastAPI app"""
+    locations = [
+        ("backend.app", "app"),
+        ("app", "app"),
+    ]
+    
+    for module_name, app_var in locations:
+        try:
+            module = __import__(module_name, fromlist=[app_var])
+            app = getattr(module, app_var)
+            print(f"[OK] Loaded app from {module_name}")
+            return app
+        except (ImportError, AttributeError):
+            continue
+    
+    print("\n[ERROR] Could not find the FastAPI app!")
+    print("\nExpected structure:")
+    print("  community-highlighter/")
+    print("  +-- desktop_app.py")
+    print("  +-- backend/")
+    print("  |   +-- app.py")
+    print("  +-- dist/")
     sys.exit(1)
 
-# Try to use pywebview for native window, fall back to browser
-USE_NATIVE_WINDOW = False
-try:
-    import webview
-    USE_NATIVE_WINDOW = True
-except ImportError:
-    print("[!] pywebview not installed - will open in browser instead")
-    print("    For a native desktop window, install: pip install pywebview")
+def check_prerequisites(script_dir):
+    """Check for required files"""
+    issues = []
+    
+    env_found = os.path.exists(os.path.join(script_dir, ".env")) or \
+                os.path.exists(os.path.join(script_dir, "backend", ".env"))
+    if not env_found:
+        issues.append("No .env file - API keys may not be configured")
+    
+    dist_found = os.path.exists(os.path.join(script_dir, "dist")) or \
+                 os.path.exists(os.path.join(script_dir, "backend", "dist"))
+    if not dist_found:
+        issues.append("No 'dist' folder - run 'npm run build'")
+    
+    return issues
 
-def start_server():
+def start_server(app, port):
     """Start the FastAPI server"""
-    # Import app from backend
-    sys.path.insert(0, script_dir)
-    
-    try:
-        from backend.app import app
-    except ImportError:
-        # Try importing directly if in same folder
-        try:
-            from app import app
-        except ImportError:
-            print("ERROR: Could not import app. Make sure app.py is in ./backend/ folder")
-            sys.exit(1)
-    
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
 
-def main():
-    print("=" * 60)
-    print("  Community Highlighter - Desktop App")
-    print("=" * 60)
-    print()
-    
-    # Check for .env file
-    if not os.path.exists(".env") and not os.path.exists("backend/.env"):
-        print("[!] Warning: No .env file found. Make sure API keys are set.")
-        print("    Create a .env file with:")
-        print("    OPENAI_API_KEY=sk-your-key")
-        print()
-    
-    # Check if frontend is built
-    if not os.path.exists("dist"):
-        print("[!] Warning: Frontend not built. Run 'npm run build' first.")
-        print("    The app will still work but may load slower.")
-        print()
-    
-    # Start server in background thread
-    print("[*] Starting server...")
-    server_thread = threading.Thread(target=start_server, daemon=True)
-    server_thread.start()
-    
-    # Wait for server to be ready
-    print("[*] Waiting for server to start...")
-    time.sleep(3)
-    
-    url = "http://127.0.0.1:8000"
-    
-    if USE_NATIVE_WINDOW:
-        print(f"[OK] Opening native window...")
-        print()
-        print("Close the window to exit.")
-        print()
-        
-        # Create native desktop window
+def wait_for_server(port, timeout=30):
+    """Wait for server to be available"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('127.0.0.1', port))
+            sock.close()
+            if result == 0:
+                return True
+        except:
+            pass
+        time.sleep(0.5)
+    return False
+
+def open_native_window(url):
+    """Try to open a native window"""
+    try:
+        import webview
         webview.create_window(
-            "Community Highlighter",
-            url,
-            width=1400,
-            height=900,
-            resizable=True,
-            min_size=(800, 600)
+            APP_NAME, url,
+            width=WINDOW_WIDTH, height=WINDOW_HEIGHT,
+            resizable=True, min_size=(800, 600)
         )
         webview.start()
-    else:
-        print(f"[OK] Opening in browser: {url}")
-        print()
-        print("Press Ctrl+C to stop the server.")
-        print()
-        
-        # Open in default browser
-        webbrowser.open(url)
-        
-        # Keep running until interrupted
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("\n[*] Shutting down...")
+        return True
+    except ImportError:
+        return False
+    except Exception as e:
+        print(f"[!] Native window error: {e}")
+        return False
+
+def open_in_browser(url):
+    """Open in browser and keep running"""
+    print(f"\n[OK] Opening: {url}")
+    webbrowser.open(url)
+    
+    print("\n" + "=" * 50)
+    print("  Server running! Press Ctrl+C to stop")
+    print("=" * 50 + "\n")
+    
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n[*] Shutting down...")
+
+def main():
+    print("\n" + "=" * 50)
+    print(f"  {APP_NAME} v{APP_VERSION} - Desktop Mode")
+    print("=" * 50 + "\n")
+    
+    script_dir = setup_environment()
+    print(f"[*] Directory: {script_dir}")
+    
+    for issue in check_prerequisites(script_dir):
+        print(f"[!] {issue}")
+    
+    try:
+        import uvicorn
+    except ImportError:
+        print("\n[ERROR] uvicorn not installed! Run: pip install uvicorn")
+        sys.exit(1)
+    
+    print("[*] Loading application...")
+    app = find_app_module(script_dir)
+    
+    print(f"[*] Starting server on port {DEFAULT_PORT}...")
+    threading.Thread(target=start_server, args=(app, DEFAULT_PORT), daemon=True).start()
+    
+    print("[*] Waiting for server...")
+    if not wait_for_server(DEFAULT_PORT):
+        print("[ERROR] Server failed to start")
+        sys.exit(1)
+    
+    url = f"http://127.0.0.1:{DEFAULT_PORT}"
+    print(f"[OK] Server ready: {url}")
+    
+    if not open_native_window(url):
+        print("[!] pywebview not available - using browser")
+        print("    Install for native window: pip install pywebview")
+        open_in_browser(url)
 
 if __name__ == "__main__":
     main()
