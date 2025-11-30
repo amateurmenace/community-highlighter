@@ -167,40 +167,75 @@ def create_app_bundle():
 # Community Highlighter Launcher
 # This script runs the Python GUI launcher
 
+# Set up PATH to include common Python locations (GUI apps have minimal PATH)
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
 # Get the directory where this script is located
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 RESOURCES="$DIR/../Resources"
 
+# Log file for debugging
+LOGFILE="$RESOURCES/launcher.log"
+echo "=== Launcher started at $(date) ===" > "$LOGFILE"
+echo "PATH: $PATH" >> "$LOGFILE"
+
 cd "$RESOURCES"
 
-# Find Python
-if command -v python3 &> /dev/null; then
-    PYTHON=python3
-elif command -v python &> /dev/null; then
-    PYTHON=python
-else
+# Find Python - check specific locations first
+PYTHON=""
+
+# Check common Python 3 locations
+for p in /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3 /Library/Frameworks/Python.framework/Versions/*/bin/python3; do
+    if [ -x "$p" ]; then
+        PYTHON="$p"
+        echo "Found Python at: $p" >> "$LOGFILE"
+        break
+    fi
+done
+
+# Fallback to PATH search
+if [ -z "$PYTHON" ]; then
+    if command -v python3 &> /dev/null; then
+        PYTHON=$(command -v python3)
+        echo "Found Python via PATH: $PYTHON" >> "$LOGFILE"
+    elif command -v python &> /dev/null; then
+        PYTHON=$(command -v python)
+        echo "Found Python via PATH: $PYTHON" >> "$LOGFILE"
+    fi
+fi
+
+# If still no Python, show error
+if [ -z "$PYTHON" ]; then
+    echo "ERROR: Python not found!" >> "$LOGFILE"
     osascript -e 'display dialog "Python 3 is required but not installed.\\n\\nPlease install Python from:\\nhttps://www.python.org/downloads/" buttons {"OK"} default button "OK" with icon stop with title "Community Highlighter"'
     exit 1
 fi
 
+echo "Using Python: $PYTHON" >> "$LOGFILE"
+echo "Python version: $($PYTHON --version 2>&1)" >> "$LOGFILE"
+
 # Check/create virtual environment
 if [ ! -d "$RESOURCES/venv" ]; then
     osascript -e 'display notification "Setting up for first run... This may take a minute." with title "Community Highlighter"'
-    $PYTHON -m venv "$RESOURCES/venv" 2>/dev/null
+    echo "Creating virtual environment..." >> "$LOGFILE"
+    $PYTHON -m venv "$RESOURCES/venv" 2>> "$LOGFILE"
     if [ -d "$RESOURCES/venv" ]; then
         source "$RESOURCES/venv/bin/activate"
-        pip install --upgrade pip --quiet 2>/dev/null
-        pip install -r "$RESOURCES/requirements.txt" --quiet 2>/dev/null
+        echo "Installing dependencies..." >> "$LOGFILE"
+        pip install --upgrade pip --quiet 2>> "$LOGFILE"
+        pip install -r "$RESOURCES/requirements.txt" --quiet 2>> "$LOGFILE"
     else
+        echo "venv creation failed, using system Python" >> "$LOGFILE"
         # Fallback: use system Python if venv fails
-        $PYTHON -m pip install -r "$RESOURCES/requirements.txt" --user --quiet 2>/dev/null
+        $PYTHON -m pip install -r "$RESOURCES/requirements.txt" --user --quiet 2>> "$LOGFILE"
     fi
 else
     source "$RESOURCES/venv/bin/activate" 2>/dev/null
 fi
 
 # Run the launcher
-exec $PYTHON "$RESOURCES/launcher.py"
+echo "Starting launcher.py..." >> "$LOGFILE"
+exec $PYTHON "$RESOURCES/launcher.py" 2>> "$LOGFILE"
 '''
     
     launcher_path = os.path.join(macos_dir, "launcher")

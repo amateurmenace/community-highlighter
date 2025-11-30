@@ -89,16 +89,26 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 # Sign up at https://www.webshare.io/ and get rotating residential proxy credentials
 WEBSHARE_PROXY_USERNAME = os.getenv("WEBSHARE_PROXY_USERNAME", "")
 WEBSHARE_PROXY_PASSWORD = os.getenv("WEBSHARE_PROXY_PASSWORD", "")
+# Optional: custom proxy host:port (check your Webshare dashboard for the correct endpoint)
+WEBSHARE_PROXY_HOST = os.getenv("WEBSHARE_PROXY_HOST", "p.webshare.io:80")
 
 # Build proxy URL with proper URL encoding for special characters
 WEBSHARE_PROXY_URL = None
 if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
     from urllib.parse import quote
     # URL-encode credentials in case they have special characters like @, #, etc.
-    encoded_user = quote(WEBSHARE_PROXY_USERNAME, safe='')
+    # Add -1 suffix for rotating residential proxies (Webshare session format)
+    username_with_session = WEBSHARE_PROXY_USERNAME
+    if not WEBSHARE_PROXY_USERNAME.endswith(('-1', '-rotate', '-country-us')):
+        username_with_session = f"{WEBSHARE_PROXY_USERNAME}-1"
+    
+    encoded_user = quote(username_with_session, safe='')
     encoded_pass = quote(WEBSHARE_PROXY_PASSWORD, safe='')
-    WEBSHARE_PROXY_URL = f"http://{encoded_user}:{encoded_pass}@p.webshare.io:80"
-    print(f"[OK] Proxy URL built for yt-dlp (username: {WEBSHARE_PROXY_USERNAME[:4]}...)")
+    
+    proxy_host = WEBSHARE_PROXY_HOST
+    
+    WEBSHARE_PROXY_URL = f"http://{encoded_user}:{encoded_pass}@{proxy_host}/"
+    print(f"[OK] Proxy URL built: {username_with_session}@{proxy_host}")
 
 # Initialize YouTube Transcript API - with proxy if available
 if WEBSHARE_IMPORT_OK and WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
@@ -884,10 +894,17 @@ async def system_status():
 
 
 def parse_vtt_to_transcript(vtt_content: str) -> list:
-    """Parse VTT content into transcript format for AI assistant"""
+    """Parse VTT content into transcript format for AI assistant
+    
+    Handles YouTube's rolling captions which often have overlapping/duplicate text.
+    """
     transcript_data = []
     lines = vtt_content.split("\n")
     i = 0
+    
+    # Track seen text to avoid duplicates
+    seen_texts = set()
+    last_text = ""
 
     while i < len(lines):
         line = lines[i].strip()
@@ -924,7 +941,7 @@ def parse_vtt_to_transcript(vtt_content: str) -> list:
 
                 start_seconds = time_to_seconds(start_time)
                 end_seconds = time_to_seconds(end_time)
-                duration = max(end_seconds - start_seconds, 1.0)
+                duration = max(end_seconds - start_seconds, 0.5)
 
                 # Get the text (next non-empty lines)
                 i += 1
@@ -940,16 +957,54 @@ def parse_vtt_to_transcript(vtt_content: str) -> list:
                     i += 1
 
                 text = " ".join(text_lines).strip()
+                
                 if text:
-                    transcript_data.append(
-                        {"text": text, "start": start_seconds, "duration": duration}
-                    )
+                    # Deduplicate: Check for exact duplicates and rolling text
+                    text_normalized = text.lower().strip()
+                    
+                    # Skip if exact duplicate
+                    if text_normalized in seen_texts:
+                        continue
+                    
+                    # Check for rolling/overlapping text (YouTube captions often show partial updates)
+                    # If new text is contained in last text, or last text is contained in new text, skip
+                    is_rolling = False
+                    if last_text:
+                        last_normalized = last_text.lower().strip()
+                        # Check if one contains the other (rolling caption)
+                        if text_normalized in last_normalized or last_normalized in text_normalized:
+                            # Keep the longer one
+                            if len(text_normalized) > len(last_normalized):
+                                # Replace last entry with this longer one
+                                if transcript_data:
+                                    transcript_data[-1]["text"] = text
+                                    seen_texts.add(text_normalized)
+                            is_rolling = True
+                        # Check for significant overlap (more than 50% of words match)
+                        elif not is_rolling:
+                            words_new = set(text_normalized.split())
+                            words_last = set(last_normalized.split())
+                            if words_new and words_last:
+                                overlap = len(words_new & words_last) / min(len(words_new), len(words_last))
+                                if overlap > 0.7:  # 70% overlap = likely rolling caption
+                                    # Keep the longer text
+                                    if len(text) > len(last_text) and transcript_data:
+                                        transcript_data[-1]["text"] = text
+                                    is_rolling = True
+                    
+                    if not is_rolling:
+                        seen_texts.add(text_normalized)
+                        transcript_data.append(
+                            {"text": text, "start": start_seconds, "duration": duration}
+                        )
+                        last_text = text
+                        
             except Exception as e:
                 print(f"   Warning: Could not parse timestamp: {e}")
 
         i += 1
 
-    print(f"   Parsed {len(transcript_data)} segments from VTT")
+    print(f"   Parsed {len(transcript_data)} segments from VTT (deduplicated)")
     return transcript_data
 
 
@@ -2185,15 +2240,9 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
 
         elif format_type == "social":
             output = os.path.join(FILES_DIR, f"social_{job_id[:8]}.mp4")
-            total_duration = 0
-            selected_clips = []
-            for clip in clips:
-                duration = clip.get("end", 0) - clip.get("start", 0)
-                if total_duration + duration <= 60:
-                    selected_clips.append(clip)
-                    total_duration += duration
-                else:
-                    break
+            
+            # Use all clips (same as regular reel, no 60s limit)
+            selected_clips = clips[:10]  # Max 10 clips like regular reel
 
             if selected_clips:
                 # First extract clips with captions, then concatenate
@@ -2208,31 +2257,40 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     duration = end - start
                     highlight_text = clip.get("highlight", "")
                     
-                    # Build filter chain
+                    # Build filter chain - start with scaling for vertical video
                     vf_filters = ["scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2"]
                     
+                    # Add subtitles (captions at bottom)
                     if captions_enabled and transcript_data:
                         clip_transcript = get_transcript_for_timerange(start, end, transcript_data)
                         if clip_transcript:
                             srt_file = os.path.join(work, f"social_{i}.srt")
                             create_srt_file(clip_transcript, srt_file)
-                            srt_escaped = srt_file.replace('\\', '/').replace(':', '\\:')
-                            vf_filters.append(f"subtitles='{srt_escaped}':force_style='FontSize=28,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=3,Shadow=2,MarginV=120'")
+                            # Use absolute path and proper escaping for FFmpeg
+                            srt_path = os.path.abspath(srt_file)
+                            # FFmpeg subtitles filter needs special escaping
+                            srt_escaped = srt_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+                            vf_filters.append(f"subtitles='{srt_escaped}':force_style='FontSize=24,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=3,Shadow=2,MarginV=80,Alignment=2'")
+                            print(f"[social] Added subtitles from {srt_file}")
                     
+                    # Add highlight text at top
                     if captions_enabled and highlight_text:
                         escaped_text = escape_ffmpeg_text(highlight_text)
-                        # For vertical video, position text carefully
-                        vf_filters.append(f"drawtext=text='{escaped_text}':fontsize=32:fontcolor=yellow:borderw=4:bordercolor=black:x=(w-text_w)/2:y=100:font=Arial")
+                        vf_filters.append(f"drawtext=text='{escaped_text}':fontsize=28:fontcolor=yellow:borderw=3:bordercolor=black:x=(w-text_w)/2:y=80:font=Arial")
                     
+                    vf_string = ",".join(vf_filters)
                     cmd = [
                         "ffmpeg", "-i", video_file,
                         "-ss", str(start), "-t", str(duration),
-                        "-vf", ",".join(vf_filters),
+                        "-vf", vf_string,
                         "-c:v", "libx264", "-preset", "fast",
                         "-c:a", "aac",
                         clip_file, "-y"
                     ]
-                    subprocess.run(cmd, capture_output=True)
+                    print(f"[social] Processing clip {i+1}: {start:.1f}s - {end:.1f}s")
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                    if result.returncode != 0:
+                        print(f"[social] FFmpeg error: {result.stderr[:500]}")
                     
                     if os.path.exists(clip_file):
                         clip_files.append(clip_file)
@@ -2283,29 +2341,36 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                         clip_file = os.path.join(work, f"temp_{i}.mp4")
                         vf_filters = []
                         
+                        # Add subtitles (captions at bottom)
                         if transcript_data:
                             clip_transcript = get_transcript_for_timerange(start, end, transcript_data)
                             if clip_transcript:
                                 srt_file = os.path.join(work, f"srt_{i}.srt")
                                 create_srt_file(clip_transcript, srt_file)
-                                srt_escaped = srt_file.replace('\\', '/').replace(':', '\\:')
-                                # Captions at bottom, not too big
-                                vf_filters.append(f"subtitles='{srt_escaped}':force_style='FontSize=18,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2,Shadow=1,MarginV=25'")
+                                # Use absolute path and proper escaping for FFmpeg
+                                srt_path = os.path.abspath(srt_file)
+                                srt_escaped = srt_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+                                # Captions at bottom with proper alignment
+                                vf_filters.append(f"subtitles='{srt_escaped}':force_style='FontSize=20,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2,Shadow=1,MarginV=30,Alignment=2'")
+                                print(f"[combined] Added subtitles from {srt_file}")
                         
+                        # Add highlight text at top
                         if highlight_text:
                             escaped_text = escape_ffmpeg_text(highlight_text)
                             # Highlight text at top in yellow
-                            vf_filters.append(f"drawtext=text='{escaped_text}':fontsize=22:fontcolor=yellow:borderw=3:bordercolor=black:x=(w-text_w)/2:y=30:font=Arial")
+                            vf_filters.append(f"drawtext=text='{escaped_text}':fontsize=20:fontcolor=yellow:borderw=2:bordercolor=black:x=(w-text_w)/2:y=25:font=Arial")
                         
                         if vf_filters:
+                            vf_string = ",".join(vf_filters)
                             cmd = [
                                 "ffmpeg", "-i", video_file,
                                 "-ss", str(start), "-t", str(duration),
-                                "-vf", ",".join(vf_filters),
+                                "-vf", vf_string,
                                 "-c:v", "libx264", "-preset", "fast",
                                 "-c:a", "aac",
                                 clip_file, "-y"
                             ]
+                            print(f"[combined] Processing clip {i+1}: {start:.1f}s - {end:.1f}s with captions")
                         else:
                             cmd = [
                                 "ffmpeg", "-i", video_file,
@@ -2314,7 +2379,9 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                                 "-c:a", "aac",
                                 clip_file, "-y"
                             ]
-                        subprocess.run(cmd, capture_output=True)
+                        result = subprocess.run(cmd, capture_output=True, text=True)
+                        if result.returncode != 0:
+                            print(f"[combined] FFmpeg error: {result.stderr[:500]}")
                     else:
                         # Fast copy without captions
                         clip_file = os.path.join(work, f"temp_{i}.mp4")

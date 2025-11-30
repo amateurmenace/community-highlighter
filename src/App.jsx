@@ -2552,20 +2552,80 @@ function ExportModal({ onSelect, onClose, clipCount }) {
   );
 }
 
-function ProgressIndicator({ status, percent, message }) {
+function ProgressIndicator({ status, percent, message, estimatedTime }) {
+  const [dots, setDots] = useState('');
+  
+  // Animated dots to show activity
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDots(d => d.length >= 3 ? '' : d + '.');
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
+  
   return (
-    <div className="progress-indicator animate-slideIn">
-      <div className="progress-header">
-        <div className={`status-dot ${status}`} />
-        <span className="status-text">{message}</span>
+    <div className="progress-indicator animate-slideIn" style={{
+      background: 'linear-gradient(135deg, #1E7F63 0%, #166b52 100%)',
+      color: 'white',
+      padding: '20px',
+      borderRadius: '12px',
+      marginBottom: '20px',
+      boxShadow: '0 4px 15px rgba(30, 127, 99, 0.3)'
+    }}>
+      <div className="progress-header" style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+        {/* Spinning animation */}
+        <div style={{
+          width: '24px',
+          height: '24px',
+          border: '3px solid rgba(255,255,255,0.3)',
+          borderTopColor: 'white',
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite'
+        }} />
+        <span style={{ fontWeight: 600, fontSize: '16px' }}>{message}{dots}</span>
       </div>
+      
       {percent !== undefined && (
-        <div className="progress-bar">
-          <div className="progress-fill" style={{ width: `${percent}%` }}>
-            <span className="progress-percent">{Math.round(percent)}%</span>
+        <div className="progress-bar" style={{
+          background: 'rgba(255,255,255,0.2)',
+          borderRadius: '8px',
+          height: '12px',
+          overflow: 'hidden',
+          marginBottom: '12px'
+        }}>
+          <div className="progress-fill" style={{
+            width: `${percent}%`,
+            height: '100%',
+            background: 'rgba(255,255,255,0.9)',
+            borderRadius: '8px',
+            transition: 'width 0.5s ease',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
+            {percent > 10 && <span style={{ fontSize: '10px', fontWeight: 600, color: '#1E7F63' }}>{Math.round(percent)}%</span>}
           </div>
         </div>
       )}
+      
+      <div style={{ fontSize: '13px', opacity: 0.9, lineHeight: 1.5 }}>
+        {estimatedTime && (
+          <div style={{ marginBottom: '6px' }}>
+            ⏱️ Estimated time: ~{estimatedTime} minutes
+          </div>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span>💡</span>
+          <span>This could take a while. Feel free to visit other sites while you wait, but keep this tab open.</span>
+        </div>
+      </div>
+      
+      {/* CSS for spin animation */}
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }
@@ -3233,7 +3293,7 @@ export default function App() {
   const [clipBasket, setClipBasket] = useState([]);
   const [lang, setLang] = useState("en");
   const [aiModel, setAiModel] = useState("gpt-4o");
-  const [processStatus, setProcessStatus] = useState({ active: false, message: "", percent: 0 });
+  const [processStatus, setProcessStatus] = useState({ active: false, message: "", percent: 0, estimatedTime: null });
   const [translation, setTranslation] = useState({ text: "", lang: "", show: false });
   const [translateLang, setTranslateLang] = useState("Spanish");
   const [showExportModal, setShowExportModal] = useState(false);
@@ -3707,10 +3767,14 @@ export default function App() {
     }
 
     // Highlights already exist - build reel directly
+    // Estimate processing time based on number of clips (roughly 30-60 seconds per clip)
+    const estimatedMinutes = Math.ceil((5 * 45) / 60); // 5 clips * ~45 seconds each
+    
     setProcessStatus({
       active: true,
       message: format === 'social' ? "Building social media reel..." : "Building AI highlight reel...",
-      percent: 0
+      percent: 0,
+      estimatedTime: estimatedMinutes
     });
     setLoading(l => ({ ...l, reel: true }));
 
@@ -4106,6 +4170,7 @@ export default function App() {
             status="active"
             percent={processStatus.percent}
             message={processStatus.message}
+            estimatedTime={processStatus.estimatedTime}
           />
         )}
 
@@ -4552,8 +4617,24 @@ export default function App() {
           </section>
 
           <section className="card section right-column animate-fadeIn">
+            {/* 1. VIDEO PLAYER - First */}
+            {videoId && (
+              <div className="video-section animate-slideIn">
+                <div style={{ fontWeight: 700, marginBottom: 12 }}>{t.videoPlayer}</div>
+                <iframe
+                  ref={playerRef}
+                  title="video-player"
+                  className="video-frame"
+                  src={`https://www.youtube.com/embed/${videoId}?autoplay=0&mute=0&playsinline=1`}
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  allowFullScreen
+                />
+              </div>
+            )}
+
+            {/* 2. CLIP BASKET - Under video */}
             {clipBasket.length > 0 && (
-              <div className="basket-section animate-slideIn">
+              <div className="basket-section animate-slideIn" style={{ marginTop: 16 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                   <div style={{ fontWeight: 700 }}>
                     {t.savedClips}: {clipBasket.length}
@@ -4593,8 +4674,9 @@ export default function App() {
               </div>
             )}
 
+            {/* 3. JOB STATUS / PROCESSING METER - Under clip basket */}
             {job.status !== "idle" && (
-              <div className="status-section animate-slideIn">
+              <div className="status-section animate-slideIn" style={{ marginTop: 16 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <div style={{ fontWeight: 700 }}>{t.processing}</div>
                   <div className={`status-badge ${job.status}`}>
@@ -4617,24 +4699,11 @@ export default function App() {
               </div>
             )}
 
-            {videoId && (
-              <div className="video-section animate-slideIn">
-                <div style={{ fontWeight: 700, marginBottom: 12 }}>{t.videoPlayer}</div>
-                <iframe
-                  ref={playerRef}
-                  title="video-player"
-                  className="video-frame"
-                  src={`https://www.youtube.com/embed/${videoId}?autoplay=0&mute=0&playsinline=1`}
-                  allow="autoplay; encrypted-media; picture-in-picture"
-                  allowFullScreen
-                />
-              </div>
-            )}
-
             {/* v5.2: Live Meeting Mode removed */}
 
+            {/* 4. HIGHLIGHT REEL ACTIONS - At bottom */}
             {videoId && (
-              <div className="actions-section-vertical animate-slideIn">
+              <div className="actions-section-vertical animate-slideIn" style={{ marginTop: 16 }}>
                 <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 16 }}>
                   {t.createReel}
                 </div>
@@ -4698,7 +4767,7 @@ export default function App() {
                   onClick={() => buildReel('social')}
                   disabled={loading.reel}
                 >
-                  Social Media Reel (60s)
+                  Social Media Reel (Vertical)
                 </button>
 
                 <button
