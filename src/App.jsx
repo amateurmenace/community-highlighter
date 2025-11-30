@@ -4234,6 +4234,50 @@ export default function App() {
           </section>
         )}
 
+        {/* Cloud Mode Banner - Show download prompt when in cloud mode */}
+        {isCloudMode && videoId && (
+          <div style={{
+            marginTop: '16px',
+            padding: '16px 24px',
+            background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
+            border: '2px solid #1E7F63',
+            borderRadius: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '16px',
+            flexWrap: 'wrap'
+          }}>
+            <div style={{ flex: 1, minWidth: '250px' }}>
+              <div style={{ fontWeight: '700', color: '#1E7F63', marginBottom: '4px', fontSize: '15px' }}>
+                Want to Download Video Clips?
+              </div>
+              <div style={{ color: '#166534', fontSize: '13px', lineHeight: '1.4' }}>
+                Video editing features require the desktop app. Download clips, create highlight reels, and export videos locally.
+              </div>
+            </div>
+            <a 
+              href="https://github.com/amateurmenace/community-highlighter/releases/latest"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                background: '#1E7F63',
+                color: 'white',
+                padding: '10px 20px',
+                borderRadius: '8px',
+                fontWeight: '600',
+                fontSize: '14px',
+                textDecoration: 'none',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              Download Desktop App
+            </a>
+          </div>
+        )}
+
         {translation.show && (
           <section className="card section translation-card animate-slideUp" style={{ marginTop: 16 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -4676,51 +4720,6 @@ export default function App() {
             )}
           </section>
         </div>
-
-        {/* Cloud Mode Banner - Show download prompt when in cloud mode */}
-        {isCloudMode && videoId && (
-          <div style={{
-            maxWidth: '1200px',
-            margin: '20px auto',
-            padding: '16px 24px',
-            background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
-            border: '2px solid #1E7F63',
-            borderRadius: '12px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '16px',
-            flexWrap: 'wrap'
-          }}>
-            <div style={{ flex: 1, minWidth: '250px' }}>
-              <div style={{ fontWeight: '700', color: '#1E7F63', marginBottom: '4px', fontSize: '15px' }}>
-                Want to Download Video Clips?
-              </div>
-              <div style={{ color: '#166534', fontSize: '13px', lineHeight: '1.4' }}>
-                Video editing features require the desktop app. Download clips, create highlight reels, and export videos locally.
-              </div>
-            </div>
-            <a 
-              href="https://github.com/amateurmenace/community-highlighter/releases/latest"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                background: '#1E7F63',
-                color: 'white',
-                padding: '10px 20px',
-                borderRadius: '8px',
-                fontWeight: '600',
-                fontSize: '14px',
-                textDecoration: 'none',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              Download Desktop App
-            </a>
-          </div>
-        )}
 
         {fullText && sents.length > 0 && (
           <section id="analytics-section" className="full-width-viz card section animate-slideUp" style={{ marginTop: 16 }}>
