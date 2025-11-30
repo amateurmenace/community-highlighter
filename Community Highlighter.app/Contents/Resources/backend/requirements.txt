@@ -21,4 +21,3 @@ git+https://github.com/yt-dlp/yt-dlp.git
 pydantic==2.5.0
 sqlalchemy==2.0.23
 dateparser==1.2.0
-Pillow>=10.0.0

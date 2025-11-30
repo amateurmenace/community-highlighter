@@ -3205,6 +3205,7 @@ export default function App() {
   const [actions, setActions] = useState({ reel: "", sum: "", dl: "", tr: "" });
   const [summary, setSummary] = useState({ para: "", bullets: [] });
   const [highlightsWithQuotes, setHighlightsWithQuotes] = useState([]);
+  const [reelCaptionsEnabled, setReelCaptionsEnabled] = useState(true);
   const [words, setWords] = useState([]);
   const [entities, setEntities] = useState([]);
   const [loadingEntities, setLoadingEntities] = useState(false);
@@ -3636,12 +3637,76 @@ export default function App() {
 
   const buildReel = async (format = "combined") => {
     const quotes = highlightsWithQuotes.map(h => h.quote);
+    const highlights = highlightsWithQuotes.map(h => h.highlight);
 
-    if (!videoId || quotes.length === 0) {
-      alert("Please generate AI highlights first. The reel is built from the quotes.");
+    // Auto-generate highlights if none exist
+    if (!videoId) {
+      alert("Please load a video first.");
       return;
     }
 
+    if (quotes.length === 0) {
+      // No highlights yet - generate them first
+      setProcessStatus({
+        active: true,
+        message: "Generating AI highlights first...",
+        percent: 0
+      });
+      setLoading(l => ({ ...l, reel: true }));
+
+      try {
+        const res = await apiSummaryAI({
+          transcript: fullText.slice(0, 100000),
+          language: lang === "es" ? "es" : "en",
+          model: aiModel,
+          strategy: "highlights_with_quotes"
+        });
+
+        const text = res.summarySentences || "[]";
+        let generatedHighlights = [];
+        try {
+          generatedHighlights = JSON.parse(text);
+        } catch (e) {
+          console.error("Failed to parse highlights JSON:", e);
+          const bullets = text.split(/\d+\.|Â|-/).filter(s => s.trim().length > 10);
+          for (let i = 0; i < Math.min(10, bullets.length); i++) {
+            generatedHighlights.push({
+              highlight: bullets[i].trim().split('\n')[0],
+              quote: 'Quote not found (fallback)'
+            });
+          }
+        }
+
+        generatedHighlights = generatedHighlights.slice(0, 10);
+        setHighlightsWithQuotes(generatedHighlights);
+
+        // Now build the reel with the generated highlights
+        setProcessStatus({
+          active: true,
+          message: format === 'social' ? "Building social media reel..." : "Building AI highlight reel...",
+          percent: 20
+        });
+
+        const reelRes = await apiHighlightReel({
+          videoId,
+          quotes: generatedHighlights.map(h => h.quote), // Pass ALL quotes - backend will select spread
+          highlights: generatedHighlights.map(h => h.highlight), // Pass ALL highlights
+          transcript: sents,
+          pad,
+          format: format,
+          captions: reelCaptionsEnabled
+        });
+        pollJobStatus(reelRes.jobId);
+
+      } catch (e) {
+        console.error("Reel generation error:", e);
+        setProcessStatus({ active: false, message: "", percent: 0 });
+        setLoading(l => ({ ...l, reel: false }));
+      }
+      return;
+    }
+
+    // Highlights already exist - build reel directly
     setProcessStatus({
       active: true,
       message: format === 'social' ? "Building social media reel..." : "Building AI highlight reel...",
@@ -3650,13 +3715,15 @@ export default function App() {
     setLoading(l => ({ ...l, reel: true }));
 
     try {
-      // Pass transcript segments so backend can find timestamps
+      // Pass ALL quotes/highlights - backend will select a spread-out sample of 5
       const res = await apiHighlightReel({
         videoId,
-        quotes: quotes.slice(0, 5), // Use first 5 quotes as requested
+        quotes: quotes, // Pass ALL quotes
+        highlights: highlights, // Pass ALL highlights  
         transcript: sents, // Pass transcript for timestamp matching
         pad,
-        format: format
+        format: format,
+        captions: reelCaptionsEnabled // Pass captions preference
       });
       pollJobStatus(res.jobId);
     } catch (e) {
@@ -4570,6 +4637,52 @@ export default function App() {
               <div className="actions-section-vertical animate-slideIn">
                 <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 16 }}>
                   {t.createReel}
+                </div>
+
+                {/* Captions Toggle */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '12px 16px',
+                  background: '#f8fafc',
+                  borderRadius: '8px',
+                  marginBottom: '12px',
+                  border: '1px solid #e2e8f0'
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '14px', color: '#1e293b' }}>
+                      Include Captions
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                      Adds subtitles and highlight labels to video
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setReelCaptionsEnabled(!reelCaptionsEnabled)}
+                    style={{
+                      width: '48px',
+                      height: '26px',
+                      borderRadius: '13px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: reelCaptionsEnabled ? '#1E7F63' : '#cbd5e1',
+                      position: 'relative',
+                      transition: 'background 0.2s'
+                    }}
+                  >
+                    <div style={{
+                      width: '22px',
+                      height: '22px',
+                      borderRadius: '50%',
+                      background: 'white',
+                      position: 'absolute',
+                      top: '2px',
+                      left: reelCaptionsEnabled ? '24px' : '2px',
+                      transition: 'left 0.2s',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                    }} />
+                  </button>
                 </div>
 
                 <button

@@ -2547,13 +2547,12 @@ async def highlight_reel(req: Request):
             except Exception as e:
                 print(f"Could not fetch transcript for timestamp matching: {e}")
     
-    # Build clips by finding quote timestamps for ALL quotes
-    all_clips = []
+    # Build clips by finding quote timestamps
+    clips = []
     transcript_cache = {vid: transcript_data} if transcript_data else {}
     
-    print(f"[highlight_reel] Processing {len(quotes)} quotes to find timestamps...")
-    
-    for i, quote in enumerate(quotes):
+    # Use only first 5 quotes for the reel (as requested)
+    for i, quote in enumerate(quotes[:5]):
         start_time, end_time = find_quote_timestamp(quote, transcript_cache, vid)
         
         highlight_label = highlights[i] if i < len(highlights) else ""
@@ -2562,81 +2561,33 @@ async def highlight_reel(req: Request):
             # Apply padding
             clip_start = max(0, start_time - pad)
             clip_end = end_time + pad
-            all_clips.append({
+            clips.append({
                 "start": clip_start,
                 "end": clip_end,
                 "label": quote[:60],
                 "highlight": highlight_label[:80],  # Highlight text for overlay
                 "quote_start": start_time,  # Original start for caption timing
-                "quote_end": end_time,
-                "original_index": i
+                "quote_end": end_time
             })
         else:
             print(f"Could not find timestamp for quote: {quote[:50]}...")
     
-    # Select 5 evenly spread clips from throughout the video
-    if len(all_clips) > 5:
-        # Sort by timestamp
-        all_clips.sort(key=lambda c: c["start"])
-        
-        # Select evenly distributed clips
-        total = len(all_clips)
-        step = total / 5
-        selected_indices = [int(i * step) for i in range(5)]
-        
-        # Make sure we don't go out of bounds and get unique indices
-        selected_indices = list(set(min(idx, total - 1) for idx in selected_indices))
-        selected_indices.sort()
-        
-        # If we don't have 5 unique indices, add more
-        while len(selected_indices) < 5 and len(selected_indices) < total:
-            for idx in range(total):
-                if idx not in selected_indices:
-                    selected_indices.append(idx)
-                    selected_indices.sort()
-                    break
-        
-        clips = [all_clips[i] for i in selected_indices[:5]]
-        print(f"[highlight_reel] Selected {len(clips)} spread-out clips from {len(all_clips)} total")
-    else:
-        clips = all_clips
-    
-    # Sort final clips by timestamp for proper video order
-    clips.sort(key=lambda c: c["start"])
-    
     if not clips:
         # Fallback: create clips at regular intervals if no matches found
         print("Warning: No quote timestamps found, using fallback intervals")
-        import random
-        
-        # Get video duration estimate from transcript
-        video_duration = 0
-        if transcript_data:
-            last_segment = transcript_data[-1] if transcript_data else None
-            if last_segment:
-                video_duration = last_segment.get('start', 0) + last_segment.get('duration', 0)
-        
-        if video_duration == 0:
-            video_duration = 3600  # Default 1 hour
-        
-        # Create evenly spaced fallback clips
-        interval = video_duration / 6  # 5 clips means 6 segments
-        for i in range(5):
-            start = int(interval * (i + 0.5))  # Middle of each segment
+        for i, quote in enumerate(quotes[:5]):
+            start = i * 60  # 1 minute intervals
             highlight_label = highlights[i] if i < len(highlights) else ""
-            quote = quotes[i] if i < len(quotes) else ""
             clips.append({
                 "start": start,
                 "end": start + 20,
-                "label": quote[:60] if quote else f"Highlight {i+1}",
+                "label": quote[:60],
                 "highlight": highlight_label[:80],
                 "quote_start": start,
                 "quote_end": start + 15
             })
     
-    print(f"[highlight_reel] Creating reel with {len(clips)} clips, captions={captions_enabled}")
-    for i, clip in enumerate(clips):
-        print(f"  Clip {i+1}: {clip['start']:.1f}s - {clip['end']:.1f}s | {clip.get('highlight', '')[:40]}...")
+    print(f"Creating highlight reel with {len(clips)} clips, captions={captions_enabled}: {clips}")
     
     job_id = str(uuid.uuid4())
     JOBS[job_id] = {"status": "queued", "percent": 0, "message": f"Building reel from {len(clips)} clips..."}

@@ -1,0 +1,40 @@
+#!/bin/bash
+
+# Community Highlighter Launcher
+# This script runs the Python GUI launcher
+
+# Get the directory where this script is located
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+RESOURCES="$DIR/../Resources"
+
+cd "$RESOURCES"
+
+# Find Python
+if command -v python3 &> /dev/null; then
+    PYTHON=python3
+elif command -v python &> /dev/null; then
+    PYTHON=python
+else
+    osascript -e 'display dialog "Python 3 is required but not installed.\n\nPlease install Python from:\nhttps://www.python.org/downloads/" buttons {"OK"} default button "OK" with icon stop with title "Community Highlighter"'
+    exit 1
+fi
+
+# Check for required packages and install if needed
+$PYTHON -c "import tkinter" 2>/dev/null
+if [ $? -ne 0 ]; then
+    osascript -e 'display dialog "Setting up for first run...\n\nThis may take a moment." buttons {"OK"} default button "OK" with title "Community Highlighter"'
+fi
+
+# Check/create virtual environment
+if [ ! -d "$RESOURCES/venv" ]; then
+    osascript -e 'display notification "Setting up virtual environment..." with title "Community Highlighter"'
+    $PYTHON -m venv "$RESOURCES/venv"
+    source "$RESOURCES/venv/bin/activate"
+    pip install --upgrade pip --quiet
+    pip install -r "$RESOURCES/requirements.txt" --quiet
+else
+    source "$RESOURCES/venv/bin/activate"
+fi
+
+# Run the launcher
+exec $PYTHON "$RESOURCES/launcher.py"
