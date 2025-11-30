@@ -1,5 +1,5 @@
 /**
- * DesktopAppBanner.jsx - v5.6
+ * DesktopAppBanner.jsx - v6.0
  * 
  * Shows a banner prompting users to download the desktop app
  * when running in cloud mode (video features disabled).
@@ -39,7 +39,6 @@ export function DesktopAppBanner({ onDismiss }) {
   const [isCloudMode, setIsCloudMode] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const downloadUrl = 'https://github.com/amateurmenace/community-highlighter/releases/latest';
-
   
   useEffect(() => {
     // Check if running in cloud mode
@@ -79,61 +78,45 @@ export function DesktopAppBanner({ onDismiss }) {
   
   return (
     <div style={{
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      color: 'white',
-      padding: '12px 20px',
       display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: '16px',
-      fontSize: '14px',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+      justifyContent: 'center',
+      padding: '24px 20px',
     }}>
       <div style={{
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
         gap: '12px',
-        flex: 1,
+        maxWidth: '320px',
+        textAlign: 'center',
       }}>
-        <span style={{ fontSize: '24px' }}>🖥️</span>
-        <div>
-          <div style={{ fontWeight: '600', marginBottom: '2px' }}>
-            Want to create video clips and highlight reels?
-          </div>
-          <div style={{ opacity: '0.9', fontSize: '13px' }}>
-            Download the desktop app for full features including video downloads
-          </div>
+        <div style={{ fontSize: '13px', color: '#666', lineHeight: '1.5' }}>
+          Want to create video clips and highlight reels? Download the desktop app for full video editing features.
         </div>
-      </div>
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
         <button 
           onClick={handleDownload}
           style={{
-            background: 'white',
-            color: '#667eea',
+            background: '#1e7f63',
+            color: 'white',
             border: 'none',
-            padding: '8px 16px',
+            padding: '10px 20px',
             borderRadius: '6px',
             fontWeight: '600',
             cursor: 'pointer',
-            fontSize: '13px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
+            fontSize: '14px',
           }}
         >
-          <span>⬇️</span> Download App
+          Download Desktop App
         </button>
         <button 
           onClick={handleDismiss}
           style={{
             background: 'transparent',
-            color: 'white',
-            border: '1px solid rgba(255,255,255,0.3)',
-            padding: '8px 12px',
-            borderRadius: '6px',
+            color: '#999',
+            border: 'none',
+            padding: '4px 8px',
             cursor: 'pointer',
-            fontSize: '13px',
+            fontSize: '12px',
           }}
         >
           Maybe Later
@@ -147,28 +130,28 @@ export function DesktopAppBanner({ onDismiss }) {
  * Inline prompt for clip sections when feature is unavailable
  */
 export function DesktopAppInlinePrompt({ feature = 'this feature' }) {
-  const downloadUrl = 'https://github.com/amateurmenace/community-highlighter/releases';
+  const downloadUrl = 'https://github.com/amateurmenace/community-highlighter/releases/latest';
   
   return (
     <div style={{
-      background: '#f0f4ff',
-      border: '1px solid #c7d2fe',
+      background: '#f5f0e6',
+      border: '2px solid #1e7f63',
       borderRadius: '8px',
       padding: '16px',
       marginBottom: '16px',
       textAlign: 'center',
     }}>
-      <div style={{ fontSize: '32px', marginBottom: '8px' }}>🎬</div>
-      <div style={{ fontWeight: '600', color: '#4338ca', marginBottom: '4px' }}>
+      <div style={{ fontSize: '32px', marginBottom: '8px' }}>VIDEO</div>
+      <div style={{ fontWeight: '700', color: '#1e7f63', marginBottom: '4px' }}>
         Desktop App Required
       </div>
-      <div style={{ color: '#6366f1', fontSize: '14px', marginBottom: '12px' }}>
+      <div style={{ color: '#4a4a4a', fontSize: '14px', marginBottom: '12px' }}>
         {feature} requires the desktop app because YouTube blocks video downloads from cloud servers.
       </div>
       <button 
         onClick={() => window.open(downloadUrl, '_blank')}
         style={{
-          background: '#4f46e5',
+          background: '#1e7f63',
           color: 'white',
           border: 'none',
           padding: '10px 20px',
@@ -181,6 +164,36 @@ export function DesktopAppInlinePrompt({ feature = 'this feature' }) {
         Download Desktop App
       </button>
     </div>
+  );
+}
+
+/**
+ * Locked button component for cloud mode
+ */
+export function LockedButton({ children, onClick, style = {} }) {
+  const downloadUrl = 'https://github.com/amateurmenace/community-highlighter/releases/latest';
+  
+  return (
+    <button
+      onClick={() => window.open(downloadUrl, '_blank')}
+      style={{
+        background: '#e2e8f0',
+        color: '#64748b',
+        border: 'none',
+        padding: '10px 16px',
+        borderRadius: '6px',
+        cursor: 'pointer',
+        fontSize: '14px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        ...style
+      }}
+      title="Download desktop app to use this feature"
+    >
+      <span style={{ fontSize: '11px', fontWeight: '700', background: '#94a3b8', color: 'white', padding: '2px 6px', borderRadius: '4px' }}>LOCKED</span>
+      {children}
+    </button>
   );
 }
 

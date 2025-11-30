@@ -452,7 +452,7 @@ function OptimizationPanel({ stats, onClose, onClearCache }) {
             fontSize: '12px'
           }}>
             <span style={{ color: enabled ? '#22c55e' : '#94a3b8' }}>
-              {enabled ? 'Å“â€œ' : 'â€”â€¹'}
+              {enabled ? 'X to œ' : ' to ” to ¹'}
             </span>
             <span style={{ textTransform: 'capitalize' }}>
               {key.replace(/_/g, ' ')}
@@ -628,7 +628,7 @@ function DecisionTimeline({ sents, playerRef, videoId, addToBasket, pad, openExp
         <div className="decision-popup">
           <div className="popup-header">
             <span>{selectedDecision.timestamp}</span>
-            <button className="btn-close-popup" onClick={() => setSelectedDecision(null)}>Å“â€¢</button>
+            <button className="btn-close-popup" onClick={() => setSelectedDecision(null)}>X</button>
           </div>
           <div className="popup-text">{selectedDecision.text}</div>
           <div className="popup-actions">
@@ -717,7 +717,7 @@ function MentionedEntitiesCard({ entities, isLoading }) {
           <div className="entity-popup-card entity-popup-positioned" onClick={(e) => e.stopPropagation()}>
             <div className="entity-popup-header">
               <h3>{selectedEntity.text}</h3>
-              <button className="btn-close-popup" onClick={closeModal}>Å“â€¢</button>
+              <button className="btn-close-popup" onClick={closeModal}>X</button>
             </div>
 
             {/* View Mode Tabs */}
@@ -838,7 +838,7 @@ function MentionedEntitiesCard({ entities, isLoading }) {
 function SearchResultCard({ match, query, t, openExpandedAt, addToBasket, playerRef, videoId, pad }) {
   return (
     <div className="result-card animate-slideIn">
-      <div style={{ fontSize: 12, color: "#64748b" }}>{padTimePrecise(match.start)} â‚¬â€ {padTimePrecise(match.end)}</div>
+      <div style={{ fontSize: 12, color: "#64748b" }}>{padTimePrecise(match.start)} â to  {padTimePrecise(match.end)}</div>
       <div style={{ marginTop: 6 }}>
         {query ? match.text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, "gi")).map((part, idx) => (
           <span key={idx} className={part.toLowerCase() === query.toLowerCase() ? "hit" : ""}>{part}</span>
@@ -962,7 +962,7 @@ function TopicHeatMap({ fullText, sents, openExpandedAt, t, addToBasket, playerR
           <div className="entity-popup-card" onClick={(e) => e.stopPropagation()}>
             <div className="entity-popup-header">
               <h3>Sentences related to "{selectedTopic.name}"</h3>
-              <button className="btn-close-popup" onClick={closeTopicModal}>Å“â€¢</button>
+              <button className="btn-close-popup" onClick={closeTopicModal}>X</button>
             </div>
             <div className="entity-popup-content" style={{ overflowY: 'auto', padding: '10px' }}>
               {selectedSentence ? (
@@ -1141,7 +1141,7 @@ function DisagreementTimeline({ sents, playerRef, videoId, openExpandedAt, addTo
         <div className="decision-popup">
           <div className="popup-header">
             <span>{selectedMoment.timestamp}</span>
-            <button className="btn-close-popup" onClick={() => setSelectedMoment(null)}>Å“â€¢</button>
+            <button className="btn-close-popup" onClick={() => setSelectedMoment(null)}>X</button>
           </div>
           <div className="popup-text">{selectedMoment.text}</div>
           <div className="popup-actions">
@@ -2511,7 +2511,7 @@ function ExportModal({ onSelect, onClose, clipCount }) {
       <div className="export-modal" onClick={e => e.stopPropagation()}>
         <div className="export-modal-header">
           <h2>Choose Export Format</h2>
-          <button className="btn-close" onClick={onClose}>Å“â€¢</button>
+          <button className="btn-close" onClick={onClose}>X</button>
         </div>
 
         <div className="export-options">
@@ -2603,7 +2603,7 @@ function LoadingCard({ title, message, percent, bytesLoaded, bytesTotal, startTi
       {bytesLoaded && bytesTotal && (
         <div className="loading-body" style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
           {formatBytes(bytesLoaded)} / {formatBytes(bytesTotal)}
-          {timeEstimate && <span style={{ marginLeft: '8px' }}>â‚¬Â¢ {timeEstimate}</span>}
+          {timeEstimate && <span style={{ marginLeft: '8px' }}>âÂ {timeEstimate}</span>}
         </div>
       )}
       {(percent !== undefined && percent !== null) && (
@@ -2717,7 +2717,7 @@ Sent via Community Highlighter
         <div className="feedback-form-container card">
           <div className="feedback-header">
             <h3>Feature Request</h3>
-            <button className="btn-close-popup" onClick={() => setShowForm(false)}>Å“â€¢</button>
+            <button className="btn-close-popup" onClick={() => setShowForm(false)}>X</button>
           </div>
 
           {!submitted ? (
@@ -2813,6 +2813,10 @@ function ClipPreview({ clip, videoId }) {
     }
   };
 
+  // Generate thumbnail URL from YouTube
+  const thumbnailUrl = videoId ? `https://img.youtube.com/vi/${videoId}/mqdefault.jpg` : null;
+  const clipDuration = clip.end - clip.start;
+
   return (
     <div
       className="clip-preview-wrapper"
@@ -2822,9 +2826,31 @@ function ClipPreview({ clip, videoId }) {
       }}
       onMouseLeave={() => setShowPreview(false)}
     >
-      <div className="basket-item">
-        <div className="time">{padTime(clip.start)} â€ â€™ {padTime(clip.end)}</div>
-        <div className="text">{clip.text}</div>
+      <div className="basket-item" style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', padding: '12px', background: '#f8fafc', borderRadius: '8px', marginBottom: '8px', border: '1px solid #e2e8f0' }}>
+        {/* Thumbnail */}
+        {thumbnailUrl && (
+          <div style={{ flexShrink: 0, width: '80px', height: '45px', borderRadius: '4px', overflow: 'hidden', background: '#e2e8f0', position: 'relative' }}>
+            <img 
+              src={thumbnailUrl} 
+              alt="Clip thumbnail" 
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              onError={(e) => { e.target.style.display = 'none'; }}
+            />
+            <div style={{ position: 'absolute', bottom: '2px', right: '2px', background: 'rgba(0,0,0,0.75)', color: 'white', fontSize: '9px', padding: '2px 4px', borderRadius: '2px', fontWeight: '600' }}>
+              {padTime(clipDuration)}
+            </div>
+          </div>
+        )}
+        
+        {/* Clip info */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="time" style={{ fontWeight: '600', color: '#1E7F63', marginBottom: '4px', fontSize: '13px' }}>
+            {padTime(clip.start)} to {padTime(clip.end)}
+          </div>
+          <div className="text" style={{ fontSize: '12px', color: '#4a5568', lineHeight: '1.4', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+            {clip.text || 'Selected clip'}
+          </div>
+        </div>
       </div>
 
       {showPreview && preview && (
@@ -2923,7 +2949,7 @@ function MeetingAssistant({ videoId, transcript, forceOpen = 0 }) {
         className="assistant-toggle"
         onClick={() => setIsOpen(!isOpen)}
       >
-        ’¬ AI Assistant {isOpen ? 'Å“â€“' : ''}
+        AI Assistant {isOpen ? '-' : '+'}
       </button>
 
       {isOpen && (
@@ -3123,7 +3149,7 @@ function KnowledgeBase({ currentVideoId, onSelectMeeting }) {
             onClick={addCurrentMeetingToKB}
             disabled={isAddingToKB}
           >
-            {isAddingToKB ? 'Adding...' : 'Å¾â€¢ Add Current Meeting to Knowledge Base'}
+            {isAddingToKB ? 'Adding...' : ' to  Add Current Meeting to Knowledge Base'}
           </button>
 
           {relatedMeetings.length > 0 && (
@@ -3659,7 +3685,7 @@ export default function App() {
         highlights = JSON.parse(text);
       } catch (e) {
         console.error("Failed to parse highlights JSON:", e);
-        const bullets = text.split(/\d+\.|Â¢|-/).filter(s => s.trim().length > 10);
+        const bullets = text.split(/\d+\.|Â|-/).filter(s => s.trim().length > 10);
         for (let i = 0; i < Math.min(10, bullets.length); i++) {
           highlights.push({
             highlight: bullets[i].trim().split('\n')[0],
@@ -4037,6 +4063,51 @@ export default function App() {
               style={{ flex: 1, minWidth: 300 }}
             />
 
+          {/* Cloud Mode Banner - Show download prompt when in cloud mode */}
+          {isCloudMode && (
+            <div style={{
+              width: '100%',
+              marginTop: '12px',
+              padding: '16px 20px',
+              background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
+              border: '2px solid #1E7F63',
+              borderRadius: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px',
+              flexWrap: 'wrap'
+            }}>
+              <div style={{ flex: 1, minWidth: '250px' }}>
+                <div style={{ fontWeight: '700', color: '#1E7F63', marginBottom: '4px', fontSize: '15px' }}>
+                  Want to Download Video Clips?
+                </div>
+                <div style={{ color: '#166534', fontSize: '13px', lineHeight: '1.4' }}>
+                  Video editing features require the desktop app. Download clips, create highlight reels, and export videos locally.
+                </div>
+              </div>
+              <a 
+                href="https://github.com/amateurmenace/community-highlighter/releases/latest"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  background: '#1E7F63',
+                  color: 'white',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  fontWeight: '600',
+                  fontSize: '14px',
+                  textDecoration: 'none',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                Download Desktop App
+              </a>
+            </div>
+          )}
+
             {/* LIVE TRANSCRIPT AND HIGHLIGHTS - ADD THIS AFTER THE LIVE INPUT */}
             {isLiveMode && videoId && (
               <div className="live-content" style={{
@@ -4218,7 +4289,7 @@ export default function App() {
                 className="btn btn-ghost"
                 onClick={() => setTranslation(prev => ({ ...prev, show: false }))}
               >
-                Å“â€¢ Close
+                X Close
               </button>
             </div>
             <div className="translation-text">
@@ -4422,12 +4493,23 @@ export default function App() {
                     {t.savedClips}: {clipBasket.length}
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <button
-                      className="btn btn-primary animate-hover"
-                      onClick={() => setShowExportModal(true)}
-                    >
-                      {t.exportClips}
-                    </button>
+                    {isCloudMode ? (
+                      <button
+                        className="btn animate-hover"
+                        onClick={() => window.open('https://github.com/amateurmenace/community-highlighter/releases/latest', '_blank')}
+                        style={{ background: '#e2e8f0', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                        title="Download desktop app to export clips"
+                      >
+                        <span style={{ fontSize: '12px' }}>LOCKED</span> {t.exportClips}
+                      </button>
+                    ) : (
+                      <button
+                        className="btn btn-primary animate-hover"
+                        onClick={() => setShowExportModal(true)}
+                      >
+                        {t.exportClips}
+                      </button>
+                    )}
                     <button className="btn btn-ghost animate-hover" onClick={clearBasket}>
                       {t.clearBasket}
                     </button>
@@ -4627,7 +4709,7 @@ export default function App() {
                     setForceAssistantOpen(prev => prev + 1);
                   }}
                 >
-                  ’¬ AI Assistant
+                  ’ AI Assistant
                 </button>
                 <button
                   className="btn btn-secondary"
@@ -4721,7 +4803,7 @@ export default function App() {
           </section>
         )}
 
-        {/* ’¬ AI Meeting Assistant */}
+        {/* ’ AI Meeting Assistant */}
         {showAssistant && videoId && (
           <MeetingAssistant
             videoId={videoId}

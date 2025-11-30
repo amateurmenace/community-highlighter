@@ -1,5 +1,5 @@
 /**
- * DesktopAppBanner.jsx - v5.6
+ * DesktopAppBanner.jsx - v6.0
  * 
  * Shows a banner prompting users to download the desktop app
  * when running in cloud mode (video features disabled).
@@ -106,7 +106,7 @@ export function DesktopAppBanner({ onDismiss }) {
             fontSize: '14px',
           }}
         >
-          ⬇️ Download Desktop App
+          Download Desktop App
         </button>
         <button 
           onClick={handleDismiss}
@@ -141,7 +141,7 @@ export function DesktopAppInlinePrompt({ feature = 'this feature' }) {
       marginBottom: '16px',
       textAlign: 'center',
     }}>
-      <div style={{ fontSize: '32px', marginBottom: '8px' }}>🎬</div>
+      <div style={{ fontSize: '32px', marginBottom: '8px' }}>VIDEO</div>
       <div style={{ fontWeight: '700', color: '#1e7f63', marginBottom: '4px' }}>
         Desktop App Required
       </div>
@@ -164,6 +164,36 @@ export function DesktopAppInlinePrompt({ feature = 'this feature' }) {
         Download Desktop App
       </button>
     </div>
+  );
+}
+
+/**
+ * Locked button component for cloud mode
+ */
+export function LockedButton({ children, onClick, style = {} }) {
+  const downloadUrl = 'https://github.com/amateurmenace/community-highlighter/releases/latest';
+  
+  return (
+    <button
+      onClick={() => window.open(downloadUrl, '_blank')}
+      style={{
+        background: '#e2e8f0',
+        color: '#64748b',
+        border: 'none',
+        padding: '10px 16px',
+        borderRadius: '6px',
+        cursor: 'pointer',
+        fontSize: '14px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        ...style
+      }}
+      title="Download desktop app to use this feature"
+    >
+      <span style={{ fontSize: '11px', fontWeight: '700', background: '#94a3b8', color: 'white', padding: '2px 6px', borderRadius: '4px' }}>LOCKED</span>
+      {children}
+    </button>
   );
 }
 
