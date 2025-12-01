@@ -492,13 +492,13 @@ CRITICAL RULES:
 KEY INFORMATION FROM MEETING:
 
 DECISIONS & VOTES MADE:
-{chr(10).join(f" • {d}" for d in combined_decisions[:20])}
+{chr(10).join(f" â€¢ {d}" for d in combined_decisions[:20])}
 
 MAJOR DISCUSSIONS:
-{chr(10).join(f" • {d}" for d in combined_discussions[:20])}
+{chr(10).join(f" â€¢ {d}" for d in combined_discussions[:20])}
 
 ACTION ITEMS:
-{chr(10).join(f" • {a}" for a in combined_actions[:15])}
+{chr(10).join(f" â€¢ {a}" for a in combined_actions[:15])}
 
 NOTABLE QUOTES (use ONLY complete quotes):
 {chr(10).join(f' "{q}"' for q in combined_quotes[:20])}
@@ -510,16 +510,6 @@ Create exactly 10 highlights following these requirements:
 4. Remaining highlights should cover DIFFERENT topics for variety
 5. Each quote must be a COMPLETE sentence from the meeting
 
-CRITICAL - HIGHLIGHT WRITING RULES:
-- Each "highlight" MUST be a SPECIFIC, DETAILED sentence (15-30 words)
-- NEVER use generic phrases like "Discussion about..." or "Update on..." or "Item regarding..."
-- ALWAYS include SPECIFIC details: names, dollar amounts, vote counts, project names, locations
-- Write like a news headline that tells the ACTUAL story, not just the topic
-- BAD: "Discussion about budget allocation" 
-- GOOD: "Council approves $2.4M for Main Street sidewalk repairs after heated debate"
-- BAD: "Update on school construction"
-- GOOD: "Lincoln Elementary expansion delayed 6 months due to contractor disputes"
-
 For each highlight, also provide:
 - category: one of "vote", "budget", "public_comment", "announcement", "controversy", "action_item"
 - importance: 1-5 (5 = most important)
@@ -529,7 +519,7 @@ Respond in this EXACT JSON format:
 {{
   "highlights": [
     {{
-      "highlight": "Specific detailed summary with names, numbers, and outcomes",
+      "highlight": "Brief summary of key point",
       "quote": "Complete supporting quote from the meeting",
       "category": "vote",
       "importance": 5,
@@ -1403,18 +1393,10 @@ async def summary_ai(req: Request):
 TRANSCRIPT:
 {transcript}
 
-CRITICAL - HIGHLIGHT WRITING RULES:
-- Each "highlight" MUST be a SPECIFIC, DETAILED sentence (15-30 words)
-- NEVER use generic phrases like "Discussion about..." or "Update on..." or "Item regarding..."
-- ALWAYS include SPECIFIC details: names, dollar amounts, vote counts, project names, locations
-- Write like a news headline that tells the ACTUAL story, not just the topic
-- BAD: "Discussion about budget allocation" 
-- GOOD: "Council approves $2.4M for Main Street sidewalk repairs after heated debate"
-
 Respond in this EXACT JSON format:
 {{
   "highlights": [
-    {{"highlight": "Specific detailed summary with names, numbers, outcomes", "quote": "Direct quote from transcript"}},
+    {{"highlight": "Summary of key point", "quote": "Direct quote from transcript"}},
     ...
   ]
 }}"""
@@ -2867,26 +2849,16 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
     
     # Default video options
     opts = video_options or {}
-    disable_all = opts.get('disable_all', True)  # Default to disabled for safety
     
-    # If disable_all is True, skip ALL effects
-    if disable_all:
-        use_transitions = False
-        transition_duration = 0.5
-        color_filter = 'none'
-        do_normalize_audio = False
-        do_logo_watermark = False
-        do_background_music = False
-        use_hw_accel = opts.get('use_hw_accel', True)
-        print(f"[simple_job] ALL advanced processing DISABLED - fast export mode")
-    else:
-        use_transitions = opts.get('transitions', False)
-        transition_duration = opts.get('transition_duration', 0.5)
-        color_filter = opts.get('color_filter', 'none')
-        do_normalize_audio = opts.get('normalize_audio', False)
-        do_logo_watermark = opts.get('logo_watermark', False)
-        do_background_music = opts.get('background_music', False)
-        use_hw_accel = opts.get('use_hw_accel', True)
+    # Extract options - no longer using disable_all master toggle
+    use_transitions = opts.get('transitions', False)
+    transition_duration = opts.get('transition_duration', 0.5)
+    color_filter = opts.get('colorFilter', opts.get('color_filter', 'none'))
+    do_background_music = opts.get('backgroundMusic', False)
+    do_logo_watermark = opts.get('logoWatermark', opts.get('logo_watermark', False))
+    playback_speed = opts.get('playbackSpeed', '1.0')
+    show_highlight_labels = opts.get('showHighlightLabels', True)
+    use_hw_accel = opts.get('use_hw_accel', True)
     
     # Get hardware encoder - use libx264 for reliability
     hw_encoder = 'libx264'  # Always use software encoder for reliability
@@ -2894,7 +2866,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
 
     work = tempfile.mkdtemp()
     print(f"[simple_job] Starting job {job_id}: {len(clips)} clips, format={format_type}, captions={captions_enabled}")
-    print(f"[simple_job] Options: disable_all={disable_all}, transitions={use_transitions}, color={color_filter}, music={do_background_music}")
+    print(f"[simple_job] Options: transitions={use_transitions}, color={color_filter}, bgMusic={do_background_music}")
 
     def get_transcript_for_timerange(start, end, transcript):
         """Get transcript segments that fall within a time range
@@ -3066,105 +3038,21 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
         
         print(f"[text_overlay] Created filter: fontsize={fontsize}, max_chars={max_chars}, lines={len(lines)}, video={video_width}x{video_height}")
         return filter_str
-
-    def create_timed_caption_filters(segments, work_dir, prefix, video_width=1920, video_height=1080,
-                                     fontcolor="white", bordercolor="black", clip_start_offset=0):
-        """Create multiple timed drawtext filters for real-time captions.
         
-        Args:
-            segments: List of transcript segments with 'start', 'end', 'text' keys
-                     NOTE: start/end should be RELATIVE to clip start (0 = clip start)
-            work_dir: Working directory for temp files
-            prefix: Prefix for temp text files
-            video_width: Video width for responsive sizing
-            video_height: Video height for responsive sizing
-            fontcolor: Font color
-            bordercolor: Border color
-            clip_start_offset: Offset to subtract from segment times (for clips from longer videos)
-            
-        Returns:
-            List of FFmpeg drawtext filter strings, one per segment
-        """
-        if not segments:
-            return []
+        # Build filter string using textfile
+        filter_str = (
+            f"drawtext=textfile='{text_file_escaped}'"
+            f":fontsize={fontsize}"
+            f":fontcolor={fontcolor}"
+            f":borderw={borderw}"
+            f":bordercolor={bordercolor}"
+            f":x=(w-tw)/2"
+            f":y={y_expr}"
+            f":font=Arial"
+        )
         
-        # Calculate responsive sizes
-        sizes = get_responsive_text_sizes(video_height, video_width)
-        fontsize = sizes['caption']
-        borderw = max(2, fontsize // 10)
-        
-        # Calculate max chars based on aspect ratio
-        aspect = video_width / video_height if video_height > 0 else 16/9
-        if aspect < 1:  # Vertical video
-            max_chars = max(20, min(35, int(video_width / (fontsize * 0.55))))
-        else:  # Horizontal video
-            max_chars = max(30, min(60, int(video_width / (fontsize * 0.55))))
-        
-        # Safe margin from bottom
-        safe_margin = int(video_height * 0.05)
-        y_expr = f"h-th-{safe_margin}"
-        
-        filters = []
-        
-        for i, seg in enumerate(segments):
-            text = seg.get('text', '').strip()
-            if not text:
-                continue
-            
-            # Get timing relative to clip (already adjusted by get_transcript_for_timerange)
-            start_time = max(0, seg.get('start', 0))
-            end_time = seg.get('end', start_time + 3)
-            
-            # Word wrap the text
-            words = text.split()
-            lines = []
-            current_line = ""
-            
-            for word in words:
-                if len(word) > max_chars - 5:
-                    word = word[:max_chars-8] + "..."
-                
-                if len(current_line) + len(word) + 1 <= max_chars:
-                    current_line = current_line + " " + word if current_line else word
-                else:
-                    if current_line:
-                        lines.append(current_line)
-                    current_line = word
-            
-            if current_line:
-                lines.append(current_line)
-            
-            # Limit to 2 lines for captions
-            if len(lines) > 2:
-                lines = lines[:2]
-                lines[-1] = lines[-1][:max_chars-6] + "..." if len(lines[-1]) > max_chars - 3 else lines[-1] + "..."
-            
-            wrapped_text = '\n'.join(lines)
-            
-            # Write to temp file
-            text_file = os.path.join(work_dir, f"{prefix}_cap_{i}.txt")
-            with open(text_file, 'w', encoding='utf-8') as f:
-                f.write(wrapped_text)
-            
-            text_file_escaped = text_file.replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
-            
-            # Build filter with enable expression for timing
-            filter_str = (
-                f"drawtext=textfile='{text_file_escaped}'"
-                f":fontsize={fontsize}"
-                f":fontcolor={fontcolor}"
-                f":borderw={borderw}"
-                f":bordercolor={bordercolor}"
-                f":x=(w-tw)/2"
-                f":y={y_expr}"
-                f":font=Arial"
-                f":enable='between(t,{start_time:.2f},{end_time:.2f})'"
-            )
-            
-            filters.append(filter_str)
-        
-        print(f"[timed_captions] Created {len(filters)} timed caption filters for {len(segments)} segments")
-        return filters
+        print(f"[text_overlay] Created filter: fontsize={fontsize}, max_chars={max_chars}, lines={len(lines)}")
+        return filter_str
 
     try:
         video_file = os.path.join(work, "video.mp4")
@@ -3324,10 +3212,10 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             print(f"[individual] Failed to download segment {i+1}, skipping")
                             continue
 
-                    # Build FFmpeg filter for captions and highlight text
+                    # Build FFmpeg filter for highlight text only
                     vf_filters = []
                     
-                    # Add highlight text at top
+                    # Add highlight text at top (the AI-generated summary label)
                     if captions_enabled and highlight_text:
                         highlight_filter = create_text_overlay_filter(
                             highlight_text, work, f"ind_highlight_{i}",
@@ -3337,21 +3225,10 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                         )
                         if highlight_filter:
                             vf_filters.append(highlight_filter)
-                            print(f"[individual] Adding highlight text: {highlight_text[:50]}...")
+                            print(f"[individual] Adding highlight label: {highlight_text[:50]}...")
                     
-                    # Add caption text at bottom - USE TIMED CAPTIONS
-                    if captions_enabled and transcript_data:
-                        clip_transcript = get_transcript_for_timerange(orig_start, orig_end, transcript_data)
-                        if clip_transcript:
-                            # Use timed captions that follow speech in real-time
-                            caption_filters = create_timed_caption_filters(
-                                clip_transcript, work, f"ind_caption_{i}",
-                                video_width=clip_video_width, video_height=clip_video_height,
-                                fontcolor="white", bordercolor="black"
-                            )
-                            if caption_filters:
-                                vf_filters.extend(caption_filters)
-                                print(f"[individual] Added {len(caption_filters)} timed captions")
+                    # NOTE: Removed static caption text block - captions should follow speech timing
+                    # not be displayed as one big static block
                     
                     # Add color filter if specified
                     if color_filter_str:
@@ -3433,7 +3310,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     # For social reels, output is always 1080x1920 (9:16 vertical)
                     social_width, social_height = 1080, 1920
                     
-                    # Step 2: Add highlight text at top
+                    # Step 2: Add highlight text at top (the AI-generated summary label)
                     if captions_enabled and highlight_text:
                         highlight_filter = create_text_overlay_filter(
                             highlight_text, work, f"social_highlight_{i}",
@@ -3443,23 +3320,9 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                         )
                         if highlight_filter:
                             vf_filters.append(highlight_filter)
-                            print(f"[social] Adding highlight text: {highlight_text[:50]}...")
+                            print(f"[social] Adding highlight label: {highlight_text[:50]}...")
                     
-                    # Step 3: Add captions at bottom - USE TIMED CAPTIONS
-                    if captions_enabled and transcript_data:
-                        clip_transcript = get_transcript_for_timerange(orig_start, orig_end, transcript_data)
-                        if clip_transcript:
-                            # Use timed captions that follow speech in real-time
-                            caption_filters = create_timed_caption_filters(
-                                clip_transcript, work, f"social_caption_{i}",
-                                video_width=social_width, video_height=social_height,
-                                fontcolor="white", bordercolor="black"
-                            )
-                            if caption_filters:
-                                vf_filters.extend(caption_filters)
-                                print(f"[social] Added {len(caption_filters)} timed captions")
-                        else:
-                            print(f"[social] No transcript segments found for clip {i+1}")
+                    # NOTE: Removed static caption text block - no longer adding joined transcript text
                     
                     # Add color filter if specified
                     if color_filter_str:
@@ -3545,40 +3408,24 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             print(f"[combined] Failed to download segment {i+1}, skipping")
                             continue
                     
-                    if captions_enabled and (transcript_data or highlight_text):
-                        # Need to re-encode to add captions/text
+                    if captions_enabled and highlight_text:
+                        # Need to re-encode to add highlight label text
                         clip_file = os.path.join(work, f"temp_{i}.mp4")
                         vf_filters = []
                         
-                        # Add highlight text at top
-                        if highlight_text:
-                            highlight_filter = create_text_overlay_filter(
-                                highlight_text, work, f"combined_highlight_{i}",
-                                video_width=video_width, video_height=video_height,
-                                fontcolor="yellow", bordercolor="black",
-                                position="top", text_type="title"
-                            )
-                            if highlight_filter:
-                                vf_filters.append(highlight_filter)
-                                print(f"[combined] Adding highlight text: {highlight_text[:50]}...")
+                        # Add highlight text at top (the AI-generated summary label)
+                        highlight_filter = create_text_overlay_filter(
+                            highlight_text, work, f"combined_highlight_{i}",
+                            video_width=video_width, video_height=video_height,
+                            fontcolor="yellow", bordercolor="black",
+                            position="top", text_type="title"
+                        )
+                        if highlight_filter:
+                            vf_filters.append(highlight_filter)
+                            print(f"[combined] Adding highlight label: {highlight_text[:50]}...")
                         
-                        # Add captions at bottom - USE TIMED CAPTIONS
-                        if transcript_data:
-                            orig_start = clip.get("start", 0)
-                            orig_end = clip.get("end", orig_start + 10)
-                            clip_transcript = get_transcript_for_timerange(orig_start, orig_end, transcript_data)
-                            if clip_transcript:
-                                # Use timed captions that follow speech in real-time
-                                caption_filters = create_timed_caption_filters(
-                                    clip_transcript, work, f"combined_caption_{i}",
-                                    video_width=video_width, video_height=video_height,
-                                    fontcolor="white", bordercolor="black"
-                                )
-                                if caption_filters:
-                                    vf_filters.extend(caption_filters)
-                                    print(f"[combined] Added {len(caption_filters)} timed captions")
-                            else:
-                                print(f"[combined] No transcript segments found for clip {i+1}")
+                        # NOTE: Removed static caption text block that joined all transcript text
+                        # This was causing duplicate text to appear under the highlight label
                         
                         # Add color filter if specified
                         if color_filter_str:
@@ -3611,7 +3458,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                                 "-async", "1",  # Audio sync
                                 clip_file, "-y"
                             ]
-                            print(f"[combined] Processing clip {i+1}: {clip.get('start', 0):.1f}s - {clip.get('end', 0):.1f}s with captions")
+                            print(f"[combined] Processing clip {i+1}: {clip.get('start', 0):.1f}s - {clip.get('end', 0):.1f}s with highlight label")
                         else:
                             cmd = [
                                 "ffmpeg",
@@ -3664,24 +3511,15 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                 subprocess.run(cmd, capture_output=True)
 
         # ================================================================
-        # POST-PROCESSING: Apply final enhancements (only if not disabled)
+        # POST-PROCESSING: Apply final enhancements
         # ================================================================
         
-        if os.path.exists(output) and not disable_all:
+        if os.path.exists(output):
             job["percent"] = 85
             job["message"] = "Applying finishing touches..."
             
             final_output = output
             temp_count = 0
-            
-            # Normalize audio if requested
-            if do_normalize_audio and format_type in ['combined', 'social']:
-                job["message"] = "Normalizing audio..."
-                temp_output = os.path.join(work, f"normalized_{temp_count}.mp4")
-                if normalize_audio(final_output, temp_output):
-                    final_output = temp_output
-                    temp_count += 1
-                    print(f"[postproc] Audio normalized")
             
             # Add background music if requested
             if do_background_music and format_type in ['combined', 'social']:
@@ -3706,10 +3544,6 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                 shutil.copy2(final_output, output)
                 print(f"[postproc] Copied final output to {output}")
             
-            job["percent"] = 95
-        elif os.path.exists(output):
-            # Skip all post-processing when disable_all is True
-            print(f"[postproc] Skipped all post-processing (disable_all={disable_all})")
             job["percent"] = 95
 
         if os.path.exists(output):
@@ -3769,7 +3603,6 @@ async def render_clips(req: Request):
         'color_filter': 'none' if disable_all else data.get('colorFilter', 'none'),
         'normalize_audio': False if disable_all else data.get('normalizeAudio', False),
         'logo_watermark': False if disable_all else data.get('logoWatermark', False),
-        'background_music': False if disable_all else data.get('backgroundMusic', False),
         'use_hw_accel': data.get('useHwAccel', True),
     }
     
@@ -4013,7 +3846,6 @@ async def highlight_reel(req: Request):
         'color_filter': 'none' if disable_all else data.get('colorFilter', 'none'),
         'normalize_audio': False if disable_all else data.get('normalizeAudio', False),
         'logo_watermark': False if disable_all else data.get('logoWatermark', False),
-        'background_music': False if disable_all else data.get('backgroundMusic', False),
         'use_hw_accel': data.get('useHwAccel', True),
     }
     print(f"[highlight_reel] Video options (disable_all={disable_all}): {video_options}")
@@ -4076,25 +3908,22 @@ async def highlight_reel(req: Request):
     
     # SELECT 5 EVENLY SPREAD CLIPS from the available highlights
     # This creates a "sports highlight reel" feel - clips from throughout the video
-    # NOTE: Skip index 0 as it's often a formality (intro/greeting)
     if len(all_clips) > 5:
         # Sort by timestamp first
         all_clips.sort(key=lambda c: c["start"])
         
-        # Select evenly distributed clips starting from index 1 (skip the first/formality)
-        # For 10 clips: indices 1, 3, 5, 7, 9 (skipping 0)
+        # Select evenly distributed clips (indices 0, 2, 4, 6, 8 for 10 clips, etc.)
         total = len(all_clips)
-        usable_clips = total - 1  # Exclude first clip
-        step = usable_clips / 5  # e.g., for 10 clips: step = 1.8
-        selected_indices = [int(1 + i * step) for i in range(5)]  # Start from 1, not 0
+        step = total / 5  # e.g., for 10 clips: step = 2.0
+        selected_indices = [int(i * step) for i in range(5)]
         
         # Make sure we don't go out of bounds and get unique indices
         selected_indices = list(set(min(idx, total - 1) for idx in selected_indices))
         selected_indices.sort()
         
-        # If we don't have 5 unique indices, fill from unused (but still skip 0)
+        # If we don't have 5 unique indices, fill from unused
         while len(selected_indices) < 5 and len(selected_indices) < total:
-            for idx in range(1, total):  # Start from 1, skip 0
+            for idx in range(total):
                 if idx not in selected_indices:
                     selected_indices.append(idx)
                     selected_indices.sort()
@@ -5749,23 +5578,91 @@ async def compare_meetings(req: Request):
 # Jargon Translator
 @app.post("/api/jargon/explain")
 async def explain_jargon(req: Request):
+    """Explain civic/government jargon using GPT for intelligent context-aware definitions"""
     data = await req.json()
     term = data.get("term", "").strip()
     
     if not term:
         raise HTTPException(400, "Term is required")
     
-    # Check dictionary first
+    # Check dictionary first for common terms
     for key, explanation in JARGON_DICTIONARY.items():
         if key.lower() == term.lower():
             return {"term": key, "explanation": explanation, "source": "dictionary"}
     
-    # Fallback explanation
-    return {
-        "term": term,
-        "explanation": f"'{term}' is a civic or government term. For an accurate definition, please consult your local government's glossary or ask the meeting administrator.",
-        "source": "fallback"
-    }
+    # Use GPT for intelligent civic context explanation
+    try:
+        prompt = f"""You are an expert in local government, civic processes, and municipal administration.
+
+A user wants to understand the term: "{term}"
+
+Provide a clear, plain-language explanation of this term specifically in the context of:
+- Local government meetings (city council, planning board, zoning board, school committee)
+- Municipal processes and procedures
+- Civic engagement and public participation
+- Budget and finance in local government
+- Land use, zoning, and development
+
+Your explanation should be:
+1. Written for someone with no government experience (8th grade reading level)
+2. Focused on how this term is used in LOCAL government context
+3. 2-3 sentences maximum
+4. Include a brief real-world example if helpful
+
+If this term is not specifically a civic/government term, still try to explain how it might come up in a local government meeting context.
+
+Respond in this JSON format:
+{{
+  "explanation": "Your plain-language explanation here",
+  "example": "A brief example of how this might come up in a meeting (optional, can be null)"
+}}"""
+
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a helpful civic education assistant that explains government terms in plain language."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=300,
+            temperature=0.3
+        )
+        
+        response_text = response.choices[0].message.content.strip()
+        
+        # Parse JSON response
+        import json
+        try:
+            # Clean up potential markdown formatting
+            if response_text.startswith("```"):
+                response_text = response_text.split("```")[1]
+                if response_text.startswith("json"):
+                    response_text = response_text[4:]
+            
+            result = json.loads(response_text)
+            return {
+                "term": term,
+                "explanation": result.get("explanation", response_text),
+                "example": result.get("example"),
+                "source": "ai"
+            }
+        except json.JSONDecodeError:
+            # If JSON parsing fails, use raw response
+            return {
+                "term": term,
+                "explanation": response_text,
+                "example": None,
+                "source": "ai"
+            }
+            
+    except Exception as e:
+        print(f"[jargon] GPT explanation failed: {e}")
+        # Fallback explanation
+        return {
+            "term": term,
+            "explanation": f"'{term}' is a term that may appear in local government meetings. For an accurate definition in your specific context, consult your local government's glossary or ask a meeting administrator.",
+            "example": None,
+            "source": "fallback"
+        }
 
 @app.get("/api/jargon/dictionary")
 async def get_jargon_dictionary():

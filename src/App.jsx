@@ -425,12 +425,12 @@ function FeedbackModal({ onClose }) {
       }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h2 style={{ margin: 0, fontSize: '20px', color: '#1e7f63' }}>Share Your Feedback</h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#999' }}>Ãƒ—</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#999' }}>Ãƒâ€”</button>
         </div>
         
         {sent ? (
           <div style={{ textAlign: 'center', padding: '20px' }}>
-            <div style={{ fontSize: '48px', marginBottom: '12px' }}>âÅ“…</div>
+            <div style={{ fontSize: '48px', marginBottom: '12px' }}>Ã¢Å“â€¦</div>
             <div style={{ fontSize: '16px', color: '#1e7f63' }}>Thank you for your feedback!</div>
           </div>
         ) : (
@@ -471,7 +471,7 @@ function FeedbackModal({ onClose }) {
 }
 
 // ============================================================================
-// 🧠 NEW: Optimization Panel Component
+// Å¡â‚¬ NEW: Optimization Panel Component
 // ============================================================================
 function OptimizationPanel({ stats, onClose, onClearCache }) {
   if (!stats) return null;
@@ -501,7 +501,7 @@ function OptimizationPanel({ stats, onClose, onClearCache }) {
         paddingBottom: '12px',
         borderBottom: '2px solid var(--line)'
       }}>
-        <h3 style={{ margin: 0, fontSize: '18px' }}>🧠 AI Optimizations</h3>
+        <h3 style={{ margin: 0, fontSize: '18px' }}>Å¡â‚¬ AI Optimizations</h3>
         <button onClick={onClose} style={{
           background: 'none',
           border: 'none',
@@ -542,7 +542,7 @@ function OptimizationPanel({ stats, onClose, onClearCache }) {
             fontSize: '12px'
           }}>
             <span style={{ color: enabled ? '#22c55e' : '#94a3b8' }}>
-              {enabled ? 'X to Å“' : ' to ” to ¹'}
+              {enabled ? 'X to Å“' : ' to â€ to Â¹'}
             </span>
             <span style={{ textTransform: 'capitalize' }}>
               {key.replace(/_/g, ' ')}
@@ -561,8 +561,8 @@ function OptimizationPanel({ stats, onClose, onClearCache }) {
           Cache Statistics:
         </div>
         <div style={{ fontSize: '12px', color: '#64748b' }}>
-          <div>âÅ“¨ Cached analyses: {cache.total_entries || 0}</div>
-          <div>’¾ Cache size: {cache.total_size_mb || 0} MB</div>
+          <div>Ã¢Å“Â¨ Cached analyses: {cache.total_entries || 0}</div>
+          <div>â€™Â¾ Cache size: {cache.total_size_mb || 0} MB</div>
         </div>
       </div>
 
@@ -571,7 +571,7 @@ function OptimizationPanel({ stats, onClose, onClearCache }) {
         onClick={onClearCache}
         style={{ width: '100%', fontSize: '13px' }}
       >
-        “¸ Clear Cache
+        â€œÂ¸ Clear Cache
       </button>
     </div>
   );
@@ -816,7 +816,7 @@ function MentionedEntitiesCard({ entities, isLoading }) {
                 className={`entity-tab ${viewMode === 'maps' ? 'active' : ''}`}
                 onClick={switchToMaps}
               >
-                âÅ“¨ Google Maps
+                Ã¢Å“Â¨ Google Maps
               </button>
               <button
                 className={`entity-tab ${viewMode === 'wikipedia' ? 'active' : ''}`}
@@ -928,7 +928,7 @@ function MentionedEntitiesCard({ entities, isLoading }) {
 function SearchResultCard({ match, query, t, openExpandedAt, addToBasket, playerRef, videoId, pad }) {
   return (
     <div className="result-card animate-slideIn">
-      <div style={{ fontSize: 12, color: "#64748b" }}>{padTimePrecise(match.start)} â to  {padTimePrecise(match.end)}</div>
+      <div style={{ fontSize: 12, color: "#64748b" }}>{padTimePrecise(match.start)} Ã¢ to Â {padTimePrecise(match.end)}</div>
       <div style={{ marginTop: 6 }}>
         {query ? match.text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, "gi")).map((part, idx) => (
           <span key={idx} className={part.toLowerCase() === query.toLowerCase() ? "hit" : ""}>{part}</span>
@@ -1442,7 +1442,7 @@ function CrossReferenceNetwork({ fullText, entities }) {
         </div>
         {network.nodes.length > 0 && (
           <button className="btn btn-ghost btn-export" onClick={exportNetworkImage}>
-            “¸ Export
+            â€œÂ¸ Export
           </button>
         )}
       </div>
@@ -1626,7 +1626,7 @@ function ConversationDynamics({ sents, playerRef, videoId }) {
           </p>
         </div>
         <button className="btn btn-ghost btn-export" onClick={exportDynamicsImage}>
-          “¸ Export
+          â€œÂ¸ Export
         </button>
       </div>
 
@@ -1897,12 +1897,11 @@ function IssueTimelinePanel({ transcript, videoId, videoTitle, entities }) {
 }
 
 // Jargon Translator Panel
+// Jargon Translator - Uses GPT for civic/government term explanations
 function JargonTranslatorPanel() {
   const [term, setTerm] = useState('');
   const [explanation, setExplanation] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [dictionary, setDictionary] = useState([]);
-  const [showDictionary, setShowDictionary] = useState(false);
 
   const handleExplain = async () => {
     if (!term.trim()) return;
@@ -1914,46 +1913,34 @@ function JargonTranslatorPanel() {
     finally { setLoading(false); }
   };
 
-  const loadDictionary = async () => {
-    try {
-      const result = await apiGetJargonDictionary();
-      setDictionary(result.terms || []);
-      setShowDictionary(true);
-    } catch (e) { console.error('Failed to load dictionary:', e); }
-  };
-
   return (
-    <div className="viz-card jargon-card">
-      <h3>Jargon Translator</h3>
-      <p className="viz-desc">Don't know what a term means? Get a plain-language explanation.</p>
+    <div className="viz-card jargon-card" style={{ marginTop: '24px' }}>
+      <h3>📖 Jargon Translator</h3>
+      <p className="viz-desc">Don't understand a civic term? Get a plain-language explanation powered by AI.</p>
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-        <input type="text" value={term} onChange={(e) => setTerm(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleExplain()}
-          placeholder="Enter a term (e.g., TIF, variance, quorum)"
-          style={{ flex: 1, padding: '12px 16px', border: '2px solid #e2e8f0', borderRadius: '8px', fontSize: '14px' }} />
-        <button className="btn btn-primary" onClick={handleExplain} disabled={loading}>{loading ? '...' : 'Explain'}</button>
+        <input 
+          type="text" 
+          value={term} 
+          onChange={(e) => setTerm(e.target.value)} 
+          onKeyDown={(e) => e.key === 'Enter' && handleExplain()}
+          placeholder="Enter a term (e.g., TIF, variance, quorum, RFP)"
+          style={{ flex: 1, padding: '12px 16px', border: '2px solid #e2e8f0', borderRadius: '8px', fontSize: '14px' }} 
+        />
+        <button className="btn btn-primary" onClick={handleExplain} disabled={loading}>
+          {loading ? 'Thinking...' : 'Explain'}
+        </button>
       </div>
       {explanation && (
-        <div style={{ background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)', padding: '16px', borderRadius: '12px', marginBottom: '16px', border: '2px solid #22c55e' }}>
-          <div style={{ fontWeight: '700', color: '#15803d', marginBottom: '8px' }}>{explanation.term}</div>
-          <div style={{ color: '#166534' }}>{explanation.explanation}</div>
-          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>Source: {explanation.source === 'dictionary' ? 'Built-in dictionary' : 'AI-generated'}</div>
-        </div>
-      )}
-      <button className="btn btn-ghost" onClick={loadDictionary} style={{ width: '100%' }}>Browse Full Dictionary</button>
-      {showDictionary && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }} onClick={() => setShowDictionary(false)}>
-          <div style={{ background: 'white', borderRadius: '16px', width: '90%', maxWidth: '700px', maxHeight: '80vh', overflow: 'auto', padding: '24px' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2 style={{ margin: 0 }}>Civic Jargon Dictionary</h2>
-              <button onClick={() => setShowDictionary(false)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer' }}>X</button>
+        <div style={{ background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)', padding: '16px', borderRadius: '12px', border: '2px solid #22c55e' }}>
+          <div style={{ fontWeight: '700', color: '#15803d', marginBottom: '8px', fontSize: '16px' }}>{explanation.term}</div>
+          <div style={{ color: '#166534', lineHeight: '1.6' }}>{explanation.explanation}</div>
+          {explanation.example && (
+            <div style={{ marginTop: '12px', padding: '10px', background: 'rgba(255,255,255,0.5)', borderRadius: '8px', fontSize: '13px', color: '#475569' }}>
+              <strong>Example:</strong> {explanation.example}
             </div>
-            <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '16px' }}>{dictionary.length} terms defined</div>
-            {dictionary.map((item, idx) => (
-              <div key={idx} style={{ padding: '12px', borderBottom: '1px solid #e2e8f0' }}>
-                <div style={{ fontWeight: '600', color: '#1E7F63' }}>{item.term}</div>
-                <div style={{ marginTop: '4px', color: '#374151' }}>{item.explanation}</div>
-              </div>
-            ))}
+          )}
+          <div style={{ fontSize: '11px', color: '#64748b', marginTop: '10px' }}>
+            🤖 AI-powered explanation for civic/government context
           </div>
         </div>
       )}
@@ -2493,7 +2480,7 @@ function MeetingEfficiencyDashboard({ fullText, cues }) {
         </div>
         {efficiency && (
           <button className="btn btn-ghost btn-export" onClick={exportEfficiencyImage}>
-            “¸ Export
+            â€œÂ¸ Export
           </button>
         )}
       </div>
@@ -2703,11 +2690,11 @@ function ProgressIndicator({ status, percent, message, estimatedTime, isVideoDow
         <div style={{ fontSize: '13px', opacity: 0.9, lineHeight: 1.5 }}>
           {estimatedTime && (
             <div style={{ marginBottom: '6px' }}>
-              ⏱️ Estimated time: ~{estimatedTime} minutes
+              â±ï¸ Estimated time: ~{estimatedTime} minutes
             </div>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>💡</span>
+            <span>ðŸ’¡</span>
             <span>This could take a while - up to 10min for hours-long videos. Feel free to visit other sites while you wait, but keep this tab open. Your download will be available under the video.</span>
           </div>
         </div>
@@ -2756,7 +2743,7 @@ function LoadingCard({ title, message, percent, bytesLoaded, bytesTotal, startTi
       {bytesLoaded && bytesTotal && (
         <div className="loading-body" style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
           {formatBytes(bytesLoaded)} / {formatBytes(bytesTotal)}
-          {timeEstimate && <span style={{ marginLeft: '8px' }}>âÃ‚ {timeEstimate}</span>}
+          {timeEstimate && <span style={{ marginLeft: '8px' }}>Ã¢Ã‚ {timeEstimate}</span>}
         </div>
       )}
       {(percent !== undefined && percent !== null) && (
@@ -2928,7 +2915,7 @@ Sent via Community Highlighter
 }
 
 // ============================================================================
-// ”´ NEW v4.0 COMPONENTS: Enhanced Features
+// â€Â´ NEW v4.0 COMPONENTS: Enhanced Features
 // ============================================================================
 
 // New Component: Clip Preview Tooltip
@@ -3255,7 +3242,7 @@ function KnowledgeBase({ currentVideoId, onSelectMeeting }) {
   return (
     <div className="knowledge-base">
       <div className="kb-header">
-        <h2>“¸ Community Knowledge Base</h2>
+        <h2>â€œÂ¸ Community Knowledge Base</h2>
         {kbStats && (
           <div className="kb-stats">
             <span>{kbStats.total_meetings} meetings</span>
@@ -3332,73 +3319,6 @@ function KnowledgeBase({ currentVideoId, onSelectMeeting }) {
 }
 
 // ============================================================================
-// v6.1 NEW COMPONENTS: Scorecard, Timeline, Share Moment, Reel Presets
-// ============================================================================
-
-// Reel Style Presets - Quick selection of video style configurations
-const REEL_PRESETS = {
-  news_brief: {
-    name: "📰 News Brief",
-    description: "Clean, professional, just the facts",
-    settings: { disableAllAdvanced: true, clipPadding: 3, transitions: false, colorFilter: 'none', normalizeAudio: false, backgroundMusic: false }
-  },
-  social_media: {
-    name: "🎬 Social Media",
-    description: "Dynamic, with transitions and music",
-    settings: { disableAllAdvanced: false, clipPadding: 4, transitions: true, colorFilter: 'warm', normalizeAudio: false, backgroundMusic: true }
-  },
-  highlights_only: {
-    name: "🔥 Quick Highlights",
-    description: "Exciting moments with upbeat music",
-    settings: { disableAllAdvanced: false, clipPadding: 2, transitions: true, colorFilter: 'high_contrast', normalizeAudio: false, backgroundMusic: true }
-  },
-  professional: {
-    name: "💼 Professional",
-    description: "Polished for presentations",
-    settings: { disableAllAdvanced: false, clipPadding: 4, transitions: true, colorFilter: 'cinematic', normalizeAudio: false, logoWatermark: true, backgroundMusic: true }
-  }
-};
-
-function ReelStylePresets({ videoOptions, setVideoOptions }) {
-  const [selectedPreset, setSelectedPreset] = useState(null);
-
-  const applyPreset = (presetKey) => {
-    const preset = REEL_PRESETS[presetKey];
-    if (preset) {
-      setVideoOptions(prev => ({ ...prev, ...preset.settings }));
-      setSelectedPreset(presetKey);
-    }
-  };
-
-  return (
-    <div style={{ marginBottom: '16px' }}>
-      <div style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b', marginBottom: '8px' }}>
-        🎬 Quick Presets
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-        {Object.entries(REEL_PRESETS).map(([key, preset]) => (
-          <button
-            key={key}
-            onClick={() => applyPreset(key)}
-            style={{
-              padding: '8px 12px',
-              borderRadius: '8px',
-              border: selectedPreset === key ? '2px solid #1E7F63' : '1px solid #e2e8f0',
-              background: selectedPreset === key ? '#f0fdf4' : 'white',
-              cursor: 'pointer',
-              fontSize: '12px',
-              textAlign: 'left',
-              minWidth: '140px'
-            }}
-          >
-            <div style={{ fontWeight: 600, marginBottom: '2px' }}>{preset.name}</div>
-            <div style={{ color: '#64748b', fontSize: '11px' }}>{preset.description}</div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 // Meeting Scorecard - Visual summary with key metrics
 function MeetingScorecard({ transcript, highlights, entities, isLoading }) {
@@ -3440,29 +3360,29 @@ function MeetingScorecard({ transcript, highlights, entities, isLoading }) {
 
   return (
     <div className="viz-card meeting-scorecard">
-      <h3>📊 Meeting Scorecard</h3>
+      <h3>ðŸ“Š Meeting Scorecard</h3>
       <p className="viz-desc">Key metrics and engagement indicators for this meeting.</p>
       
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '16px', marginTop: '16px' }}>
         <div className="scorecard-metric">
           <div style={{ fontSize: '28px', fontWeight: 700, color: '#1E7F63' }}>{scorecard.decisions_made}</div>
-          <div style={{ fontSize: '12px', color: '#64748b' }}>🗳️ Votes/Decisions</div>
+          <div style={{ fontSize: '12px', color: '#64748b' }}>ðŸ—³ï¸ Votes/Decisions</div>
         </div>
         <div className="scorecard-metric">
           <div style={{ fontSize: '28px', fontWeight: 700, color: '#2563eb' }}>{scorecard.public_comments}</div>
-          <div style={{ fontSize: '12px', color: '#64748b' }}>💬 Public Comments</div>
+          <div style={{ fontSize: '12px', color: '#64748b' }}>ðŸ’¬ Public Comments</div>
         </div>
         <div className="scorecard-metric">
           <div style={{ fontSize: '28px', fontWeight: 700, color: '#16a34a' }}>{scorecard.budget_items}</div>
-          <div style={{ fontSize: '12px', color: '#64748b' }}>💰 Budget Items</div>
+          <div style={{ fontSize: '12px', color: '#64748b' }}>ðŸ’° Budget Items</div>
         </div>
         <div className="scorecard-metric">
           <div style={{ fontSize: '28px', fontWeight: 700, color: '#9333ea' }}>{scorecard.speakers}</div>
-          <div style={{ fontSize: '12px', color: '#64748b' }}>🎤 Speakers</div>
+          <div style={{ fontSize: '12px', color: '#64748b' }}>ðŸŽ¤ Speakers</div>
         </div>
         <div className="scorecard-metric">
           <div style={{ fontSize: '28px', fontWeight: 700, color: '#64748b' }}>{scorecard.duration}</div>
-          <div style={{ fontSize: '12px', color: '#64748b' }}>⏱️ Duration</div>
+          <div style={{ fontSize: '12px', color: '#64748b' }}>â±ï¸ Duration</div>
         </div>
         <div className="scorecard-metric">
           <div style={{ 
@@ -3471,13 +3391,13 @@ function MeetingScorecard({ transcript, highlights, entities, isLoading }) {
           }}>
             {scorecard.engagement_score}%
           </div>
-          <div style={{ fontSize: '12px', color: '#64748b' }}>ˆ Engagement</div>
+          <div style={{ fontSize: '12px', color: '#64748b' }}>ðŸ“ˆ Engagement</div>
         </div>
       </div>
 
       {scorecard.hot_topics && scorecard.hot_topics.length > 0 && (
         <div style={{ marginTop: '20px' }}>
-          <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>🔥 Hot Topics</div>
+          <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>ðŸ”¥ Hot Topics</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
             {scorecard.hot_topics.map((topic, idx) => (
               <span key={idx} style={{
@@ -3498,9 +3418,10 @@ function MeetingScorecard({ transcript, highlights, entities, isLoading }) {
   );
 }
 
-// Interactive Timeline with colored markers
+// Interactive Timeline with colored markers and expandable action cards
 function InteractiveTimeline({ sents, highlights, playerRef, videoId, addToBasket, pad }) {
   const [hoveredPoint, setHoveredPoint] = useState(null);
+  const [expandedPoint, setExpandedPoint] = useState(null);
   const timelineRef = useRef(null);
 
   if (!sents || sents.length === 0) return null;
@@ -3515,11 +3436,14 @@ function InteractiveTimeline({ sents, highlights, playerRef, videoId, addToBaske
     if (h.start !== undefined) {
       timelinePoints.push({
         time: h.start,
+        endTime: h.end || h.start + 30,
         type: h.category || 'highlight',
         label: h.highlight || h.text || `Highlight ${idx + 1}`,
+        fullText: h.text || h.highlight || '',
         color: h.category === 'vote' ? '#ef4444' : 
                h.category === 'budget' ? '#16a34a' : 
-               h.category === 'public_comment' ? '#2563eb' : '#f59e0b'
+               h.category === 'public_comment' ? '#2563eb' : '#f59e0b',
+        originalIndex: idx
       });
     }
   });
@@ -3529,13 +3453,14 @@ function InteractiveTimeline({ sents, highlights, playerRef, videoId, addToBaske
   sents.forEach((sent, idx) => {
     const lowerText = sent.text.toLowerCase();
     if (decisionKeywords.some(kw => lowerText.includes(kw))) {
-      // Avoid duplicates near existing points
       const nearbyPoint = timelinePoints.find(p => Math.abs(p.time - sent.start) < 30);
       if (!nearbyPoint) {
         timelinePoints.push({
           time: sent.start,
+          endTime: sent.end || sent.start + 15,
           type: 'decision',
           label: sent.text.substring(0, 80) + (sent.text.length > 80 ? '...' : ''),
+          fullText: sent.text,
           color: '#ef4444'
         });
       }
@@ -3551,13 +3476,18 @@ function InteractiveTimeline({ sents, highlights, playerRef, videoId, addToBaske
       if (!nearbyPoint) {
         timelinePoints.push({
           time: sent.start,
+          endTime: sent.end || sent.start + 30,
           type: 'public_comment',
           label: sent.text.substring(0, 80) + (sent.text.length > 80 ? '...' : ''),
+          fullText: sent.text,
           color: '#2563eb'
         });
       }
     }
   });
+
+  // Sort by time
+  timelinePoints.sort((a, b) => a.time - b.time);
 
   const seekTo = (time) => {
     if (playerRef?.current?.seekTo) {
@@ -3573,10 +3503,28 @@ function InteractiveTimeline({ sents, highlights, playerRef, videoId, addToBaske
                  : `${m}:${String(s).padStart(2, '0')}`;
   };
 
+  const handlePointClick = (idx, time) => {
+    if (expandedPoint === idx) {
+      setExpandedPoint(null);
+    } else {
+      setExpandedPoint(idx);
+      seekTo(time);
+    }
+  };
+
+  const getTypeLabel = (type) => {
+    switch(type) {
+      case 'vote': case 'decision': return '🗳️ Vote/Decision';
+      case 'budget': return '💰 Budget Item';
+      case 'public_comment': return '💬 Public Comment';
+      default: return '⭐ Highlight';
+    }
+  };
+
   return (
     <div className="viz-card interactive-timeline">
       <h3>🎯 Interactive Timeline</h3>
-      <p className="viz-desc">Click any marker to jump to that moment. Colors indicate type of content.</p>
+      <p className="viz-desc">Click any marker to expand details and jump to that moment.</p>
       
       <div style={{ display: 'flex', gap: '16px', marginBottom: '12px', flexWrap: 'wrap' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
@@ -3622,25 +3570,27 @@ function InteractiveTimeline({ sents, highlights, playerRef, videoId, addToBaske
         {/* Timeline points */}
         {timelinePoints.map((point, idx) => {
           const position = (point.time / totalDuration) * 100;
+          const isExpanded = expandedPoint === idx;
           return (
             <div
               key={idx}
-              onClick={() => seekTo(point.time)}
+              onClick={() => handlePointClick(idx, point.time)}
               onMouseEnter={() => setHoveredPoint(idx)}
               onMouseLeave={() => setHoveredPoint(null)}
               style={{
                 position: 'absolute',
                 left: `calc(${position}% + 8px - 8px)`,
                 top: '50%',
-                transform: 'translateY(-50%)',
+                transform: `translateY(-50%) ${isExpanded ? 'scale(1.3)' : ''}`,
                 width: '16px',
                 height: '16px',
                 borderRadius: '50%',
                 background: point.color,
                 cursor: 'pointer',
-                zIndex: hoveredPoint === idx ? 10 : 1,
-                boxShadow: hoveredPoint === idx ? '0 0 0 4px rgba(0,0,0,0.1)' : 'none',
-                transition: 'transform 0.2s, box-shadow 0.2s'
+                zIndex: hoveredPoint === idx || isExpanded ? 10 : 1,
+                boxShadow: isExpanded ? `0 0 0 4px ${point.color}40` : hoveredPoint === idx ? '0 0 0 4px rgba(0,0,0,0.1)' : 'none',
+                transition: 'transform 0.2s, box-shadow 0.2s',
+                border: isExpanded ? '2px solid white' : 'none'
               }}
               title={`${formatTime(point.time)} - ${point.label}`}
             />
@@ -3648,7 +3598,7 @@ function InteractiveTimeline({ sents, highlights, playerRef, videoId, addToBaske
         })}
 
         {/* Hover tooltip */}
-        {hoveredPoint !== null && timelinePoints[hoveredPoint] && (
+        {hoveredPoint !== null && expandedPoint === null && timelinePoints[hoveredPoint] && (
           <div style={{
             position: 'absolute',
             left: `calc(${(timelinePoints[hoveredPoint].time / totalDuration) * 100}%)`,
@@ -3661,24 +3611,106 @@ function InteractiveTimeline({ sents, highlights, playerRef, videoId, addToBaske
             fontSize: '12px',
             maxWidth: '250px',
             zIndex: 20,
-            whiteSpace: 'normal'
+            whiteSpace: 'normal',
+            marginBottom: '4px'
           }}>
             <div style={{ fontWeight: 600, marginBottom: '4px' }}>
               {formatTime(timelinePoints[hoveredPoint].time)}
             </div>
             <div>{timelinePoints[hoveredPoint].label}</div>
+            <div style={{ fontSize: '10px', opacity: 0.7, marginTop: '4px' }}>Click to expand</div>
           </div>
         )}
       </div>
 
       {/* Time labels */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748b', padding: '0 8px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748b', padding: '0 8px', marginBottom: '12px' }}>
         <span>0:00</span>
         <span>{formatTime(totalDuration / 4)}</span>
         <span>{formatTime(totalDuration / 2)}</span>
         <span>{formatTime(totalDuration * 3 / 4)}</span>
         <span>{formatTime(totalDuration)}</span>
       </div>
+
+      {/* Expanded Action Card */}
+      {expandedPoint !== null && timelinePoints[expandedPoint] && (
+        <div style={{
+          background: 'white',
+          border: `2px solid ${timelinePoints[expandedPoint].color}`,
+          borderRadius: '12px',
+          padding: '16px',
+          marginTop: '8px',
+          animation: 'slideIn 0.2s ease-out'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+            <div>
+              <div style={{ 
+                display: 'inline-block',
+                background: `${timelinePoints[expandedPoint].color}20`,
+                color: timelinePoints[expandedPoint].color,
+                padding: '4px 10px',
+                borderRadius: '16px',
+                fontSize: '11px',
+                fontWeight: 600,
+                marginBottom: '8px'
+              }}>
+                {getTypeLabel(timelinePoints[expandedPoint].type)}
+              </div>
+              <div style={{ fontSize: '13px', color: '#64748b' }}>
+                {formatTime(timelinePoints[expandedPoint].time)} - {formatTime(timelinePoints[expandedPoint].endTime)}
+              </div>
+            </div>
+            <button
+              onClick={() => setExpandedPoint(null)}
+              style={{
+                background: 'none',
+                border: 'none',
+                fontSize: '18px',
+                cursor: 'pointer',
+                color: '#94a3b8',
+                padding: '4px'
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          
+          <div style={{ 
+            fontSize: '15px', 
+            color: '#1e293b', 
+            lineHeight: '1.6',
+            marginBottom: '16px'
+          }}>
+            {timelinePoints[expandedPoint].fullText || timelinePoints[expandedPoint].label}
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => seekTo(timelinePoints[expandedPoint].time)}
+              className="btn btn-primary"
+              style={{ fontSize: '12px', padding: '8px 12px' }}
+            >
+              ▶️ Play from here
+            </button>
+            {addToBasket && (
+              <button
+                onClick={() => {
+                  const point = timelinePoints[expandedPoint];
+                  addToBasket({
+                    start: Math.max(0, point.time - (pad || 2)),
+                    end: point.endTime + (pad || 2),
+                    label: point.label
+                  });
+                }}
+                className="btn btn-secondary"
+                style={{ fontSize: '12px', padding: '8px 12px' }}
+              >
+                📎 Save to Clips
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3737,7 +3769,7 @@ function ShareMoment({ videoId, sents, playerRef }) {
         className="btn btn-ghost"
         style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
       >
-        🔗 Share a Moment
+        ðŸ”— Share a Moment
       </button>
     );
   }
@@ -3765,7 +3797,7 @@ function ShareMoment({ videoId, sents, playerRef }) {
         onClick={(e) => e.stopPropagation()}
       >
         <h3 style={{ margin: '0 0 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          🔗 Share a Moment
+          ðŸ”— Share a Moment
         </h3>
 
         {!shareResult ? (
@@ -3817,7 +3849,7 @@ function ShareMoment({ videoId, sents, playerRef }) {
               className="btn btn-ghost"
               style={{ marginBottom: '16px', width: '100%' }}
             >
-              ⏱️ Use Current Video Time
+              â±ï¸ Use Current Video Time
             </button>
 
             <div style={{ display: 'flex', gap: '12px' }}>
@@ -3832,7 +3864,7 @@ function ShareMoment({ videoId, sents, playerRef }) {
         ) : (
           <>
             <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '8px', marginBottom: '16px' }}>
-              <div style={{ color: '#16a34a', fontWeight: 600, marginBottom: '8px' }}>✔ Share link created!</div>
+              <div style={{ color: '#16a34a', fontWeight: 600, marginBottom: '8px' }}>âœ“ Share link created!</div>
               <div style={{ fontSize: '12px', color: '#64748b' }}>
                 Duration: {shareResult.duration} seconds
               </div>
@@ -3851,7 +3883,7 @@ function ShareMoment({ videoId, sents, playerRef }) {
                   onClick={() => copyToClipboard(shareResult.youtube_url)}
                   className="btn btn-ghost"
                 >
-                  📋
+                  ðŸ“‹
                 </button>
               </div>
             </div>
@@ -3869,7 +3901,7 @@ function ShareMoment({ videoId, sents, playerRef }) {
                   onClick={() => copyToClipboard(shareResult.embed_code)}
                   className="btn btn-ghost"
                 >
-                  📋
+                  ðŸ“‹
                 </button>
               </div>
             </div>
@@ -3943,8 +3975,8 @@ function AccessibilityPanel({ summary, onSimplified, onTranslated }) {
           padding: 0
         }}
       >
-        ♿ Accessibility Options
-        <span style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }}>▼</span>
+        â™¿ Accessibility Options
+        <span style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }}>â–¼</span>
       </button>
 
       {isOpen && (
@@ -3952,7 +3984,7 @@ function AccessibilityPanel({ summary, onSimplified, onTranslated }) {
           {/* Reading Level */}
           <div style={{ marginBottom: '16px' }}>
             <label style={{ display: 'block', fontSize: '13px', marginBottom: '8px', color: '#475569', fontWeight: 500 }}>
-              📖 Reading Level
+              ðŸ“– Reading Level
             </label>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               {[
@@ -3989,7 +4021,7 @@ function AccessibilityPanel({ summary, onSimplified, onTranslated }) {
           {/* Translation */}
           <div>
             <label style={{ display: 'block', fontSize: '13px', marginBottom: '8px', color: '#475569', fontWeight: 500 }}>
-              🌐 Translate Summary
+              ðŸŒ Translate Summary
             </label>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
               {languages.map(lang => (
@@ -4023,7 +4055,7 @@ function AccessibilityPanel({ summary, onSimplified, onTranslated }) {
           {(simplifiedText || translatedText) && (
             <div style={{ marginTop: '16px', padding: '12px', background: 'white', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
               <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: '#475569' }}>
-                {translatedText ? `„ ${targetLanguage} Translation` : '„ Simplified Version'}
+                {translatedText ? `ðŸ“„ ${targetLanguage} Translation` : 'ðŸ“„ Simplified Version'}
               </div>
               <div style={{ fontSize: '13px', lineHeight: 1.6, color: '#1e293b' }}>
                 {translatedText || simplifiedText}
@@ -4067,20 +4099,18 @@ export default function App() {
   
   // 🎬 Video editing options
   const [videoOptions, setVideoOptions] = useState({
-    disableAllAdvanced: true,  // NEW: Master toggle to disable all processing
+    clipPadding: 4,
+    backgroundMusic: false,
     transitions: false,
     transitionDuration: 0.5,
     colorFilter: 'none',
-    normalizeAudio: false,
-    backgroundMusic: false,
-    clipPadding: 4,
+    playbackSpeed: '1.0',
+    showHighlightLabels: true,
     logoWatermark: false,
     introTitle: '',
     introSubtitle: '',
     outroTitle: '',
-    outroCta: '',
-    generateThumbnail: false,
-    addChapters: false
+    outroCta: ''
   });
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   
@@ -4096,12 +4126,12 @@ export default function App() {
     startTime: null
   });
 
-  // 🧠 NEW: Optimization stats state
+  // Å¡â‚¬ NEW: Optimization stats state
   const [optimizationStats, setOptimizationStats] = useState(null);
   const [showOptimizationPanel, setShowOptimizationPanel] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
-  // ”´ NEW v4.0: State for new features
+  // â€Â´ NEW v4.0: State for new features
   const [showAssistant, setShowAssistant] = useState(false);
   const [forceAssistantOpen, setForceAssistantOpen] = useState(0); // Counter to force open
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
@@ -4150,7 +4180,7 @@ export default function App() {
 
     return "";
   };
-  // 🧠 NEW: Load optimization stats on mount
+  // Å¡â‚¬ NEW: Load optimization stats on mount
   useEffect(() => {
     const loadStats = async () => {
       try {
@@ -4257,7 +4287,7 @@ export default function App() {
           language: lang === "es" ? "es" : "en",
           model: aiModel,
           strategy: "concise",
-          video_id: vid  // 🧠 NEW: For caching
+          video_id: vid  // Å¡â‚¬ NEW: For caching
         });
 
         let summaryText = "";
@@ -4314,7 +4344,7 @@ export default function App() {
       const ws = new WebSocket(getWebSocketUrl(`/ws/live`));
 
       ws.onopen = () => {
-        console.log("”´ Live mode connected");
+        console.log("â€Â´ Live mode connected");
       };
 
       ws.onmessage = (event) => {
@@ -4335,7 +4365,7 @@ export default function App() {
       };
 
       ws.onclose = () => {
-        console.log("”´ Live mode disconnected");
+        console.log("â€Â´ Live mode disconnected");
         setIsLiveMode(false);
       };
 
@@ -4379,7 +4409,7 @@ export default function App() {
         language: lang === "es" ? "es" : "en",
         model: aiModel,
         strategy: "detailed",
-        video_id: videoId  // 🧠 NEW: For caching
+        video_id: videoId  // Å¡â‚¬ NEW: For caching
       });
 
       let summaryText = "";
@@ -4467,7 +4497,7 @@ export default function App() {
           setProcessStatus(prev => ({
             ...prev,
             percent: 100,
-            message: status.status === "done" ? "Complete! ✔" : "Error occurred"
+            message: status.status === "done" ? "Complete! âœ“" : "Error occurred"
           }));
         }
 
@@ -4847,7 +4877,7 @@ export default function App() {
               background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
             }}>
               <h2 style={{ margin: 0, color: 'white', fontSize: '24px' }}>
-                ” Investigate: "{investigateWord.text}"
+                â€Â Investigate: "{investigateWord.text}"
               </h2>
               <button 
                 onClick={() => setInvestigateWord(null)}
@@ -4861,7 +4891,7 @@ export default function App() {
                   borderRadius: '8px'
                 }}
               >
-                âÅ“•
+                Ã¢Å“â€¢
               </button>
             </div>
 
@@ -4886,7 +4916,7 @@ export default function App() {
                   color: investigateViewMode === 'news' ? 'white' : '#64748b'
                 }}
               >
-                “° Google News
+                â€œÂ° Google News
               </button>
               <button
                 onClick={() => setInvestigateViewMode('maps')}
@@ -4901,7 +4931,7 @@ export default function App() {
                   color: investigateViewMode === 'maps' ? 'white' : '#64748b'
                 }}
               >
-                —ºÃ¯¸ Google Maps
+                â€”ÂºÃ¯Â¸Â Google Maps
               </button>
               <button
                 onClick={() => setInvestigateViewMode('wikipedia')}
@@ -4916,7 +4946,7 @@ export default function App() {
                   color: investigateViewMode === 'wikipedia' ? 'white' : '#64748b'
                 }}
               >
-                “Å¡ Wikipedia
+                â€œÅ¡ Wikipedia
               </button>
             </div>
 
@@ -4970,7 +5000,7 @@ export default function App() {
                 className="btn btn-primary"
                 style={{ textDecoration: 'none' }}
               >
-                Open in New Tab â—
+                Open in New Tab Ã¢â€ â€”
               </a>
               <button 
                 className="btn btn-ghost" 
@@ -5070,7 +5100,7 @@ export default function App() {
                 border: '2px solid #ff4444'
               }}>
                 <h3 style={{ color: '#ff4444', marginBottom: '15px' }}>
-                  ”´ LIVE MODE - Real-time Updates
+                  â€Â´ LIVE MODE - Real-time Updates
                 </h3>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
@@ -5210,10 +5240,10 @@ export default function App() {
                                    item.category === 'budget' ? '#166534' :
                                    item.category === 'public_comment' ? '#1e40af' : '#92400e'
                           }}>
-                            {item.category === 'vote' ? '🗳️ Vote' :
-                             item.category === 'budget' ? '💰 Budget' :
-                             item.category === 'public_comment' ? '💬 Public' :
-                             item.category === 'announcement' ? '¢ Announcement' : ''}
+                            {item.category === 'vote' ? 'ðŸ—³ï¸ Vote' :
+                             item.category === 'budget' ? 'ðŸ’° Budget' :
+                             item.category === 'public_comment' ? 'ðŸ’¬ Public' :
+                             item.category === 'announcement' ? 'ðŸ“¢ Announcement' : ''}
                           </span>
                         )}
                       </div>
@@ -5231,7 +5261,7 @@ export default function App() {
                           "{item.quote}"
                           {item.speaker && (
                             <span style={{ display: 'block', marginTop: '4px', fontStyle: 'normal', color: '#94a3b8', fontSize: '12px' }}>
-                              — {item.speaker}
+                              â€” {item.speaker}
                             </span>
                           )}
                         </div>
@@ -5389,7 +5419,7 @@ export default function App() {
                         gap: '6px'
                       }}
                     >
-                      ” Investigate
+                      â€Â Investigate
                     </button>
                   </div>
                 )}
@@ -5479,9 +5509,11 @@ export default function App() {
                     </div>
                   </div>
                 )}
-
-                {/* Jargon Translator - directly under Word Cloud */}
-                <JargonTranslatorPanel />
+                
+                {/* Jargon Translator - Only show after word cloud is created */}
+                {words.length > 0 && (
+                  <JargonTranslatorPanel />
+                )}
               </>
             )}
 
@@ -5653,12 +5685,6 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* v6.1: Reel Style Presets */}
-                <ReelStylePresets 
-                  videoOptions={videoOptions}
-                  setVideoOptions={setVideoOptions}
-                />
-
                 {/* v6.1: Share a Moment button */}
                 {videoId && (
                   <ShareMoment 
@@ -5698,123 +5724,153 @@ export default function App() {
                   
                   {showAdvancedOptions && (
                     <div style={{ padding: '0 16px 16px 16px' }}>
-                      {/* MASTER TOGGLE - Disable All Processing */}
+                      {/* Clip Padding - Always available */}
+                      <div style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #e2e8f0' }}>
+                        <label style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b', display: 'block', marginBottom: '6px' }}>
+                          ⏱️ Clip Padding
+                        </label>
+                        <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>
+                          Extra seconds before/after each highlight
+                        </div>
+                        <select
+                          value={videoOptions.clipPadding}
+                          onChange={(e) => setVideoOptions(v => ({ ...v, clipPadding: parseInt(e.target.value) }))}
+                          style={{
+                            width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0',
+                            fontSize: '13px', background: 'white'
+                          }}
+                        >
+                          <option value="1">1 second (very tight)</option>
+                          <option value="2">2 seconds (tight)</option>
+                          <option value="3">3 seconds</option>
+                          <option value="4">4 seconds (recommended)</option>
+                          <option value="5">5 seconds (relaxed)</option>
+                          <option value="6">6 seconds (extra context)</option>
+                        </select>
+                      </div>
+
+                      {/* 🎵 BACKGROUND MUSIC - New prominent option */}
                       <div style={{ 
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center', 
-                        marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #e2e8f0'
+                        marginBottom: '16px', padding: '12px', background: '#fef3c7', borderRadius: '8px'
                       }}>
                         <div>
-                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b' }}>Skip All Processing</span>
-                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>Fastest export, no effects</div>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#92400e' }}>🎵 Background Music</span>
+                          <div style={{ fontSize: '11px', color: '#b45309' }}>Light upbeat music at 12% volume</div>
                         </div>
                         <button
-                          onClick={() => setVideoOptions(v => ({ ...v, disableAllAdvanced: !v.disableAllAdvanced }))}
+                          onClick={() => setVideoOptions(v => ({ ...v, backgroundMusic: !v.backgroundMusic }))}
                           style={{
-                            width: '40px', height: '22px', borderRadius: '11px', border: 'none', cursor: 'pointer',
-                            background: videoOptions.disableAllAdvanced ? '#1E7F63' : '#cbd5e1', position: 'relative'
+                            width: '44px', height: '24px', borderRadius: '12px', border: 'none', cursor: 'pointer',
+                            background: videoOptions.backgroundMusic ? '#f59e0b' : '#cbd5e1', position: 'relative'
                           }}
                         >
                           <div style={{
-                            width: '18px', height: '18px', borderRadius: '50%', background: 'white',
-                            position: 'absolute', top: '2px', left: videoOptions.disableAllAdvanced ? '20px' : '2px',
+                            width: '20px', height: '20px', borderRadius: '50%', background: 'white',
+                            position: 'absolute', top: '2px', left: videoOptions.backgroundMusic ? '22px' : '2px',
                             transition: 'left 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
                           }} />
                         </button>
                       </div>
 
-                      {/* Only show other options when processing is enabled */}
-                      <div style={{ opacity: videoOptions.disableAllAdvanced ? 0.4 : 1, pointerEvents: videoOptions.disableAllAdvanced ? 'none' : 'auto' }}>
-                        {/* Clip Padding */}
-                        <div style={{ marginBottom: '12px' }}>
-                          <label style={{ fontSize: '13px', color: '#64748b', display: 'block', marginBottom: '4px' }}>Clip Padding (seconds before/after)</label>
-                          <select
-                            value={videoOptions.clipPadding}
-                            onChange={(e) => setVideoOptions(v => ({ ...v, clipPadding: parseInt(e.target.value) }))}
-                            style={{
-                              width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0',
-                              fontSize: '13px', background: 'white'
-                            }}
-                          >
-                            <option value="2">2 seconds (tight)</option>
-                            <option value="3">3 seconds</option>
-                            <option value="4">4 seconds (recommended)</option>
-                            <option value="5">5 seconds</option>
-                            <option value="6">6 seconds (relaxed)</option>
-                          </select>
+                      {/* Fade Transitions */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                        <div>
+                          <span style={{ fontSize: '13px', color: '#475569' }}>✨ Fade Transitions</span>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>Smooth fades between clips</div>
                         </div>
+                        <button
+                          onClick={() => setVideoOptions(v => ({ ...v, transitions: !v.transitions }))}
+                          style={{
+                            width: '40px', height: '22px', borderRadius: '11px', border: 'none', cursor: 'pointer',
+                            background: videoOptions.transitions ? '#1E7F63' : '#cbd5e1', position: 'relative'
+                          }}
+                        >
+                          <div style={{
+                            width: '18px', height: '18px', borderRadius: '50%', background: 'white',
+                            position: 'absolute', top: '2px', left: videoOptions.transitions ? '20px' : '2px',
+                            transition: 'left 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                          }} />
+                        </button>
+                      </div>
 
-                        {/* Transitions */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                          <span style={{ fontSize: '13px', color: '#64748b' }}>Fade Transitions</span>
-                          <button
-                            onClick={() => setVideoOptions(v => ({ ...v, transitions: !v.transitions }))}
-                            style={{
-                              width: '40px', height: '22px', borderRadius: '11px', border: 'none', cursor: 'pointer',
-                              background: videoOptions.transitions ? '#1E7F63' : '#cbd5e1', position: 'relative'
-                            }}
-                          >
-                            <div style={{
-                              width: '18px', height: '18px', borderRadius: '50%', background: 'white',
-                              position: 'absolute', top: '2px', left: videoOptions.transitions ? '20px' : '2px',
-                              transition: 'left 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
-                            }} />
-                          </button>
-                        </div>
+                      {/* Color Filter */}
+                      <div style={{ marginBottom: '12px' }}>
+                        <label style={{ fontSize: '13px', color: '#475569', display: 'block', marginBottom: '4px' }}>🎨 Color Style</label>
+                        <select
+                          value={videoOptions.colorFilter}
+                          onChange={(e) => setVideoOptions(v => ({ ...v, colorFilter: e.target.value }))}
+                          style={{
+                            width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0',
+                            fontSize: '13px', background: 'white'
+                          }}
+                        >
+                          <option value="none">Original (no filter)</option>
+                          <option value="warm">Warm (friendly)</option>
+                          <option value="cool">Cool (professional)</option>
+                          <option value="high_contrast">High Contrast (bold)</option>
+                          <option value="cinematic">Cinematic (dramatic)</option>
+                        </select>
+                      </div>
 
-                        {/* Color Filter */}
-                        <div style={{ marginBottom: '12px' }}>
-                          <label style={{ fontSize: '13px', color: '#64748b', display: 'block', marginBottom: '4px' }}>Color Filter</label>
-                          <select
-                            value={videoOptions.colorFilter}
-                            onChange={(e) => setVideoOptions(v => ({ ...v, colorFilter: e.target.value }))}
-                            style={{
-                              width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0',
-                              fontSize: '13px', background: 'white'
-                            }}
-                          >
-                            <option value="none">None</option>
-                            <option value="warm">Warm</option>
-                            <option value="cool">Cool</option>
-                            <option value="high_contrast">High Contrast</option>
-                            <option value="cinematic">Cinematic</option>
-                          </select>
-                        </div>
+                      {/* Playback Speed */}
+                      <div style={{ marginBottom: '12px' }}>
+                        <label style={{ fontSize: '13px', color: '#475569', display: 'block', marginBottom: '4px' }}>⚡ Playback Speed</label>
+                        <select
+                          value={videoOptions.playbackSpeed || '1.0'}
+                          onChange={(e) => setVideoOptions(v => ({ ...v, playbackSpeed: e.target.value }))}
+                          style={{
+                            width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0',
+                            fontSize: '13px', background: 'white'
+                          }}
+                        >
+                          <option value="0.75">0.75x (slower)</option>
+                          <option value="1.0">1.0x (normal)</option>
+                          <option value="1.25">1.25x (slightly faster)</option>
+                          <option value="1.5">1.5x (faster)</option>
+                        </select>
+                      </div>
 
-                        {/* Audio Normalize */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                          <span style={{ fontSize: '13px', color: '#64748b' }}>Normalize Audio</span>
-                          <button
-                            onClick={() => setVideoOptions(v => ({ ...v, normalizeAudio: !v.normalizeAudio }))}
-                            style={{
-                              width: '40px', height: '22px', borderRadius: '11px', border: 'none', cursor: 'pointer',
-                              background: videoOptions.normalizeAudio ? '#1E7F63' : '#cbd5e1', position: 'relative'
-                            }}
-                          >
-                            <div style={{
-                              width: '18px', height: '18px', borderRadius: '50%', background: 'white',
-                              position: 'absolute', top: '2px', left: videoOptions.normalizeAudio ? '20px' : '2px',
-                              transition: 'left 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
-                            }} />
-                          </button>
+                      {/* Show Highlight Labels */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                        <div>
+                          <span style={{ fontSize: '13px', color: '#475569' }}>🏷️ Show Highlight Labels</span>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>Display summary text on video</div>
                         </div>
+                        <button
+                          onClick={() => setVideoOptions(v => ({ ...v, showHighlightLabels: v.showHighlightLabels !== false }))}
+                          style={{
+                            width: '40px', height: '22px', borderRadius: '11px', border: 'none', cursor: 'pointer',
+                            background: videoOptions.showHighlightLabels !== false ? '#1E7F63' : '#cbd5e1', position: 'relative'
+                          }}
+                        >
+                          <div style={{
+                            width: '18px', height: '18px', borderRadius: '50%', background: 'white',
+                            position: 'absolute', top: '2px', left: videoOptions.showHighlightLabels !== false ? '20px' : '2px',
+                            transition: 'left 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                          }} />
+                        </button>
+                      </div>
 
-                        {/* Logo Watermark */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                          <span style={{ fontSize: '13px', color: '#64748b' }}>🏷️ Logo Watermark</span>
-                          <button
-                            onClick={() => setVideoOptions(v => ({ ...v, logoWatermark: !v.logoWatermark }))}
-                            style={{
-                              width: '40px', height: '22px', borderRadius: '11px', border: 'none', cursor: 'pointer',
-                              background: videoOptions.logoWatermark ? '#1E7F63' : '#cbd5e1', position: 'relative'
-                            }}
-                          >
-                            <div style={{
-                              width: '18px', height: '18px', borderRadius: '50%', background: 'white',
-                              position: 'absolute', top: '2px', left: videoOptions.logoWatermark ? '20px' : '2px',
-                              transition: 'left 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
-                            }} />
-                          </button>
+                      {/* Logo Watermark */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <span style={{ fontSize: '13px', color: '#475569' }}>🏢 Logo Watermark</span>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>Add branding to video</div>
                         </div>
+                        <button
+                          onClick={() => setVideoOptions(v => ({ ...v, logoWatermark: !v.logoWatermark }))}
+                          style={{
+                            width: '40px', height: '22px', borderRadius: '11px', border: 'none', cursor: 'pointer',
+                            background: videoOptions.logoWatermark ? '#1E7F63' : '#cbd5e1', position: 'relative'
+                          }}
+                        >
+                          <div style={{
+                            width: '18px', height: '18px', borderRadius: '50%', background: 'white',
+                            position: 'absolute', top: '2px', left: videoOptions.logoWatermark ? '20px' : '2px',
+                            transition: 'left 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                          }} />
+                        </button>
                       </div>
                     </div>
                   )}
@@ -5956,13 +6012,13 @@ export default function App() {
                     setForceAssistantOpen(prev => prev + 1);
                   }}
                 >
-                  ’ AI Assistant
+                  â€™ AI Assistant
                 </button>
                 <button
                   className="btn btn-secondary"
                   onClick={() => setShowKnowledgeBase(!showKnowledgeBase)}
                 >
-                  “¸ Knowledge Base
+                  â€œÂ¸ Knowledge Base
                 </button>
               </div>
             )}
@@ -5993,16 +6049,18 @@ export default function App() {
                 pad={pad}
               />
 
-              {/* Row: People/Places/Things + Topic Subscriptions */}
+              <DecisionTimeline
+                sents={sents}
+                playerRef={playerRef}
+                videoId={videoId}
+                addToBasket={addToBasket}
+                pad={pad}
+                openExpandedAt={openExpandedAt}
+              />
+
               <MentionedEntitiesCard
                 entities={entities}
                 isLoading={loadingEntities}
-              />
-
-              <TopicSubscriptionsPanel
-                transcript={fullText}
-                videoId={videoId}
-                videoTitle={videoTitle}
               />
 
               <TopicHeatMap
@@ -6037,23 +6095,34 @@ export default function App() {
                 videoId={videoId}
               />
 
-              {/* Full-width Issue Tracker & Meeting Comparison */}
-              <div style={{ gridColumn: '1 / -1' }}>
-                <CrossMeetingAnalysisPanel
-                  currentVideoId={videoId}
-                  currentTitle={videoTitle}
-                  currentTranscript={fullText}
-                  currentEntities={entities}
-                  currentSummary={summary.para}
-                />
-              </div>
+              {/* v6.0: NEW FEATURES */}
+              <TopicSubscriptionsPanel
+                transcript={fullText}
+                videoId={videoId}
+                videoTitle={videoTitle}
+              />
+
+              <IssueTimelinePanel
+                transcript={fullText}
+                videoId={videoId}
+                videoTitle={videoTitle}
+                entities={entities}
+              />
+
+              <CrossMeetingAnalysisPanel
+                currentVideoId={videoId}
+                currentTitle={videoTitle}
+                currentTranscript={fullText}
+                currentEntities={entities}
+                currentSummary={summary.para}
+              />
 
 
             </div>
           </section>
         )}
 
-        {/* ’ AI Meeting Assistant */}
+        {/* â€™ AI Meeting Assistant */}
         {showAssistant && videoId && (
           <MeetingAssistant
             videoId={videoId}
@@ -6064,7 +6133,7 @@ export default function App() {
 
       </main>
 
-      {/* “¸ Knowledge Base */}
+      {/* â€œÂ¸ Knowledge Base */}
       {showKnowledgeBase && (
         <section className="card section" style={{ marginTop: '20px' }}>
           <KnowledgeBase
@@ -6129,7 +6198,7 @@ export default function App() {
       </footer>
 
 
-      {/* 🧠 NEW: Optimization Panel */}
+      {/* Å¡â‚¬ NEW: Optimization Panel */}
       {showOptimizationPanel && optimizationStats && (
         <OptimizationPanel
           stats={optimizationStats}
@@ -6137,7 +6206,7 @@ export default function App() {
           onClearCache={async () => {
             try {
               await apiClearCache();
-              alert("âÅ“… Cache cleared!");
+              alert("Ã¢Å“â€¦ Cache cleared!");
               const newStats = await apiOptimizationStats();
               setOptimizationStats(newStats);
             } catch (e) {
