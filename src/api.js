@@ -601,3 +601,56 @@ export async function apiBuildKnowledgeGraph(data) {
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
+
+// ============================================================================
+// v6.1 NEW FEATURES: Scorecard, Share Moment, Accessibility
+// ============================================================================
+
+// Meeting Scorecard
+export async function apiMeetingScorecard(data) {
+  const res = await fetch(`${BACKEND_URL}/api/meeting/scorecard`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// Share a Moment
+export async function apiShareMoment(data) {
+  const res = await fetch(`${BACKEND_URL}/api/share/moment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function apiGetSharedMoment(shareId) {
+  const res = await fetch(`${BACKEND_URL}/api/share/${shareId}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// Accessibility
+export async function apiSimplifyText(data) {
+  const res = await fetch(`${BACKEND_URL}/api/accessibility/simplify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function apiTranslateSummary(data) {
+  const res = await fetch(`${BACKEND_URL}/api/accessibility/translate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}

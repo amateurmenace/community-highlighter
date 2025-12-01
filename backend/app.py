@@ -240,7 +240,7 @@ MEETING_CACHE = {}  # v5.0: Meeting summaries cache  # Cache for transcripts
 
 
 # ============================================================================
-# Â  NEW: VECTOR DATABASE SETUP (ChromaDB for Knowledge Base)
+# Ã‚Â  NEW: VECTOR DATABASE SETUP (ChromaDB for Knowledge Base)
 # ============================================================================
 
 # Initialize ChromaDB only if available
@@ -469,41 +469,84 @@ def synthesize_full_meeting(all_key_points, model="gpt-4o", strategy="concise"):
     combined_quotes = list(dict.fromkeys(combined_quotes))
 
     if strategy == "highlights_with_quotes":
-        system_prompt = """You are an expert at creating engaging highlights from civic meetings.
-Your highlights should be specific, actionable, and backed by direct quotes.
-CRITICAL: Only use complete quotes. Never use partial or cut-off quotes."""
+        system_prompt = """You are an expert at creating compelling, newsworthy highlights from civic meetings.
+Your goal is to identify the most IMPACTFUL moments that citizens would want to see.
+
+PRIORITIZE these types of moments (in order):
+1. VOTES & DECISIONS - Any official votes, approvals, denials, or formal decisions
+2. BUDGET & MONEY - Specific dollar amounts, funding allocations, tax implications
+3. EMOTIONAL MOMENTS - Passionate speeches, disagreements, standing ovations, frustration
+4. PUBLIC COMMENTS - Resident testimonials, community concerns, personal stories
+5. KEY ANNOUNCEMENTS - New projects, policy changes, timeline updates
+6. CONTROVERSIES - Debates, split opinions, contentious issues
+
+CRITICAL RULES:
+- Each highlight must be SPECIFIC with names, numbers, or concrete details
+- Quotes must be COMPLETE sentences, never fragments
+- Prioritize diversity - cover DIFFERENT topics, not multiple highlights about same thing
+- Include at least 2 public comments/resident voices if present
+- Flag any votes with the vote count (e.g., "passed 4-1")"""
 
         user_prompt = f"""Based on the key information extracted from a civic meeting, create 10 compelling highlights with supporting quotes.
 
 KEY INFORMATION FROM MEETING:
 
-DECISIONS MADE:
-{chr(10).join(f" {d}" for d in combined_decisions[:20])}
+DECISIONS & VOTES MADE:
+{chr(10).join(f" • {d}" for d in combined_decisions[:20])}
 
 MAJOR DISCUSSIONS:
-{chr(10).join(f" {d}" for d in combined_discussions[:20])}
+{chr(10).join(f" • {d}" for d in combined_discussions[:20])}
 
 ACTION ITEMS:
-{chr(10).join(f" {a}" for a in combined_actions[:15])}
+{chr(10).join(f" • {a}" for a in combined_actions[:15])}
 
 NOTABLE QUOTES (use ONLY complete quotes):
 {chr(10).join(f' "{q}"' for q in combined_quotes[:20])}
 
-Create exactly 10 highlights. Each highlight should:
-1. Summarize a key outcome, decision, or important discussion point in YOUR OWN WORDS
-2. Be paired with a COMPLETE, relevant direct quote that supports it (not a fragment)
-3. If a quote seems incomplete, paraphrase the content instead
+Create exactly 10 highlights following these requirements:
+1. At least 2 highlights about VOTES or DECISIONS (include vote counts if available)
+2. At least 1 highlight about BUDGET or MONEY (include specific dollar amounts)
+3. At least 2 highlights featuring PUBLIC COMMENTS or resident voices
+4. Remaining highlights should cover DIFFERENT topics for variety
+5. Each quote must be a COMPLETE sentence from the meeting
+
+CRITICAL - HIGHLIGHT WRITING RULES:
+- Each "highlight" MUST be a SPECIFIC, DETAILED sentence (15-30 words)
+- NEVER use generic phrases like "Discussion about..." or "Update on..." or "Item regarding..."
+- ALWAYS include SPECIFIC details: names, dollar amounts, vote counts, project names, locations
+- Write like a news headline that tells the ACTUAL story, not just the topic
+- BAD: "Discussion about budget allocation" 
+- GOOD: "Council approves $2.4M for Main Street sidewalk repairs after heated debate"
+- BAD: "Update on school construction"
+- GOOD: "Lincoln Elementary expansion delayed 6 months due to contractor disputes"
+
+For each highlight, also provide:
+- category: one of "vote", "budget", "public_comment", "announcement", "controversy", "action_item"
+- importance: 1-5 (5 = most important)
+- speaker: who said the quote (if identifiable)
 
 Respond in this EXACT JSON format:
 {{
   "highlights": [
-    {{"highlight": "Brief summary of key point 1", "quote": "Complete supporting quote from the meeting"}},
-    {{"highlight": "Brief summary of key point 2", "quote": "Complete supporting quote from the meeting"}},
+    {{
+      "highlight": "Specific detailed summary with names, numbers, and outcomes",
+      "quote": "Complete supporting quote from the meeting",
+      "category": "vote",
+      "importance": 5,
+      "speaker": "Mayor Smith"
+    }},
     ...
-  ]
+  ],
+  "meeting_stats": {{
+    "total_votes": 0,
+    "total_decisions": 0,
+    "public_comments_count": 0,
+    "controversial_items": 0,
+    "budget_items_discussed": 0
+  }}
 }}"""
 
-        max_tokens = 2500
+        max_tokens = 3500
 
     else:
         system_prompt = """You are an expert at writing executive summaries for civic and government meetings.
@@ -897,6 +940,7 @@ def parse_vtt_to_transcript(vtt_content: str) -> list:
     """Parse VTT content into transcript format for AI assistant
     
     Handles YouTube's rolling captions which often have overlapping/duplicate text.
+    Also detects and removes internal repetition within a single caption.
     """
     transcript_data = []
     lines = vtt_content.split("\n")
@@ -905,6 +949,51 @@ def parse_vtt_to_transcript(vtt_content: str) -> list:
     # Track seen text to avoid duplicates
     seen_texts = set()
     last_text = ""
+    
+    def remove_internal_repetition(text):
+        """Detect and remove repeated phrases within text.
+        
+        Example: "hello world hello world" -> "hello world"
+        """
+        if not text or len(text) < 10:
+            return text
+        
+        # Normalize whitespace
+        text = ' '.join(text.split())
+            
+        words = text.split(' ')
+        n = len(words)
+        if n < 4:
+            return text
+        
+        # Try splitting in half first (most common case: exact 2x repeat)
+        half = n // 2
+        first_half = ' '.join(words[:half])
+        second_half = ' '.join(words[half:half*2])
+        if first_half == second_half:
+            return first_half
+        
+        # Try splitting in thirds (3x repeat)
+        third = n // 3
+        if third >= 2:
+            p1 = ' '.join(words[:third])
+            p2 = ' '.join(words[third:third*2])
+            p3 = ' '.join(words[third*2:third*3])
+            if p1 == p2 == p3:
+                return p1
+        
+        # Try to find where the text starts repeating by looking for first word appearing again
+        first_word = words[0].lower()
+        for i in range(2, half + 2):
+            if i < n and words[i].lower() == first_word:
+                # Potential repeat starting at position i
+                candidate = ' '.join(words[:i])
+                rest = ' '.join(words[i:])
+                # Check if rest starts with candidate (allowing partial at end)
+                if rest == candidate or rest.startswith(candidate + ' ') or candidate.startswith(rest):
+                    return candidate
+        
+        return text
 
     while i < len(lines):
         line = lines[i].strip()
@@ -959,6 +1048,9 @@ def parse_vtt_to_transcript(vtt_content: str) -> list:
                 text = " ".join(text_lines).strip()
                 
                 if text:
+                    # FIRST: Remove internal repetition (e.g., "hello hello hello" -> "hello")
+                    text = remove_internal_repetition(text)
+                    
                     # Deduplicate: Check for exact duplicates and rolling text
                     text_normalized = text.lower().strip()
                     
@@ -979,6 +1071,7 @@ def parse_vtt_to_transcript(vtt_content: str) -> list:
                                 if transcript_data:
                                     transcript_data[-1]["text"] = text
                                     seen_texts.add(text_normalized)
+                                    last_text = text
                             is_rolling = True
                         # Check for significant overlap (more than 50% of words match)
                         elif not is_rolling:
@@ -990,6 +1083,7 @@ def parse_vtt_to_transcript(vtt_content: str) -> list:
                                     # Keep the longer text
                                     if len(text) > len(last_text) and transcript_data:
                                         transcript_data[-1]["text"] = text
+                                        last_text = text
                                     is_rolling = True
                     
                     if not is_rolling:
@@ -1081,11 +1175,11 @@ async def get_transcript(req: Request):
                             f" STORED {len(transcript_data)} segments (Method: YouTube Data API)"
                         )
                 except Exception as parse_error:
-                    print(f"Â   Could not parse YouTube Data API VTT: {parse_error}")
+                    print(f"Ã‚Â   Could not parse YouTube Data API VTT: {parse_error}")
 
                 return Response(content=vtt, media_type="text/vtt")
         except Exception as e:
-            print(f"Â   YouTube Data API failed: {e}")
+            print(f"Ã‚Â   YouTube Data API failed: {e}")
 
     # Last resort: yt-dlp
     try:
@@ -1143,10 +1237,10 @@ async def get_transcript(req: Request):
                                             f" STORED {len(transcript_data)} segments (Method: yt-dlp)"
                                         )
                                     else:
-                                        print(f"Â   VTT parsing returned no data")
+                                        print(f"Ã‚Â   VTT parsing returned no data")
                                 except Exception as parse_error:
                                     print(
-                                        f"Â   Could not parse yt-dlp VTT: {parse_error}"
+                                        f"Ã‚Â   Could not parse yt-dlp VTT: {parse_error}"
                                     )
 
                                 return Response(
@@ -1154,7 +1248,7 @@ async def get_transcript(req: Request):
                                 )
 
     except Exception as e:
-        print(f"Â   yt-dlp failed: {e}")
+        print(f"Ã‚Â   yt-dlp failed: {e}")
 
     raise HTTPException(
         status_code=404,
@@ -1264,7 +1358,7 @@ async def summary_ai(req: Request):
                 all_key_points.append(key_points)
 
         if not all_key_points:
-            print("Â  Key point extraction failed, using fallback")
+            print("Ã‚Â  Key point extraction failed, using fallback")
             if strategy == "highlights_with_quotes":
                 return {
                     "summarySentences": json.dumps(
@@ -1293,7 +1387,7 @@ async def summary_ai(req: Request):
                             "strategy": strategy,
                         }
                 except json.JSONDecodeError:
-                    print("Â  JSON parsing failed")
+                    print("Ã‚Â  JSON parsing failed")
             else:
                 print(f" Generated summary ({len(ai_result)} chars)")
                 return {"summarySentences": ai_result, "strategy": strategy}
@@ -1309,10 +1403,18 @@ async def summary_ai(req: Request):
 TRANSCRIPT:
 {transcript}
 
+CRITICAL - HIGHLIGHT WRITING RULES:
+- Each "highlight" MUST be a SPECIFIC, DETAILED sentence (15-30 words)
+- NEVER use generic phrases like "Discussion about..." or "Update on..." or "Item regarding..."
+- ALWAYS include SPECIFIC details: names, dollar amounts, vote counts, project names, locations
+- Write like a news headline that tells the ACTUAL story, not just the topic
+- BAD: "Discussion about budget allocation" 
+- GOOD: "Council approves $2.4M for Main Street sidewalk repairs after heated debate"
+
 Respond in this EXACT JSON format:
 {{
   "highlights": [
-    {{"highlight": "Summary of key point", "quote": "Direct quote from transcript"}},
+    {{"highlight": "Specific detailed summary with names, numbers, outcomes", "quote": "Direct quote from transcript"}},
     ...
   ]
 }}"""
@@ -1359,7 +1461,7 @@ TRANSCRIPT:
             if ai_result:
                 return {"summarySentences": ai_result, "strategy": strategy}
 
-    print("Â  Using fallback")
+    print("Ã‚Â  Using fallback")
     if strategy == "highlights_with_quotes":
         return {
             "summarySentences": json.dumps(generate_fallback_highlights(transcript)),
@@ -2095,25 +2197,724 @@ async def get_meeting_efficiency(req: Request):
 
 # Video processing endpoints
 
+# ============================================================================
+# VIDEO EDITING ENHANCEMENT FUNCTIONS
+# ============================================================================
 
-def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True, transcript_data=None):
-    """Process video clips into various output formats with optional captions"""
+def get_video_info(video_path):
+    """Get video dimensions, duration, fps using ffprobe"""
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height,r_frame_rate,duration",
+            "-show_entries", "format=duration",
+            "-of", "json",
+            video_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            import json
+            data = json.loads(result.stdout)
+            stream = data.get('streams', [{}])[0]
+            format_info = data.get('format', {})
+            
+            width = stream.get('width', 1920)
+            height = stream.get('height', 1080)
+            
+            # Parse frame rate (could be "30/1" or "29.97")
+            fps_str = stream.get('r_frame_rate', '30/1')
+            if '/' in fps_str:
+                num, den = fps_str.split('/')
+                fps = float(num) / float(den) if float(den) != 0 else 30
+            else:
+                fps = float(fps_str)
+            
+            duration = float(stream.get('duration', 0) or format_info.get('duration', 0))
+            
+            return {
+                'width': width,
+                'height': height,
+                'fps': fps,
+                'duration': duration,
+                'aspect_ratio': width / height if height > 0 else 16/9
+            }
+    except Exception as e:
+        print(f"[video_info] Error getting video info: {e}")
+    
+    return {'width': 1920, 'height': 1080, 'fps': 30, 'duration': 0, 'aspect_ratio': 16/9}
+
+
+def get_responsive_text_sizes(video_height, video_width):
+    """Calculate responsive font sizes based on video resolution
+    
+    Designed to be readable across all video sizes:
+    - 480p: Smaller but readable
+    - 720p: Good standard size
+    - 1080p: Large clear text
+    - 4K: Very large text
+    """
+    # Use the smaller dimension to ensure text fits
+    min_dimension = min(video_height, video_width)
+    
+    # Calculate scale factor based on minimum dimension
+    # Base is 720 (HD ready) - scales up and down from there
+    base_dimension = 720
+    scale_factor = min_dimension / base_dimension
+    
+    # For very small videos (under 480p), use minimum readable sizes
+    # For very large videos (4K+), cap sizes to avoid overwhelming
+    scale_factor = max(0.7, min(2.5, scale_factor))
+    
+    # Base sizes optimized for 720p, will scale proportionally
+    # These are LARGER than before to ensure readability
+    base_title = 32  # Was 24
+    base_caption = 24  # Was 18
+    base_lower_third = 20  # Was 16
+    base_watermark = 14  # Was 12
+    
+    return {
+        'title': max(18, min(72, int(base_title * scale_factor))),
+        'caption': max(14, min(54, int(base_caption * scale_factor))),
+        'lower_third': max(12, min(48, int(base_lower_third * scale_factor))),
+        'watermark': max(10, min(32, int(base_watermark * scale_factor))),
+        'max_chars_horizontal': max(35, min(80, int(55 * scale_factor))),
+        'max_chars_vertical': max(20, min(45, int(35 * scale_factor)))
+    }
+
+
+def detect_hardware_acceleration():
+    """Detect available hardware acceleration"""
+    hw_accel = {'encoder': 'libx264', 'decoder': None, 'available': []}
+    
+    try:
+        # Check for available encoders
+        result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, timeout=10)
+        encoders = result.stdout
+        
+        # macOS VideoToolbox (best for Mac)
+        if 'h264_videotoolbox' in encoders:
+            hw_accel['encoder'] = 'h264_videotoolbox'
+            hw_accel['available'].append('videotoolbox')
+            hw_accel['decoder'] = 'h264'
+        
+        # NVIDIA NVENC
+        elif 'h264_nvenc' in encoders:
+            hw_accel['encoder'] = 'h264_nvenc'
+            hw_accel['available'].append('nvenc')
+            hw_accel['decoder'] = 'h264_cuvid'
+        
+        # Intel QuickSync
+        elif 'h264_qsv' in encoders:
+            hw_accel['encoder'] = 'h264_qsv'
+            hw_accel['available'].append('qsv')
+            hw_accel['decoder'] = 'h264_qsv'
+        
+        # AMD AMF (Windows)
+        elif 'h264_amf' in encoders:
+            hw_accel['encoder'] = 'h264_amf'
+            hw_accel['available'].append('amf')
+        
+        # VA-API (Linux)
+        elif 'h264_vaapi' in encoders:
+            hw_accel['encoder'] = 'h264_vaapi'
+            hw_accel['available'].append('vaapi')
+        
+        print(f"[hw_accel] Detected: {hw_accel['encoder']} (available: {hw_accel['available']})")
+    except Exception as e:
+        print(f"[hw_accel] Detection failed: {e}, using libx264")
+    
+    return hw_accel
+
+
+def create_fade_filter(fade_type, duration=0.5, start_time=0):
+    """Create fade in/out filter for video and audio"""
+    if fade_type == 'in':
+        return f"fade=t=in:st={start_time}:d={duration}"
+    elif fade_type == 'out':
+        return f"fade=t=out:st={start_time}:d={duration}"
+    return None
+
+
+def create_audio_fade_filter(fade_type, duration=0.5, start_time=0):
+    """Create audio fade in/out filter"""
+    if fade_type == 'in':
+        return f"afade=t=in:st={start_time}:d={duration}"
+    elif fade_type == 'out':
+        return f"afade=t=out:st={start_time}:d={duration}"
+    return None
+
+
+def create_crossfade_command(clip1_path, clip2_path, output_path, duration=0.5, hw_encoder='libx264'):
+    """Create FFmpeg command for crossfade between two clips"""
+    cmd = [
+        "ffmpeg",
+        "-i", clip1_path,
+        "-i", clip2_path,
+        "-filter_complex",
+        f"[0:v][1:v]xfade=transition=fade:duration={duration}:offset=0[v];"
+        f"[0:a][1:a]acrossfade=d={duration}[a]",
+        "-map", "[v]", "-map", "[a]",
+        "-c:v", hw_encoder, "-preset", "fast",
+        "-c:a", "aac",
+        output_path, "-y"
+    ]
+    return cmd
+
+
+def create_color_filter(filter_type):
+    """Create color grading filter"""
+    filters = {
+        'none': None,
+        'vintage': 'curves=vintage',
+        'warm': 'colortemperature=temperature=6500',
+        'cool': 'colortemperature=temperature=8500',
+        'high_contrast': 'eq=contrast=1.3:brightness=0.05:saturation=1.2',
+        'low_contrast': 'eq=contrast=0.8:saturation=0.9',
+        'bw': 'colorchannelmixer=.3:.4:.3:0:.3:.4:.3:0:.3:.4:.3',
+        'sepia': 'colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131',
+        'vibrant': 'eq=saturation=1.5:contrast=1.1',
+        'cinematic': 'curves=preset=cross_process,eq=contrast=1.1:brightness=-0.05'
+    }
+    return filters.get(filter_type, None)
+
+
+def create_watermark_filter(watermark_path, position='bottom_right', opacity=0.7, scale=0.1):
+    """Create watermark overlay filter"""
+    positions = {
+        'top_left': 'x=10:y=10',
+        'top_right': 'x=W-w-10:y=10',
+        'bottom_left': 'x=10:y=H-h-10',
+        'bottom_right': 'x=W-w-10:y=H-h-10',
+        'center': 'x=(W-w)/2:y=(H-h)/2'
+    }
+    pos = positions.get(position, positions['bottom_right'])
+    # Scale watermark relative to video width
+    return f"[1:v]format=rgba,colorchannelmixer=aa={opacity},scale=iw*{scale}:-1[wm];[0:v][wm]overlay={pos}"
+
+
+def create_lower_third_filter(name, title, video_width, video_height, duration=5, fontsize=20):
+    """Create animated lower third name bar"""
+    bar_height = int(video_height * 0.08)
+    y_pos = int(video_height * 0.75)
+    
+    # Escape text for FFmpeg
+    name_escaped = name.replace("'", "\\'").replace(":", "\\:")
+    title_escaped = title.replace("'", "\\'").replace(":", "\\:") if title else ""
+    
+    filters = []
+    # Background bar with fade in
+    filters.append(f"drawbox=x=0:y={y_pos}:w={video_width}:h={bar_height}:color=black@0.7:t=fill:enable='between(t,0,{duration})'")
+    # Name text
+    filters.append(f"drawtext=text='{name_escaped}':fontsize={fontsize}:fontcolor=white:x=20:y={y_pos + 10}:enable='between(t,0,{duration})'")
+    # Title text (smaller, below name)
+    if title:
+        filters.append(f"drawtext=text='{title_escaped}':fontsize={int(fontsize*0.7)}:fontcolor=gray:x=20:y={y_pos + 10 + fontsize + 5}:enable='between(t,0,{duration})'")
+    
+    return filters
+
+
+def create_intro_slide(work_dir, title, subtitle, duration=3, width=1920, height=1080, bg_color='0x1e7f63'):
+    """Create an intro title slide"""
+    output = os.path.join(work_dir, "intro_slide.mp4")
+    
+    # Escape text
+    title_escaped = title.replace("'", "\\'").replace(":", "\\:")
+    subtitle_escaped = subtitle.replace("'", "\\'").replace(":", "\\:") if subtitle else ""
+    
+    # Calculate font sizes based on resolution
+    title_size = int(height / 15)
+    subtitle_size = int(height / 25)
+    
+    filter_complex = f"color=c={bg_color}:s={width}x{height}:d={duration}"
+    filter_complex += f",drawtext=text='{title_escaped}':fontsize={title_size}:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2-{title_size}"
+    if subtitle:
+        filter_complex += f",drawtext=text='{subtitle_escaped}':fontsize={subtitle_size}:fontcolor=white@0.8:x=(w-text_w)/2:y=(h-text_h)/2+{subtitle_size}"
+    # Add fade in/out
+    filter_complex += f",fade=t=in:st=0:d=0.5,fade=t=out:st={duration-0.5}:d=0.5"
+    
+    cmd = [
+        "ffmpeg",
+        "-f", "lavfi",
+        "-i", f"anullsrc=r=44100:cl=stereo:d={duration}",
+        "-f", "lavfi", 
+        "-i", filter_complex,
+        "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-shortest",
+        output, "-y"
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0 and os.path.exists(output):
+            return output
+        print(f"[intro] Error: {result.stderr[:300]}")
+    except Exception as e:
+        print(f"[intro] Failed to create intro: {e}")
+    return None
+
+
+def create_outro_slide(work_dir, title, cta_text, duration=4, width=1920, height=1080, bg_color='0x1e7f63'):
+    """Create an outro/call-to-action slide"""
+    output = os.path.join(work_dir, "outro_slide.mp4")
+    
+    title_escaped = title.replace("'", "\\'").replace(":", "\\:")
+    cta_escaped = cta_text.replace("'", "\\'").replace(":", "\\:") if cta_text else ""
+    
+    title_size = int(height / 18)
+    cta_size = int(height / 22)
+    
+    filter_complex = f"color=c={bg_color}:s={width}x{height}:d={duration}"
+    filter_complex += f",drawtext=text='{title_escaped}':fontsize={title_size}:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2-{title_size}"
+    if cta_text:
+        filter_complex += f",drawtext=text='{cta_escaped}':fontsize={cta_size}:fontcolor=yellow:x=(w-text_w)/2:y=(h-text_h)/2+{cta_size}"
+    filter_complex += f",fade=t=in:st=0:d=0.5,fade=t=out:st={duration-0.5}:d=0.5"
+    
+    cmd = [
+        "ffmpeg",
+        "-f", "lavfi",
+        "-i", f"anullsrc=r=44100:cl=stereo:d={duration}",
+        "-f", "lavfi",
+        "-i", filter_complex,
+        "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-shortest",
+        output, "-y"
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0 and os.path.exists(output):
+            return output
+    except Exception as e:
+        print(f"[outro] Failed to create outro: {e}")
+    return None
+
+
+def normalize_audio(input_path, output_path, target_loudness=-16):
+    """Normalize audio to consistent loudness using loudnorm filter"""
+    cmd = [
+        "ffmpeg", "-i", input_path,
+        "-af", f"loudnorm=I={target_loudness}:TP=-1.5:LRA=11",
+        "-c:v", "copy",
+        "-c:a", "aac", "-b:a", "192k",
+        output_path, "-y"
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        return result.returncode == 0 and os.path.exists(output_path)
+    except Exception as e:
+        print(f"[audio_norm] Failed: {e}")
+        return False
+
+
+def add_background_music(video_path, music_path, output_path, music_volume=0.15, duck_volume=0.3):
+    """Add background music with ducking (lower music when speech detected)"""
+    # Use sidechaincompress to duck music when there's speech
+    cmd = [
+        "ffmpeg",
+        "-i", video_path,
+        "-i", music_path,
+        "-filter_complex",
+        f"[1:a]volume={music_volume}[music];"
+        f"[0:a][music]amix=inputs=2:duration=first:dropout_transition=2[aout]",
+        "-map", "0:v", "-map", "[aout]",
+        "-c:v", "copy",
+        "-c:a", "aac", "-b:a", "192k",
+        "-shortest",
+        output_path, "-y"
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        return result.returncode == 0 and os.path.exists(output_path)
+    except Exception as e:
+        print(f"[bg_music] Failed: {e}")
+        return False
+
+
+def generate_thumbnail(video_path, output_path, timestamp=None):
+    """Generate thumbnail from video - picks frame at 1/3 duration or specified timestamp"""
+    try:
+        # Get video duration if timestamp not specified
+        if timestamp is None:
+            info = get_video_info(video_path)
+            timestamp = info['duration'] / 3 if info['duration'] > 0 else 1
+        
+        cmd = [
+            "ffmpeg",
+            "-ss", str(timestamp),
+            "-i", video_path,
+            "-vframes", "1",
+            "-q:v", "2",
+            output_path, "-y"
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        return result.returncode == 0 and os.path.exists(output_path)
+    except Exception as e:
+        print(f"[thumbnail] Failed: {e}")
+        return False
+
+
+def apply_speed_effect(input_path, output_path, speed=1.0, hw_encoder='libx264'):
+    """Apply speed change to video (0.5 = slow-mo, 2.0 = fast forward)"""
+    if speed == 1.0:
+        return False  # No change needed
+    
+    # PTS for video, atempo for audio (atempo only supports 0.5-2.0)
+    video_pts = 1.0 / speed
+    
+    # Chain atempo filters if speed is outside 0.5-2.0 range
+    if speed > 2.0:
+        audio_filter = "atempo=2.0,atempo=" + str(speed/2.0)
+    elif speed < 0.5:
+        audio_filter = "atempo=0.5,atempo=" + str(speed/0.5)
+    else:
+        audio_filter = f"atempo={speed}"
+    
+    cmd = [
+        "ffmpeg", "-i", input_path,
+        "-filter_complex",
+        f"[0:v]setpts={video_pts}*PTS[v];[0:a]{audio_filter}[a]",
+        "-map", "[v]", "-map", "[a]",
+        "-c:v", hw_encoder, "-preset", "fast",
+        "-c:a", "aac",
+        output_path, "-y"
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        return result.returncode == 0 and os.path.exists(output_path)
+    except Exception as e:
+        print(f"[speed] Failed: {e}")
+        return False
+
+
+def create_chapter_markers(clips, output_path):
+    """Create chapter metadata file for video"""
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(";FFMETADATA1\n")
+            current_time = 0
+            for i, clip in enumerate(clips):
+                duration = clip.get('end', 0) - clip.get('start', 0)
+                title = clip.get('highlight', f'Clip {i+1}')[:50]
+                start_ms = int(current_time * 1000)
+                end_ms = int((current_time + duration) * 1000)
+                
+                f.write(f"\n[CHAPTER]\nTIMEBASE=1/1000\n")
+                f.write(f"START={start_ms}\n")
+                f.write(f"END={end_ms}\n")
+                f.write(f"title={title}\n")
+                
+                current_time += duration
+        return True
+    except Exception as e:
+        print(f"[chapters] Failed: {e}")
+        return False
+
+
+def generate_upbeat_background_music(output_path, duration_seconds):
+    """Generate an upbeat but light background music track using FFmpeg's built-in audio generators.
+    Creates a pleasant, unobtrusive corporate-style background music.
+    """
+    try:
+        # Create a pleasant, upbeat but unobtrusive background track
+        # Uses multiple sine waves at harmonically related frequencies + some rhythm
+        # Base frequency: 220 Hz (A3), with harmonics at musical intervals
+        
+        # Build a layered synth sound with rhythm
+        filter_complex = (
+            # Base pad (warm, sustained)
+            f"sine=f=220:d={duration_seconds}[bass];"
+            # Fifth above (adds brightness)
+            f"sine=f=330:d={duration_seconds}[fifth];"
+            # Octave (high brightness)
+            f"sine=f=440:d={duration_seconds}[oct];"
+            # Simple rhythmic pulse using tremolo
+            f"sine=f=261.6:d={duration_seconds},tremolo=f=4:d=0.7[rhythm];"
+            # Mix layers with appropriate volumes
+            "[bass]volume=0.15[b];"
+            "[fifth]volume=0.08[f];"
+            "[oct]volume=0.05[o];"
+            "[rhythm]volume=0.1[r];"
+            # Combine all layers
+            "[b][f][o][r]amix=inputs=4:duration=longest[premix];"
+            # Add gentle fade in/out
+            f"[premix]afade=t=in:st=0:d=2,afade=t=out:st={duration_seconds-2}:d=2[out]"
+        )
+        
+        cmd = [
+            "ffmpeg",
+            "-f", "lavfi",
+            "-i", f"anullsrc=r=44100:cl=stereo:d={duration_seconds}",  # Silent base
+            "-filter_complex", filter_complex,
+            "-map", "[out]",
+            "-c:a", "aac", "-b:a", "128k",
+            "-t", str(duration_seconds),
+            output_path, "-y"
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode == 0 and os.path.exists(output_path):
+            print(f"[bg_music] Generated {duration_seconds}s background music track")
+            return True
+        else:
+            print(f"[bg_music] FFmpeg error: {result.stderr[:200]}")
+            return False
+    except Exception as e:
+        print(f"[bg_music] Failed to generate music: {e}")
+        return False
+
+
+def add_upbeat_background_music(video_path, output_path, music_volume=0.12):
+    """Add generated upbeat background music to video at low volume"""
+    try:
+        # Get video duration
+        info = get_video_info(video_path)
+        duration = info['duration']
+        
+        if duration <= 0:
+            print("[bg_music] Could not determine video duration")
+            return False
+        
+        # Generate background music
+        work_dir = os.path.dirname(output_path)
+        music_path = os.path.join(work_dir, "bg_music_temp.aac")
+        
+        if not generate_upbeat_background_music(music_path, duration + 5):  # +5 for safety
+            return False
+        
+        # Mix music with video audio
+        cmd = [
+            "ffmpeg",
+            "-i", video_path,
+            "-i", music_path,
+            "-filter_complex",
+            f"[1:a]volume={music_volume}[music];"
+            f"[0:a][music]amix=inputs=2:duration=first:dropout_transition=2[aout]",
+            "-map", "0:v", "-map", "[aout]",
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k",
+            "-shortest",
+            output_path, "-y"
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        
+        # Clean up temp music file
+        if os.path.exists(music_path):
+            os.remove(music_path)
+        
+        if result.returncode == 0 and os.path.exists(output_path):
+            print(f"[bg_music] Added background music to video")
+            return True
+        else:
+            print(f"[bg_music] Mix failed: {result.stderr[:200]}")
+            return False
+    except Exception as e:
+        print(f"[bg_music] Failed: {e}")
+        return False
+
+
+def add_logo_watermark(video_path, output_path, logo_path=None, position='bottom_right', opacity=0.7, scale=0.15):
+    """Add logo watermark overlay to video.
+    
+    Args:
+        video_path: Input video path
+        output_path: Output video path
+        logo_path: Path to logo image (defaults to logo.png in script directory)
+        position: One of 'top_left', 'top_right', 'bottom_left', 'bottom_right', 'center'
+        opacity: Logo opacity (0-1)
+        scale: Logo scale relative to video width
+    """
+    try:
+        # Find logo file - check script directory first, then common locations
+        if logo_path is None:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            possible_paths = [
+                os.path.join(script_dir, 'logo.png'),
+                os.path.join(script_dir, '..', 'logo.png'),
+                os.path.join(script_dir, 'static', 'logo.png'),
+                os.path.join(script_dir, '..', 'static', 'logo.png'),
+                '/app/logo.png',  # Cloud deployment
+            ]
+            for path in possible_paths:
+                if os.path.exists(path):
+                    logo_path = path
+                    break
+        
+        if not logo_path or not os.path.exists(logo_path):
+            print("[watermark] Logo file not found, skipping watermark")
+            return False
+        
+        # Get video dimensions for positioning
+        info = get_video_info(video_path)
+        w, h = info['width'], info['height']
+        
+        # Calculate position
+        padding = int(min(w, h) * 0.02)  # 2% padding from edges
+        
+        if position == 'top_left':
+            x_expr = str(padding)
+            y_expr = str(padding)
+        elif position == 'top_right':
+            x_expr = f"W-w-{padding}"
+            y_expr = str(padding)
+        elif position == 'bottom_left':
+            x_expr = str(padding)
+            y_expr = f"H-h-{padding}"
+        elif position == 'center':
+            x_expr = "(W-w)/2"
+            y_expr = "(H-h)/2"
+        else:  # bottom_right (default)
+            x_expr = f"W-w-{padding}"
+            y_expr = f"H-h-{padding}"
+        
+        # Build filter: scale logo, apply opacity, overlay
+        logo_width = int(w * scale)
+        filter_str = (
+            f"[1:v]scale={logo_width}:-1,format=rgba,"
+            f"colorchannelmixer=aa={opacity}[logo];"
+            f"[0:v][logo]overlay={x_expr}:{y_expr}[out]"
+        )
+        
+        cmd = [
+            "ffmpeg",
+            "-i", video_path,
+            "-i", logo_path,
+            "-filter_complex", filter_str,
+            "-map", "[out]", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", "fast",
+            "-c:a", "copy",
+            output_path, "-y"
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        
+        if result.returncode == 0 and os.path.exists(output_path):
+            print(f"[watermark] Added logo watermark at {position}")
+            return True
+        else:
+            print(f"[watermark] FFmpeg error: {result.stderr[:200]}")
+            return False
+    except Exception as e:
+        print(f"[watermark] Failed: {e}")
+        return False
+
+
+# Global hardware acceleration cache
+_HW_ACCEL_CACHE = None
+
+def get_hw_encoder():
+    """Get cached hardware encoder"""
+    global _HW_ACCEL_CACHE
+    if _HW_ACCEL_CACHE is None:
+        _HW_ACCEL_CACHE = detect_hardware_acceleration()
+    return _HW_ACCEL_CACHE['encoder']
+
+
+def download_video_segment(vid, start, end, output_path, padding=5):
+    """Download a specific segment of a video using yt-dlp's download-sections"""
+    start_padded = max(0, start - padding)
+    end_padded = end + padding
+    section = f"*{start_padded}-{end_padded}"
+    
+    cmd = [
+        "yt-dlp",
+        "-f", "best[ext=mp4][height<=720]/best[ext=mp4]/best",
+        "--download-sections", section,
+        "--force-keyframes-at-cuts",
+        "-o", output_path,
+        f"https://www.youtube.com/watch?v={vid}"
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        return result.returncode == 0 and os.path.exists(output_path)
+    except Exception as e:
+        print(f"[segment_download] Failed: {e}")
+        return False
+
+
+def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True, transcript_data=None,
+               video_options=None):
+    """Process video clips into various output formats with optional captions and editing features
+    
+    Args:
+        job_id: Unique job identifier
+        vid: YouTube video ID
+        clips: List of clip dictionaries with start, end, highlight
+        format_type: 'combined', 'social', or 'individual'
+        captions_enabled: Whether to burn in captions
+        transcript_data: Transcript segments for captions
+        video_options: Dict with optional editing features:
+            - transitions: bool - Add fade transitions between clips
+            - transition_duration: float - Duration of transitions (default 0.5s)
+            - color_filter: str - Color filter to apply (vintage, warm, cool, bw, sepia, etc.)
+            - normalize_audio: bool - Normalize audio levels
+            - intro_title: str - Title for intro slide
+            - intro_subtitle: str - Subtitle for intro slide
+            - outro_title: str - Title for outro slide  
+            - outro_cta: str - Call-to-action text for outro
+            - background_music: bool - Add upbeat background music
+            - logo_watermark: bool - Add logo watermark to clips
+            - use_hw_accel: bool - Use hardware acceleration if available
+    """
     job = JOBS[job_id]
     job["status"] = "running"
     job["percent"] = 5
-    job["message"] = "Downloading video from YouTube..."
+    job["message"] = "Preparing video download..."
+    
+    # Default video options
+    opts = video_options or {}
+    disable_all = opts.get('disable_all', True)  # Default to disabled for safety
+    
+    # If disable_all is True, skip ALL effects
+    if disable_all:
+        use_transitions = False
+        transition_duration = 0.5
+        color_filter = 'none'
+        do_normalize_audio = False
+        do_logo_watermark = False
+        do_background_music = False
+        use_hw_accel = opts.get('use_hw_accel', True)
+        print(f"[simple_job] ALL advanced processing DISABLED - fast export mode")
+    else:
+        use_transitions = opts.get('transitions', False)
+        transition_duration = opts.get('transition_duration', 0.5)
+        color_filter = opts.get('color_filter', 'none')
+        do_normalize_audio = opts.get('normalize_audio', False)
+        do_logo_watermark = opts.get('logo_watermark', False)
+        do_background_music = opts.get('background_music', False)
+        use_hw_accel = opts.get('use_hw_accel', True)
+    
+    # Get hardware encoder - use libx264 for reliability
+    hw_encoder = 'libx264'  # Always use software encoder for reliability
+    print(f"[simple_job] Using encoder: {hw_encoder}")
 
     work = tempfile.mkdtemp()
     print(f"[simple_job] Starting job {job_id}: {len(clips)} clips, format={format_type}, captions={captions_enabled}")
+    print(f"[simple_job] Options: disable_all={disable_all}, transitions={use_transitions}, color={color_filter}, music={do_background_music}")
 
     def get_transcript_for_timerange(start, end, transcript):
-        """Get transcript segments that fall within a time range"""
+        """Get transcript segments that fall within a time range
+        Supports both {start, duration, text} and {start, end, text} formats
+        """
         if not transcript:
+            print(f"[transcript] No transcript data provided")
             return []
+        
         segments = []
         for seg in transcript:
             seg_start = seg.get('start', 0)
-            seg_end = seg_start + seg.get('duration', 0)
+            # Support both 'duration' and 'end' formats
+            if 'duration' in seg:
+                seg_end = seg_start + seg.get('duration', 0)
+            elif 'end' in seg:
+                seg_end = seg.get('end', seg_start)
+            else:
+                seg_end = seg_start + 5  # Default 5 second duration
+            
             # Check if segment overlaps with our range
             if seg_start < end and seg_end > start:
                 segments.append({
@@ -2121,6 +2922,12 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     'end': min(end - start, seg_end - start),
                     'text': seg.get('text', '')
                 })
+        
+        if segments:
+            print(f"[transcript] Found {len(segments)} segments for range {start:.1f}s - {end:.1f}s")
+        else:
+            print(f"[transcript] WARNING: No segments found for range {start:.1f}s - {end:.1f}s (transcript has {len(transcript)} total segments)")
+        
         return segments
 
     def create_srt_file(segments, output_path):
@@ -2148,40 +2955,339 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
 
     def escape_ffmpeg_text(text):
         """Escape special characters for FFmpeg drawtext filter"""
-        # Escape special chars: \, ', :, %
+        if not text:
+            return text
+        # Escape special chars for FFmpeg: ', \, :
         text = text.replace('\\', '\\\\')
-        text = text.replace("'", "'\\''")
+        text = text.replace("'", "\\'")
         text = text.replace(':', '\\:')
-        text = text.replace('%', '\\%')
         return text
+    
+    def create_text_overlay_filter(text, work_dir, prefix, video_width=1920, video_height=1080,
+                                   fontcolor="yellow", bordercolor="black", position="top",
+                                   text_type="title"):
+        """Create a responsive drawtext filter with text saved to file.
+        
+        Args:
+            text: The text to display
+            work_dir: Working directory for temp files
+            prefix: Prefix for the temp text file
+            video_width: Video width for responsive sizing
+            video_height: Video height for responsive sizing
+            fontcolor: Font color
+            bordercolor: Border color  
+            position: "top" or "bottom"
+            text_type: "title" for highlight text, "caption" for transcript captions
+            
+        Returns:
+            FFmpeg filter string
+        """
+        if not text:
+            return None
+        
+        # Calculate responsive sizes based on video resolution
+        sizes = get_responsive_text_sizes(video_height, video_width)
+        
+        if text_type == "title":
+            fontsize = sizes['title']
+            borderw = max(2, fontsize // 10)  # Thicker border for visibility
+        else:  # caption
+            fontsize = sizes['caption']
+            borderw = max(2, fontsize // 10)
+        
+        # Determine max chars based on aspect ratio - be more conservative to prevent cut-off
+        aspect = video_width / video_height if video_height > 0 else 16/9
+        if aspect < 1:  # Vertical video (9:16)
+            max_chars = max(20, min(35, int(video_width / (fontsize * 0.55))))
+        else:  # Horizontal video (16:9)
+            max_chars = max(30, min(60, int(video_width / (fontsize * 0.55))))
+            
+        # Wrap text manually with conservative character limit
+        words = text.split()
+        lines = []
+        current_line = ""
+        
+        for word in words:
+            # Truncate very long words
+            if len(word) > max_chars - 5:
+                word = word[:max_chars-8] + "..."
+            
+            if len(current_line) + len(word) + 1 <= max_chars:
+                current_line = current_line + " " + word if current_line else word
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = word
+        
+        if current_line:
+            lines.append(current_line)
+        
+        # Limit to 2 lines for title, 3 for caption to prevent overflow
+        max_lines = 2 if text_type == "title" else 3
+        if len(lines) > max_lines:
+            lines = lines[:max_lines]
+            if len(lines[-1]) > max_chars - 3:
+                lines[-1] = lines[-1][:max_chars-6] + "..."
+            else:
+                lines[-1] = lines[-1] + "..."
+        
+        wrapped_text = '\n'.join(lines)
+        
+        # Write to temp file (FFmpeg textfile is more reliable for multi-line)
+        text_file = os.path.join(work_dir, f"{prefix}_text.txt")
+        with open(text_file, 'w', encoding='utf-8') as f:
+            f.write(wrapped_text)
+        
+        # Escape the file path for FFmpeg
+        text_file_escaped = text_file.replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
+        
+        # Calculate Y position with safe margins (5% from edges)
+        safe_margin = int(video_height * 0.05)
+        
+        if position == "top":
+            # Position from top with safe margin
+            y_expr = str(safe_margin)
+        else:
+            # Position from bottom with safe margin, accounting for text height
+            # th = text height, use larger margin for multi-line text
+            y_expr = f"h-th-{safe_margin}"
+        
+        # Build filter string using textfile
+        filter_str = (
+            f"drawtext=textfile='{text_file_escaped}'"
+            f":fontsize={fontsize}"
+            f":fontcolor={fontcolor}"
+            f":borderw={borderw}"
+            f":bordercolor={bordercolor}"
+            f":x=(w-tw)/2"
+            f":y={y_expr}"
+            f":font=Arial"
+        )
+        
+        print(f"[text_overlay] Created filter: fontsize={fontsize}, max_chars={max_chars}, lines={len(lines)}, video={video_width}x{video_height}")
+        return filter_str
+
+    def create_timed_caption_filters(segments, work_dir, prefix, video_width=1920, video_height=1080,
+                                     fontcolor="white", bordercolor="black", clip_start_offset=0):
+        """Create multiple timed drawtext filters for real-time captions.
+        
+        Args:
+            segments: List of transcript segments with 'start', 'end', 'text' keys
+                     NOTE: start/end should be RELATIVE to clip start (0 = clip start)
+            work_dir: Working directory for temp files
+            prefix: Prefix for temp text files
+            video_width: Video width for responsive sizing
+            video_height: Video height for responsive sizing
+            fontcolor: Font color
+            bordercolor: Border color
+            clip_start_offset: Offset to subtract from segment times (for clips from longer videos)
+            
+        Returns:
+            List of FFmpeg drawtext filter strings, one per segment
+        """
+        if not segments:
+            return []
+        
+        # Calculate responsive sizes
+        sizes = get_responsive_text_sizes(video_height, video_width)
+        fontsize = sizes['caption']
+        borderw = max(2, fontsize // 10)
+        
+        # Calculate max chars based on aspect ratio
+        aspect = video_width / video_height if video_height > 0 else 16/9
+        if aspect < 1:  # Vertical video
+            max_chars = max(20, min(35, int(video_width / (fontsize * 0.55))))
+        else:  # Horizontal video
+            max_chars = max(30, min(60, int(video_width / (fontsize * 0.55))))
+        
+        # Safe margin from bottom
+        safe_margin = int(video_height * 0.05)
+        y_expr = f"h-th-{safe_margin}"
+        
+        filters = []
+        
+        for i, seg in enumerate(segments):
+            text = seg.get('text', '').strip()
+            if not text:
+                continue
+            
+            # Get timing relative to clip (already adjusted by get_transcript_for_timerange)
+            start_time = max(0, seg.get('start', 0))
+            end_time = seg.get('end', start_time + 3)
+            
+            # Word wrap the text
+            words = text.split()
+            lines = []
+            current_line = ""
+            
+            for word in words:
+                if len(word) > max_chars - 5:
+                    word = word[:max_chars-8] + "..."
+                
+                if len(current_line) + len(word) + 1 <= max_chars:
+                    current_line = current_line + " " + word if current_line else word
+                else:
+                    if current_line:
+                        lines.append(current_line)
+                    current_line = word
+            
+            if current_line:
+                lines.append(current_line)
+            
+            # Limit to 2 lines for captions
+            if len(lines) > 2:
+                lines = lines[:2]
+                lines[-1] = lines[-1][:max_chars-6] + "..." if len(lines[-1]) > max_chars - 3 else lines[-1] + "..."
+            
+            wrapped_text = '\n'.join(lines)
+            
+            # Write to temp file
+            text_file = os.path.join(work_dir, f"{prefix}_cap_{i}.txt")
+            with open(text_file, 'w', encoding='utf-8') as f:
+                f.write(wrapped_text)
+            
+            text_file_escaped = text_file.replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
+            
+            # Build filter with enable expression for timing
+            filter_str = (
+                f"drawtext=textfile='{text_file_escaped}'"
+                f":fontsize={fontsize}"
+                f":fontcolor={fontcolor}"
+                f":borderw={borderw}"
+                f":bordercolor={bordercolor}"
+                f":x=(w-tw)/2"
+                f":y={y_expr}"
+                f":font=Arial"
+                f":enable='between(t,{start_time:.2f},{end_time:.2f})'"
+            )
+            
+            filters.append(filter_str)
+        
+        print(f"[timed_captions] Created {len(filters)} timed caption filters for {len(segments)} segments")
+        return filters
 
     try:
         video_file = os.path.join(work, "video.mp4")
         
         # Check if we already have the video cached
         cached_video = os.path.join(FILES_DIR, f"{vid}.mp4")
+        use_segment_download = False  # Flag to download segments individually
+        
+        # Default video dimensions (will be updated after download)
+        video_width = 1920
+        video_height = 1080
+        video_fps = 30
+        
         if os.path.exists(cached_video):
             print(f"[simple_job] Using cached video: {cached_video}")
             video_file = cached_video
+            # Get actual video dimensions
+            video_info = get_video_info(video_file)
+            video_width = video_info['width']
+            video_height = video_info['height']
+            video_fps = video_info['fps']
+            print(f"[simple_job] Video info: {video_width}x{video_height} @ {video_fps}fps")
         else:
+            # For efficiency, get video duration first and decide download strategy
+            job["message"] = "Checking video duration..."
+            video_duration = 0
+            try:
+                duration_cmd = ["yt-dlp", "--print", "duration", f"https://www.youtube.com/watch?v={vid}"]
+                duration_result = subprocess.run(duration_cmd, capture_output=True, text=True, timeout=30)
+                video_duration = float(duration_result.stdout.strip()) if duration_result.returncode == 0 else 0
+                print(f"[simple_job] Video duration: {video_duration}s ({video_duration/60:.1f} min)")
+            except:
+                video_duration = 0
+            
+            # Calculate total clip duration needed
+            total_clip_duration = sum(c.get("end", 0) - c.get("start", 0) for c in clips)
+            print(f"[simple_job] Total clip duration needed: {total_clip_duration}s")
+            
+            # Strategy: For very long videos (>30 min), download segments individually
+            # This is much faster than downloading a 2-hour video
+            if video_duration > 1800:  # > 30 minutes
+                print(f"[simple_job] Long video ({video_duration/60:.0f} min) - using segment download strategy")
+                use_segment_download = True
+                job["message"] = "Long video detected - downloading only needed clips..."
+                
+            else:  # Short video (<30 min) - download normally
+                job["message"] = "Downloading video..."
+                job["percent"] = 5
+                
+                cmd = [
+                    "yt-dlp",
+                    "-f", "best[ext=mp4][height<=720]/best[ext=mp4]/best",
+                    "--no-playlist",
+                    "-o", video_file,
+                    f"https://www.youtube.com/watch?v={vid}",
+                ]
+                print(f"[simple_job] Downloading: {' '.join(cmd)}")
+                
+                timeout_seconds = max(600, int(video_duration * 0.5)) if video_duration > 0 else 900
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
+                
+                if result.returncode != 0:
+                    print(f"[simple_job] yt-dlp error: {result.stderr}")
+                    raise Exception(f"Failed to download video: {result.stderr[:200]}")
+                
+                # Get video dimensions after download
+                if os.path.exists(video_file):
+                    video_info = get_video_info(video_file)
+                    video_width = video_info['width']
+                    video_height = video_info['height']
+                    video_fps = video_info['fps']
+                    print(f"[simple_job] Video info: {video_width}x{video_height} @ {video_fps}fps")
+
+            if not use_segment_download and not os.path.exists(video_file):
+                raise Exception("Video file not found after download")
+        
+        # Prepare color filter if specified
+        color_filter_str = create_color_filter(color_filter) if color_filter and color_filter != 'none' else None
+        if color_filter_str:
+            print(f"[simple_job] Applying color filter: {color_filter}")
+        
+        # Helper function to download a single segment
+        def download_segment(vid, start, end, output_path, padding=5):
+            """Download only the needed segment using yt-dlp --download-sections"""
+            # Add padding before/after for smoother transitions
+            section_start = max(0, start - padding)
+            section_end = end + padding
+            
+            # Use yt-dlp's download-sections feature
+            section_spec = f"*{section_start}-{section_end}"
+            
             cmd = [
                 "yt-dlp",
-                "-f", "best[ext=mp4]/best",
+                "-f", "best[ext=mp4][height<=720]/best[ext=mp4]/best",
+                "--download-sections", section_spec,
+                "--force-keyframes-at-cuts",
                 "--no-playlist",
-                "-o", video_file,
+                "-o", output_path,
                 f"https://www.youtube.com/watch?v={vid}",
             ]
-            print(f"[simple_job] Downloading: {' '.join(cmd)}")
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            print(f"[segment_download] Downloading {section_start:.0f}s-{section_end:.0f}s...")
             
-            if result.returncode != 0:
-                print(f"[simple_job] yt-dlp error: {result.stderr}")
-                raise Exception(f"Failed to download video: {result.stderr[:200]}")
-
-        if not os.path.exists(video_file):
-            raise Exception("Video file not found after download")
+            try:
+                # Each segment should download quickly (typically 10-30 seconds of video)
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                if result.returncode == 0 and os.path.exists(output_path):
+                    print(f"[segment_download] Success: {output_path}")
+                    return output_path, padding  # Return path and the actual padding used
+                else:
+                    print(f"[segment_download] yt-dlp error: {result.stderr[:200]}")
+                    return None, 0
+            except subprocess.TimeoutExpired:
+                print(f"[segment_download] Timeout downloading segment")
+                return None, 0
+            except Exception as e:
+                print(f"[segment_download] Error: {e}")
+                return None, 0
         
-        print(f"[simple_job] Video ready: {video_file}")
+        if use_segment_download:
+            print(f"[simple_job] Using segment-based processing for long video")
+        else:
+            print(f"[simple_job] Video ready: {video_file}")
+            
         job["percent"] = 30
         job["message"] = f"Processing {len(clips)} clips..."
 
@@ -2191,44 +3297,93 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                 for i, clip in enumerate(clips):
                     job["percent"] = 30 + int(60 * i / len(clips))
                     clip_file = os.path.join(work, f"clip_{i+1:03d}.mp4")
-                    start = clip.get("start", 0)
-                    end = clip.get("end", start + 10)
-                    duration = end - start
+                    orig_start = clip.get("start", 0)
+                    orig_end = clip.get("end", orig_start + 10)
+                    duration = orig_end - orig_start
                     highlight_text = clip.get("highlight", "")
+                    
+                    # For segment downloads, get just this clip's segment
+                    current_video = video_file
+                    start = orig_start
+                    clip_video_width = video_width
+                    clip_video_height = video_height
+                    
+                    if use_segment_download:
+                        job["message"] = f"Downloading clip {i+1} of {len(clips)}..."
+                        segment_file = os.path.join(work, f"ind_segment_{i}.mp4")
+                        segment_result, segment_padding = download_segment(vid, orig_start, orig_end, segment_file)
+                        if segment_result:
+                            current_video = segment_result
+                            start = segment_padding
+                            # Get actual video dimensions from downloaded segment
+                            seg_info = get_video_info(segment_result)
+                            clip_video_width = seg_info['width']
+                            clip_video_height = seg_info['height']
+                            print(f"[individual] Segment {i+1} dimensions: {clip_video_width}x{clip_video_height}")
+                        else:
+                            print(f"[individual] Failed to download segment {i+1}, skipping")
+                            continue
 
                     # Build FFmpeg filter for captions and highlight text
                     vf_filters = []
                     
-                    if captions_enabled and transcript_data:
-                        # Get transcript for this clip and create SRT
-                        clip_transcript = get_transcript_for_timerange(start, end, transcript_data)
-                        if clip_transcript:
-                            srt_file = os.path.join(work, f"clip_{i+1:03d}.srt")
-                            create_srt_file(clip_transcript, srt_file)
-                            # Escape path for FFmpeg
-                            srt_escaped = srt_file.replace('\\', '/').replace(':', '\\:')
-                            vf_filters.append(f"subtitles='{srt_escaped}':force_style='FontSize=20,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2,Shadow=1,MarginV=30'")
-                    
+                    # Add highlight text at top
                     if captions_enabled and highlight_text:
-                        # Add highlight text at top - yellow, bold
-                        escaped_text = escape_ffmpeg_text(highlight_text)
-                        vf_filters.append(f"drawtext=text='{escaped_text}':fontsize=24:fontcolor=yellow:borderw=3:bordercolor=black:x=(w-text_w)/2:y=40:font=Arial")
+                        highlight_filter = create_text_overlay_filter(
+                            highlight_text, work, f"ind_highlight_{i}",
+                            video_width=clip_video_width, video_height=clip_video_height,
+                            fontcolor="yellow", bordercolor="black",
+                            position="top", text_type="title"
+                        )
+                        if highlight_filter:
+                            vf_filters.append(highlight_filter)
+                            print(f"[individual] Adding highlight text: {highlight_text[:50]}...")
+                    
+                    # Add caption text at bottom - USE TIMED CAPTIONS
+                    if captions_enabled and transcript_data:
+                        clip_transcript = get_transcript_for_timerange(orig_start, orig_end, transcript_data)
+                        if clip_transcript:
+                            # Use timed captions that follow speech in real-time
+                            caption_filters = create_timed_caption_filters(
+                                clip_transcript, work, f"ind_caption_{i}",
+                                video_width=clip_video_width, video_height=clip_video_height,
+                                fontcolor="white", bordercolor="black"
+                            )
+                            if caption_filters:
+                                vf_filters.extend(caption_filters)
+                                print(f"[individual] Added {len(caption_filters)} timed captions")
+                    
+                    # Add color filter if specified
+                    if color_filter_str:
+                        vf_filters.append(color_filter_str)
+
+                    # Use input seeking for proper audio sync
+                    seek_time = max(0, start - 1)
+                    trim_start = start - seek_time
 
                     if vf_filters:
                         cmd = [
-                            "ffmpeg", "-i", video_file,
-                            "-ss", str(start), "-t", str(duration),
+                            "ffmpeg",
+                            "-ss", str(seek_time),
+                            "-i", current_video,
+                            "-ss", str(trim_start),
+                            "-t", str(duration),
                             "-vf", ",".join(vf_filters),
                             "-c:v", "libx264", "-preset", "fast",
-                            "-c:a", "aac",
+                            "-c:a", "aac", "-ar", "44100",
+                            "-async", "1",
                             clip_file, "-y"
                         ]
                     else:
                         cmd = [
-                            "ffmpeg", "-i", video_file,
-                            "-ss", str(start), "-t", str(duration),
+                            "ffmpeg",
+                            "-ss", str(seek_time),
+                            "-i", current_video,
+                            "-ss", str(trim_start),
+                            "-t", str(duration),
                             "-c:v", "libx264", "-preset", "fast",
-                            "-c:a", "aac",
+                            "-c:a", "aac", "-ar", "44100",
+                            "-async", "1",
                             clip_file, "-y"
                         ]
                     subprocess.run(cmd, capture_output=True)
@@ -2252,42 +3407,91 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                 for i, clip in enumerate(selected_clips):
                     job["percent"] = 30 + int(40 * i / len(selected_clips))
                     clip_file = os.path.join(work, f"social_clip_{i}.mp4")
-                    start = clip.get("start", 0)
-                    end = clip.get("end", start + 15)
-                    duration = end - start
+                    orig_start = clip.get("start", 0)
+                    orig_end = clip.get("end", orig_start + 15)
+                    duration = orig_end - orig_start
                     highlight_text = clip.get("highlight", "")
                     
-                    # Build filter chain - start with scaling for vertical video
-                    vf_filters = ["scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2"]
+                    # For segment downloads, get just this clip's segment
+                    current_video = video_file
+                    start = orig_start
+                    if use_segment_download:
+                        job["message"] = f"Downloading clip {i+1} of {len(selected_clips)}..."
+                        segment_file = os.path.join(work, f"social_segment_{i}.mp4")
+                        segment_result, segment_padding = download_segment(vid, orig_start, orig_end, segment_file)
+                        if segment_result:
+                            current_video = segment_result
+                            start = segment_padding  # Start at the padding offset
+                        else:
+                            print(f"[social] Failed to download segment {i+1}, skipping")
+                            continue
                     
-                    # Add subtitles (captions at bottom)
-                    if captions_enabled and transcript_data:
-                        clip_transcript = get_transcript_for_timerange(start, end, transcript_data)
-                        if clip_transcript:
-                            srt_file = os.path.join(work, f"social_{i}.srt")
-                            create_srt_file(clip_transcript, srt_file)
-                            # Use absolute path and proper escaping for FFmpeg
-                            srt_path = os.path.abspath(srt_file)
-                            # FFmpeg subtitles filter needs special escaping
-                            srt_escaped = srt_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-                            vf_filters.append(f"subtitles='{srt_escaped}':force_style='FontSize=24,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=3,Shadow=2,MarginV=80,Alignment=2'")
-                            print(f"[social] Added subtitles from {srt_file}")
+                    # Build filter chain for vertical video
+                    # Step 1: Scale to vertical 9:16 aspect ratio
+                    vf_filters = ["scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black"]
                     
-                    # Add highlight text at top
+                    # For social reels, output is always 1080x1920 (9:16 vertical)
+                    social_width, social_height = 1080, 1920
+                    
+                    # Step 2: Add highlight text at top
                     if captions_enabled and highlight_text:
-                        escaped_text = escape_ffmpeg_text(highlight_text)
-                        vf_filters.append(f"drawtext=text='{escaped_text}':fontsize=28:fontcolor=yellow:borderw=3:bordercolor=black:x=(w-text_w)/2:y=80:font=Arial")
+                        highlight_filter = create_text_overlay_filter(
+                            highlight_text, work, f"social_highlight_{i}",
+                            video_width=social_width, video_height=social_height,
+                            fontcolor="yellow", bordercolor="black",
+                            position="top", text_type="title"
+                        )
+                        if highlight_filter:
+                            vf_filters.append(highlight_filter)
+                            print(f"[social] Adding highlight text: {highlight_text[:50]}...")
+                    
+                    # Step 3: Add captions at bottom - USE TIMED CAPTIONS
+                    if captions_enabled and transcript_data:
+                        clip_transcript = get_transcript_for_timerange(orig_start, orig_end, transcript_data)
+                        if clip_transcript:
+                            # Use timed captions that follow speech in real-time
+                            caption_filters = create_timed_caption_filters(
+                                clip_transcript, work, f"social_caption_{i}",
+                                video_width=social_width, video_height=social_height,
+                                fontcolor="white", bordercolor="black"
+                            )
+                            if caption_filters:
+                                vf_filters.extend(caption_filters)
+                                print(f"[social] Added {len(caption_filters)} timed captions")
+                        else:
+                            print(f"[social] No transcript segments found for clip {i+1}")
+                    
+                    # Add color filter if specified
+                    if color_filter_str:
+                        vf_filters.append(color_filter_str)
+                    
+                    # Add fade in for first clip, fade out for last
+                    if use_transitions:
+                        if i == 0:
+                            vf_filters.append(f"fade=t=in:st=0:d={transition_duration}")
+                        if i == len(selected_clips) - 1:
+                            vf_filters.append(f"fade=t=out:st={duration - transition_duration}:d={transition_duration}")
                     
                     vf_string = ",".join(vf_filters)
+                    print(f"[social] Filter string: {vf_string[:200]}...")
+                    
+                    # Use input seeking for proper audio sync
+                    seek_time = max(0, start - 1)
+                    trim_start = start - seek_time
+                    
                     cmd = [
-                        "ffmpeg", "-i", video_file,
-                        "-ss", str(start), "-t", str(duration),
+                        "ffmpeg",
+                        "-ss", str(seek_time),
+                        "-i", current_video,
+                        "-ss", str(trim_start),
+                        "-t", str(duration),
                         "-vf", vf_string,
                         "-c:v", "libx264", "-preset", "fast",
-                        "-c:a", "aac",
+                        "-c:a", "aac", "-ar", "44100",
+                        "-async", "1",
                         clip_file, "-y"
                     ]
-                    print(f"[social] Processing clip {i+1}: {start:.1f}s - {end:.1f}s")
+                    print(f"[social] Processing clip {i+1}: {orig_start:.1f}s - {orig_end:.1f}s")
                     result = subprocess.run(cmd, capture_output=True, text=True)
                     if result.returncode != 0:
                         print(f"[social] FFmpeg error: {result.stderr[:500]}")
@@ -2296,7 +3500,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                         clip_files.append(clip_file)
                         running_time += duration
                 
-                # Concatenate clips
+                # Concatenate clips - always re-encode for consistent audio
                 if clip_files:
                     concat_file = os.path.join(work, "social_concat.txt")
                     with open(concat_file, "w") as f:
@@ -2306,21 +3510,11 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     cmd = [
                         "ffmpeg", "-f", "concat", "-safe", "0",
                         "-i", concat_file,
-                        "-c", "copy",
+                        "-c:v", "libx264", "-preset", "fast",
+                        "-c:a", "aac", "-ar", "44100",
                         output, "-y"
                     ]
                     result = subprocess.run(cmd, capture_output=True)
-                    
-                    # If concat copy fails, try re-encoding
-                    if not os.path.exists(output) or os.path.getsize(output) == 0:
-                        cmd = [
-                            "ffmpeg", "-f", "concat", "-safe", "0",
-                            "-i", concat_file,
-                            "-c:v", "libx264", "-preset", "fast",
-                            "-c:a", "aac",
-                            output, "-y"
-                        ]
-                        subprocess.run(cmd, capture_output=True)
 
         else:  # combined / default
             output = os.path.join(FILES_DIR, f"highlight_{job_id[:8]}.mp4")
@@ -2336,59 +3530,117 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     duration = end - start
                     highlight_text = clip.get("highlight", "")
                     
+                    # For segment downloads, get just this clip's segment
+                    current_video = video_file
+                    segment_padding = 0
+                    if use_segment_download:
+                        job["message"] = f"Downloading clip {i+1} of {len(clips[:10])}..."
+                        segment_file = os.path.join(work, f"segment_{i}.mp4")
+                        segment_result, segment_padding = download_segment(vid, start, end, segment_file)
+                        if segment_result:
+                            current_video = segment_result
+                            # Adjust start time since segment starts at (start - padding)
+                            start = segment_padding  # Start at the padding offset
+                        else:
+                            print(f"[combined] Failed to download segment {i+1}, skipping")
+                            continue
+                    
                     if captions_enabled and (transcript_data or highlight_text):
                         # Need to re-encode to add captions/text
                         clip_file = os.path.join(work, f"temp_{i}.mp4")
                         vf_filters = []
                         
-                        # Add subtitles (captions at bottom)
-                        if transcript_data:
-                            clip_transcript = get_transcript_for_timerange(start, end, transcript_data)
-                            if clip_transcript:
-                                srt_file = os.path.join(work, f"srt_{i}.srt")
-                                create_srt_file(clip_transcript, srt_file)
-                                # Use absolute path and proper escaping for FFmpeg
-                                srt_path = os.path.abspath(srt_file)
-                                srt_escaped = srt_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-                                # Captions at bottom with proper alignment
-                                vf_filters.append(f"subtitles='{srt_escaped}':force_style='FontSize=20,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2,Shadow=1,MarginV=30,Alignment=2'")
-                                print(f"[combined] Added subtitles from {srt_file}")
-                        
                         # Add highlight text at top
                         if highlight_text:
-                            escaped_text = escape_ffmpeg_text(highlight_text)
-                            # Highlight text at top in yellow
-                            vf_filters.append(f"drawtext=text='{escaped_text}':fontsize=20:fontcolor=yellow:borderw=2:bordercolor=black:x=(w-text_w)/2:y=25:font=Arial")
+                            highlight_filter = create_text_overlay_filter(
+                                highlight_text, work, f"combined_highlight_{i}",
+                                video_width=video_width, video_height=video_height,
+                                fontcolor="yellow", bordercolor="black",
+                                position="top", text_type="title"
+                            )
+                            if highlight_filter:
+                                vf_filters.append(highlight_filter)
+                                print(f"[combined] Adding highlight text: {highlight_text[:50]}...")
+                        
+                        # Add captions at bottom - USE TIMED CAPTIONS
+                        if transcript_data:
+                            orig_start = clip.get("start", 0)
+                            orig_end = clip.get("end", orig_start + 10)
+                            clip_transcript = get_transcript_for_timerange(orig_start, orig_end, transcript_data)
+                            if clip_transcript:
+                                # Use timed captions that follow speech in real-time
+                                caption_filters = create_timed_caption_filters(
+                                    clip_transcript, work, f"combined_caption_{i}",
+                                    video_width=video_width, video_height=video_height,
+                                    fontcolor="white", bordercolor="black"
+                                )
+                                if caption_filters:
+                                    vf_filters.extend(caption_filters)
+                                    print(f"[combined] Added {len(caption_filters)} timed captions")
+                            else:
+                                print(f"[combined] No transcript segments found for clip {i+1}")
+                        
+                        # Add color filter if specified
+                        if color_filter_str:
+                            vf_filters.append(color_filter_str)
+                        
+                        # Add fade in for first clip, fade out for last
+                        if use_transitions:
+                            if i == 0:
+                                vf_filters.append(f"fade=t=in:st=0:d={transition_duration}")
+                            if i == len(clips[:10]) - 1:
+                                vf_filters.append(f"fade=t=out:st={duration - transition_duration}:d={transition_duration}")
+                        
+                        # Use input seeking (-ss before -i) for fast seek, then output seeking for accuracy
+                        # This ensures proper audio sync
+                        seek_time = max(0, start - 1)  # Seek 1 second before for keyframe accuracy
+                        trim_start = start - seek_time  # Fine-tune trim after seek
                         
                         if vf_filters:
                             vf_string = ",".join(vf_filters)
+                            print(f"[combined] Filter string: {vf_string[:200]}...")
                             cmd = [
-                                "ffmpeg", "-i", video_file,
-                                "-ss", str(start), "-t", str(duration),
+                                "ffmpeg",
+                                "-ss", str(seek_time),  # Input seeking (fast)
+                                "-i", current_video,
+                                "-ss", str(trim_start),  # Output seeking (accurate)
+                                "-t", str(duration),
                                 "-vf", vf_string,
                                 "-c:v", "libx264", "-preset", "fast",
-                                "-c:a", "aac",
+                                "-c:a", "aac", "-ar", "44100",  # Consistent audio sample rate
+                                "-async", "1",  # Audio sync
                                 clip_file, "-y"
                             ]
-                            print(f"[combined] Processing clip {i+1}: {start:.1f}s - {end:.1f}s with captions")
+                            print(f"[combined] Processing clip {i+1}: {clip.get('start', 0):.1f}s - {clip.get('end', 0):.1f}s with captions")
                         else:
                             cmd = [
-                                "ffmpeg", "-i", video_file,
-                                "-ss", str(start), "-t", str(duration),
+                                "ffmpeg",
+                                "-ss", str(seek_time),
+                                "-i", current_video,
+                                "-ss", str(trim_start),
+                                "-t", str(duration),
                                 "-c:v", "libx264", "-preset", "fast",
-                                "-c:a", "aac",
+                                "-c:a", "aac", "-ar", "44100",
+                                "-async", "1",
                                 clip_file, "-y"
                             ]
                         result = subprocess.run(cmd, capture_output=True, text=True)
                         if result.returncode != 0:
                             print(f"[combined] FFmpeg error: {result.stderr[:500]}")
                     else:
-                        # Fast copy without captions
+                        # Re-encode even without captions for consistent audio sync
                         clip_file = os.path.join(work, f"temp_{i}.mp4")
+                        seek_time = max(0, start - 1)
+                        trim_start = start - seek_time
                         cmd = [
-                            "ffmpeg", "-i", video_file,
-                            "-ss", str(start), "-t", str(duration),
-                            "-c", "copy",
+                            "ffmpeg",
+                            "-ss", str(seek_time),
+                            "-i", current_video,
+                            "-ss", str(trim_start),
+                            "-t", str(duration),
+                            "-c:v", "libx264", "-preset", "fast",
+                            "-c:a", "aac", "-ar", "44100",
+                            "-async", "1",
                             clip_file, "-y"
                         ]
                         subprocess.run(cmd, capture_output=True)
@@ -2401,23 +3653,64 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     for cf in clip_files_for_concat:
                         f.write(f"file '{cf}'\n")
 
-                if captions_enabled:
-                    # Re-encode for consistent output
-                    cmd = [
-                        "ffmpeg", "-f", "concat", "-safe", "0",
-                        "-i", concat_file,
-                        "-c:v", "libx264", "-preset", "fast",
-                        "-c:a", "aac",
-                        output, "-y"
-                    ]
-                else:
-                    cmd = [
-                        "ffmpeg", "-f", "concat", "-safe", "0",
-                        "-i", concat_file,
-                        "-c", "copy",
-                        output, "-y"
-                    ]
+                # Always re-encode for consistent audio sync
+                cmd = [
+                    "ffmpeg", "-f", "concat", "-safe", "0",
+                    "-i", concat_file,
+                    "-c:v", "libx264", "-preset", "fast",
+                    "-c:a", "aac", "-ar", "44100",
+                    output, "-y"
+                ]
                 subprocess.run(cmd, capture_output=True)
+
+        # ================================================================
+        # POST-PROCESSING: Apply final enhancements (only if not disabled)
+        # ================================================================
+        
+        if os.path.exists(output) and not disable_all:
+            job["percent"] = 85
+            job["message"] = "Applying finishing touches..."
+            
+            final_output = output
+            temp_count = 0
+            
+            # Normalize audio if requested
+            if do_normalize_audio and format_type in ['combined', 'social']:
+                job["message"] = "Normalizing audio..."
+                temp_output = os.path.join(work, f"normalized_{temp_count}.mp4")
+                if normalize_audio(final_output, temp_output):
+                    final_output = temp_output
+                    temp_count += 1
+                    print(f"[postproc] Audio normalized")
+            
+            # Add background music if requested
+            if do_background_music and format_type in ['combined', 'social']:
+                job["message"] = "Adding background music..."
+                temp_output = os.path.join(work, f"with_music_{temp_count}.mp4")
+                if add_upbeat_background_music(final_output, temp_output, music_volume=0.12):
+                    final_output = temp_output
+                    temp_count += 1
+                    print(f"[postproc] Background music added at 12% volume")
+            
+            # Add logo watermark if requested
+            if do_logo_watermark and format_type in ['combined', 'social']:
+                job["message"] = "Adding logo watermark..."
+                temp_output = os.path.join(work, f"with_watermark_{temp_count}.mp4")
+                if add_logo_watermark(final_output, temp_output, position='bottom_right', opacity=0.6, scale=0.12):
+                    final_output = temp_output
+                    temp_count += 1
+                    print(f"[postproc] Logo watermark added")
+            
+            # Copy final output to expected location if it changed
+            if final_output != output:
+                shutil.copy2(final_output, output)
+                print(f"[postproc] Copied final output to {output}")
+            
+            job["percent"] = 95
+        elif os.path.exists(output):
+            # Skip all post-processing when disable_all is True
+            print(f"[postproc] Skipped all post-processing (disable_all={disable_all})")
+            job["percent"] = 95
 
         if os.path.exists(output):
             file_size = os.path.getsize(output)
@@ -2451,7 +3744,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
 
 @app.post("/api/render_clips")
 async def render_clips(req: Request):
-    """Render video clips in various formats"""
+    """Render video clips in various formats with optional editing features"""
     if CLOUD_MODE:
         return {
             "error": "Video clip download is not available in cloud mode",
@@ -2464,6 +3757,21 @@ async def render_clips(req: Request):
     clips = data.get("clips", [])
     format_type = data.get("format", "combined")
     title = data.get("title", "Highlight Reel")
+    captions_enabled = data.get("captions", True)
+    
+    # Video editing options - if disable_all is true, skip all processing
+    disable_all = data.get('disableAllAdvanced', True)
+    
+    video_options = {
+        'disable_all': disable_all,
+        'transitions': False if disable_all else data.get('transitions', False),
+        'transition_duration': data.get('transitionDuration', 0.5),
+        'color_filter': 'none' if disable_all else data.get('colorFilter', 'none'),
+        'normalize_audio': False if disable_all else data.get('normalizeAudio', False),
+        'logo_watermark': False if disable_all else data.get('logoWatermark', False),
+        'background_music': False if disable_all else data.get('backgroundMusic', False),
+        'use_hw_accel': data.get('useHwAccel', True),
+    }
     
     if not vid:
         return {"error": "No video ID provided", "jobId": None}
@@ -2471,7 +3779,31 @@ async def render_clips(req: Request):
     if not clips:
         return {"error": "No clips provided", "jobId": None}
     
-    print(f"[render_clips] Starting job: {len(clips)} clips, format={format_type}")
+    # Try to get transcript for captions
+    transcript_data = None
+    if captions_enabled:
+        # Check stored transcripts first
+        if vid in STORED_TRANSCRIPTS:
+            transcript_data = STORED_TRANSCRIPTS[vid]
+            print(f"[render_clips] Using stored transcript: {len(transcript_data)} segments")
+        else:
+            # Check cache
+            cache_key = f"transcript_{vid}"
+            if cache_key in TRANSCRIPT_CACHE:
+                transcript_data = TRANSCRIPT_CACHE[cache_key]
+                print(f"[render_clips] Using cached transcript: {len(transcript_data)} segments")
+            else:
+                # Try to fetch
+                try:
+                    from youtube_transcript_api import YouTubeTranscriptApi
+                    transcript_data = YouTubeTranscriptApi.get_transcript(vid)
+                    TRANSCRIPT_CACHE[cache_key] = transcript_data
+                    print(f"[render_clips] Fetched transcript: {len(transcript_data)} segments")
+                except Exception as e:
+                    print(f"[render_clips] Could not fetch transcript: {e}")
+    
+    print(f"[render_clips] Starting job: {len(clips)} clips, format={format_type}, captions={captions_enabled}, transcript={len(transcript_data) if transcript_data else 0} segments")
+    print(f"[render_clips] Video options: {video_options}")
 
     job_id = str(uuid.uuid4())
     JOBS[job_id] = {
@@ -2481,7 +3813,9 @@ async def render_clips(req: Request):
     }
 
     threading.Thread(
-        target=simple_job, args=(job_id, vid, clips, format_type), daemon=True
+        target=simple_job, 
+        args=(job_id, vid, clips, format_type, captions_enabled, transcript_data, video_options), 
+        daemon=True
     ).start()
     return {"jobId": job_id, "format": format_type, "clipCount": len(clips)}
 
@@ -2502,6 +3836,56 @@ async def job_status_by_path(job_id: str):
     """Alternative endpoint with path parameter"""
     print(f"[job_status_by_path] Checking job: {job_id}")
     return JOBS.get(job_id, {"status": "error", "message": f"Unknown job: {job_id}"})
+
+
+@app.get("/api/video_capabilities")
+async def video_capabilities():
+    """Get available video editing capabilities"""
+    hw_accel = detect_hardware_acceleration()
+    
+    return {
+        "hwAcceleration": {
+            "available": len(hw_accel['available']) > 0,
+            "encoder": hw_accel['encoder'],
+            "types": hw_accel['available']
+        },
+        "colorFilters": [
+            {"id": "none", "name": "None"},
+            {"id": "vintage", "name": "Vintage"},
+            {"id": "warm", "name": "Warm"},
+            {"id": "cool", "name": "Cool"},
+            {"id": "high_contrast", "name": "High Contrast"},
+            {"id": "low_contrast", "name": "Low Contrast"},
+            {"id": "bw", "name": "Black & White"},
+            {"id": "sepia", "name": "Sepia"},
+            {"id": "vibrant", "name": "Vibrant"},
+            {"id": "cinematic", "name": "Cinematic"}
+        ],
+        "speedOptions": [
+            {"value": 0.5, "name": "0.5x (Slow Motion)"},
+            {"value": 0.75, "name": "0.75x"},
+            {"value": 1.0, "name": "1x (Normal)"},
+            {"value": 1.25, "name": "1.25x"},
+            {"value": 1.5, "name": "1.5x"},
+            {"value": 2.0, "name": "2x (Fast)"}
+        ],
+        "watermarkPositions": [
+            {"id": "top_left", "name": "Top Left"},
+            {"id": "top_right", "name": "Top Right"},
+            {"id": "bottom_left", "name": "Bottom Left"},
+            {"id": "bottom_right", "name": "Bottom Right"},
+            {"id": "center", "name": "Center"}
+        ],
+        "features": {
+            "transitions": True,
+            "introOutro": True,
+            "audioNormalization": True,
+            "thumbnailGeneration": True,
+            "chapterMarkers": True,
+            "responsiveText": True
+        },
+        "cloudMode": CLOUD_MODE
+    }
 
 
 @app.post("/api/download_mp4")
@@ -2613,10 +3997,34 @@ async def highlight_reel(req: Request):
     vid = data.get("videoId", "")
     quotes = data.get("quotes", [])
     highlights = data.get("highlights", [])  # Highlight labels for text overlay
-    pad = data.get("pad", 3)  # seconds of padding before/after
+    pad = data.get("pad", 4)  # seconds of padding before/after
     format_type = data.get("format", "combined")
     transcript_data = data.get("transcript", [])  # Can pass transcript directly
     captions_enabled = data.get("captions", True)  # Whether to add captions
+    
+    # IMPORTANT: Extract video options from request
+    # If disableAllAdvanced is true, skip ALL post-processing
+    disable_all = data.get('disableAllAdvanced', True)
+    
+    video_options = {
+        'disable_all': disable_all,
+        'transitions': False if disable_all else data.get('transitions', False),
+        'transition_duration': data.get('transitionDuration', 0.5),
+        'color_filter': 'none' if disable_all else data.get('colorFilter', 'none'),
+        'normalize_audio': False if disable_all else data.get('normalizeAudio', False),
+        'logo_watermark': False if disable_all else data.get('logoWatermark', False),
+        'background_music': False if disable_all else data.get('backgroundMusic', False),
+        'use_hw_accel': data.get('useHwAccel', True),
+    }
+    print(f"[highlight_reel] Video options (disable_all={disable_all}): {video_options}")
+    
+    # Log transcript info
+    if transcript_data:
+        first_seg = transcript_data[0] if transcript_data else {}
+        print(f"[highlight_reel] Received transcript with {len(transcript_data)} segments")
+        print(f"[highlight_reel] First segment format: {list(first_seg.keys())}")
+    else:
+        print(f"[highlight_reel] No transcript data provided, will try to fetch")
     
     if not vid:
         return {"error": "No video ID provided", "jobId": None}
@@ -2666,30 +4074,36 @@ async def highlight_reel(req: Request):
         else:
             print(f"Could not find timestamp for quote: {quote[:50]}...")
     
-    # Select 5 evenly spread clips from throughout the video
+    # SELECT 5 EVENLY SPREAD CLIPS from the available highlights
+    # This creates a "sports highlight reel" feel - clips from throughout the video
+    # NOTE: Skip index 0 as it's often a formality (intro/greeting)
     if len(all_clips) > 5:
-        # Sort by timestamp
+        # Sort by timestamp first
         all_clips.sort(key=lambda c: c["start"])
         
-        # Select evenly distributed clips
+        # Select evenly distributed clips starting from index 1 (skip the first/formality)
+        # For 10 clips: indices 1, 3, 5, 7, 9 (skipping 0)
         total = len(all_clips)
-        step = total / 5
-        selected_indices = [int(i * step) for i in range(5)]
+        usable_clips = total - 1  # Exclude first clip
+        step = usable_clips / 5  # e.g., for 10 clips: step = 1.8
+        selected_indices = [int(1 + i * step) for i in range(5)]  # Start from 1, not 0
         
         # Make sure we don't go out of bounds and get unique indices
         selected_indices = list(set(min(idx, total - 1) for idx in selected_indices))
         selected_indices.sort()
         
-        # If we don't have 5 unique indices, add more
+        # If we don't have 5 unique indices, fill from unused (but still skip 0)
         while len(selected_indices) < 5 and len(selected_indices) < total:
-            for idx in range(total):
+            for idx in range(1, total):  # Start from 1, skip 0
                 if idx not in selected_indices:
                     selected_indices.append(idx)
                     selected_indices.sort()
                     break
         
         clips = [all_clips[i] for i in selected_indices[:5]]
-        print(f"[highlight_reel] Selected {len(clips)} spread-out clips from {len(all_clips)} total")
+        print(f"[highlight_reel] Selected clips at indices {selected_indices} from {total} total highlights")
+        for i, idx in enumerate(selected_indices[:5]):
+            print(f"  Clip {i+1}: index {idx} -> {all_clips[idx]['start']:.1f}s - {all_clips[idx]['end']:.1f}s")
     else:
         clips = all_clips
     
@@ -2727,14 +4141,16 @@ async def highlight_reel(req: Request):
             })
     
     print(f"[highlight_reel] Creating reel with {len(clips)} clips, captions={captions_enabled}")
+    print(f"[highlight_reel] Options: disable_all={video_options['disable_all']}")
     for i, clip in enumerate(clips):
         print(f"  Clip {i+1}: {clip['start']:.1f}s - {clip['end']:.1f}s | {clip.get('highlight', '')[:40]}...")
     
     job_id = str(uuid.uuid4())
     JOBS[job_id] = {"status": "queued", "percent": 0, "message": f"Building reel from {len(clips)} clips..."}
     
+    # FIXED: Pass video_options to simple_job
     threading.Thread(
-        target=simple_job, args=(job_id, vid, clips, format_type, captions_enabled, transcript_data), daemon=True
+        target=simple_job, args=(job_id, vid, clips, format_type, captions_enabled, transcript_data, video_options), daemon=True
     ).start()
     return {"jobId": job_id}
 
@@ -2833,7 +4249,7 @@ async def analyze_chat_sentiment(req: Request):
     url = f"https://www.youtube.com/watch?v={video_id}"
 
     try:
-        print(f"Â  Analyzing chat sentiment for: {video_id}")
+        print(f"Ã‚Â  Analyzing chat sentiment for: {video_id}")
         chat = ChatDownloader().get_chat(url, max_messages=max_messages)
 
         sentiments = []
@@ -2988,7 +4404,7 @@ async def chat_statistics(req: Request):
     url = f"https://www.youtube.com/watch?v={video_id}"
 
     try:
-        print(f"Â  Gathering chat statistics for: {video_id}")
+        print(f"Ã‚Â  Gathering chat statistics for: {video_id}")
         chat = ChatDownloader().get_chat(url, max_messages=max_messages)
 
         total_messages = 0
@@ -3059,7 +4475,7 @@ async def get_optimization_stats():
             "estimated_savings": {
                 "percentage": 92,
                 "per_video": "$6.00",
-                "description": "Original $6.50/video Â  $0.50/video",
+                "description": "Original $6.50/video Ã‚Â  $0.50/video",
             },
         }
     except Exception as e:
@@ -3180,7 +4596,7 @@ async def start_live_monitoring(req: Request):
 
 
 # ============================================================================
-# [*]Ã…Â¡Ã¢â€šÂ¬ NEW: AI MEETING ASSISTANT (RAG-based Chat) (v4.0)
+# [*]Ãƒâ€¦Ã‚Â¡ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ NEW: AI MEETING ASSISTANT (RAG-based Chat) (v4.0)
 # ============================================================================
 
 
@@ -3219,12 +4635,12 @@ async def chat_with_meeting(req: Request):
             # Get transcript from cache or fetch it
             if meeting_id in STORED_TRANSCRIPTS:
                 transcript_data = STORED_TRANSCRIPTS[meeting_id]
-                print(f"âœ… Using cached transcript: {len(transcript_data)} segments")
+                print(f"Ã¢Å“â€¦ Using cached transcript: {len(transcript_data)} segments")
             else:
                 try:
                     transcript_data = ytt_api.fetch(meeting_id).to_raw_data()
                     STORED_TRANSCRIPTS[meeting_id] = transcript_data
-                    print(f"âœ… Fetched and cached {len(transcript_data)} segments")
+                    print(f"Ã¢Å“â€¦ Fetched and cached {len(transcript_data)} segments")
                 except Exception as e:
                     return {
                         "answer": "I can't access the transcript for this video. Please make sure the video has captions enabled.",
@@ -3272,7 +4688,7 @@ async def chat_with_meeting(req: Request):
                 "we_vs_i": "multiple speakers likely" if we_count > i_count * 2 else "possibly single speaker or interview",
             }
             
-            print(f"ðŸ“Š Transcript stats: {transcript_stats}")
+            print(f"Ã°Å¸â€œÅ  Transcript stats: {transcript_stats}")
         
         else:
             return {
@@ -3294,10 +4710,10 @@ async def chat_with_meeting(req: Request):
                 "\n\n[... end of meeting ...]\n\n" +
                 full_transcript[-third:]
             )
-            print(f"ðŸ“ Using condensed transcript: {len(context_transcript)} chars (from {len(full_transcript)})")
+            print(f"Ã°Å¸â€œÂ Using condensed transcript: {len(context_transcript)} chars (from {len(full_transcript)})")
         else:
             context_transcript = full_transcript
-            print(f"ðŸ“ Using full transcript: {len(context_transcript)} chars")
+            print(f"Ã°Å¸â€œÂ Using full transcript: {len(context_transcript)} chars")
 
         # BUILD CONVERSATION CONTEXT
         conv_context = ""
@@ -3354,7 +4770,7 @@ User's question: {query}"""
         )
 
         answer = completion.choices[0].message.content
-        print(f"âœ… Generated response: {len(answer)} chars")
+        print(f"Ã¢Å“â€¦ Generated response: {len(answer)} chars")
 
         # Generate contextual follow-up suggestions
         follow_ups = []
@@ -3377,7 +4793,7 @@ User's question: {query}"""
         }
 
     except Exception as e:
-        print(f"âŒ Chat error: {e}")
+        print(f"Ã¢ÂÅ’ Chat error: {e}")
         import traceback
         print(traceback.format_exc())
         return {
@@ -3502,7 +4918,7 @@ Rules:
                     # Fallback if AI didn't generate enough questions
                     if len(suggestions) < 3:
                         print(
-                            f"Â   AI generated only {len(suggestions)} questions, adding fallbacks"
+                            f"Ã‚Â   AI generated only {len(suggestions)} questions, adding fallbacks"
                         )
                         suggestions.extend(
                             [
@@ -3518,7 +4934,7 @@ Rules:
 
                 except Exception as e:
                     print(
-                        f"Â   AI suggestion generation failed: {e}, using keyword-based fallback"
+                        f"Ã‚Â   AI suggestion generation failed: {e}, using keyword-based fallback"
                     )
                     # Fall through to keyword-based method below
 
@@ -3604,7 +5020,7 @@ Rules:
 
         else:
             print(
-                f"Â   No cached transcript for {meeting_id}, returning generic suggestions"
+                f"Ã‚Â   No cached transcript for {meeting_id}, returning generic suggestions"
             )
             print(f"   Available cache keys: {list(STORED_TRANSCRIPTS.keys())}")
 
@@ -3638,7 +5054,7 @@ Rules:
 
 
 # ============================================================================
-# [*]Ã…Â¡Ã¢â€šÂ¬ NEW: COMMUNITY KNOWLEDGE BASE (v4.0)
+# [*]Ãƒâ€¦Ã‚Â¡ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ NEW: COMMUNITY KNOWLEDGE BASE (v4.0)
 # ============================================================================
 
 
@@ -4401,6 +5817,197 @@ async def build_knowledge_graph(req: Request):
 
 # ============================================================================
 # END v6.0 NEW FEATURE ENDPOINTS
+# ============================================================================
+
+
+# ============================================================================
+# v6.1 NEW FEATURES: Scorecard, Share Moment, Accessibility
+# ============================================================================
+
+@app.post("/api/meeting/scorecard")
+async def generate_meeting_scorecard(req: Request):
+    """Generate a meeting scorecard with key metrics"""
+    data = await req.json()
+    transcript = data.get("transcript", "")
+    highlights = data.get("highlights", [])
+    entities = data.get("entities", [])
+    
+    # Count metrics from transcript
+    text_lower = transcript.lower()
+    
+    # Count votes (look for vote-related phrases)
+    vote_patterns = ["vote", "voted", "all in favor", "aye", "nay", "motion passed", "motion failed", "approved", "denied", "unanimous"]
+    vote_count = sum(1 for pattern in vote_patterns if pattern in text_lower)
+    vote_count = min(vote_count // 2, 10)  # Normalize
+    
+    # Count public comments
+    public_comment_patterns = ["public comment", "resident comment", "citizen comment", "open the floor", "public hearing", "community member", "my name is", "i live at", "i'm a resident"]
+    public_comments = sum(text_lower.count(pattern) for pattern in public_comment_patterns)
+    public_comments = min(public_comments, 50)
+    
+    # Count budget mentions
+    budget_patterns = ["$", "dollar", "million", "thousand", "budget", "funding", "allocated", "appropriat"]
+    budget_mentions = sum(text_lower.count(pattern) for pattern in budget_patterns)
+    budget_mentions = min(budget_mentions // 3, 20)
+    
+    # Estimate duration from word count (avg 150 words per minute)
+    word_count = len(transcript.split())
+    duration_minutes = word_count // 150
+    hours = duration_minutes // 60
+    minutes = duration_minutes % 60
+    duration_str = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+    
+    # Count unique speakers (rough estimate from "said", colons after names)
+    speaker_estimate = len(set(entities)) if entities else len(set([e.strip() for e in text_lower.split(':') if len(e.strip()) < 30 and len(e.strip()) > 2]))
+    speaker_estimate = min(speaker_estimate, 30)
+    
+    # Extract hot topics from entities
+    hot_topics = []
+    if entities:
+        # Group by type and count
+        topic_counts = {}
+        for e in entities:
+            text = e.get('text', '') if isinstance(e, dict) else str(e)
+            if text and len(text) > 2:
+                topic_counts[text] = topic_counts.get(text, 0) + 1
+        hot_topics = sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        hot_topics = [t[0] for t in hot_topics]
+    
+    # Get highlight categories if available
+    categories = {}
+    for h in highlights:
+        cat = h.get('category', 'general') if isinstance(h, dict) else 'general'
+        categories[cat] = categories.get(cat, 0) + 1
+    
+    return {
+        "scorecard": {
+            "decisions_made": vote_count,
+            "public_comments": public_comments,
+            "budget_items": budget_mentions,
+            "duration": duration_str,
+            "speakers": speaker_estimate,
+            "hot_topics": hot_topics[:5],
+            "highlight_categories": categories,
+            "word_count": word_count,
+            "engagement_score": min(100, (public_comments * 3) + (vote_count * 5) + len(hot_topics) * 2)
+        }
+    }
+
+
+@app.post("/api/share/moment")
+async def create_shareable_moment(req: Request):
+    """Create a shareable link for a specific moment in a video"""
+    data = await req.json()
+    video_id = data.get("videoId", "")
+    start_time = data.get("startTime", 0)
+    end_time = data.get("endTime", start_time + 30)
+    title = data.get("title", "Meeting Moment")
+    description = data.get("description", "")
+    
+    # Generate share ID
+    import hashlib
+    share_id = hashlib.md5(f"{video_id}_{start_time}_{end_time}_{time.time()}".encode()).hexdigest()[:12]
+    
+    # Store share data (in production, use database)
+    share_data = {
+        "id": share_id,
+        "video_id": video_id,
+        "start_time": start_time,
+        "end_time": end_time,
+        "title": title,
+        "description": description,
+        "created_at": time.time(),
+        "youtube_url": f"https://www.youtube.com/watch?v={video_id}&t={int(start_time)}s",
+        "embed_code": f'<iframe width="560" height="315" src="https://www.youtube.com/embed/{video_id}?start={int(start_time)}&end={int(end_time)}" frameborder="0" allowfullscreen></iframe>'
+    }
+    
+    # Store in memory (would be database in production)
+    if not hasattr(app.state, 'shared_moments'):
+        app.state.shared_moments = {}
+    app.state.shared_moments[share_id] = share_data
+    
+    return {
+        "share_id": share_id,
+        "share_url": f"/share/{share_id}",
+        "youtube_url": share_data["youtube_url"],
+        "embed_code": share_data["embed_code"],
+        "duration": end_time - start_time
+    }
+
+
+@app.get("/api/share/{share_id}")
+async def get_shared_moment(share_id: str):
+    """Retrieve a shared moment by ID"""
+    if hasattr(app.state, 'shared_moments') and share_id in app.state.shared_moments:
+        return app.state.shared_moments[share_id]
+    return {"error": "Shared moment not found"}
+
+
+@app.post("/api/accessibility/simplify")
+async def simplify_text(req: Request):
+    """Simplify text for accessibility (lower reading level)"""
+    data = await req.json()
+    text = data.get("text", "")
+    target_level = data.get("level", "simple")  # simple, moderate, detailed
+    
+    if not text or not OPENAI_API_KEY:
+        return {"simplified": text, "error": "No text or API key"}
+    
+    level_instructions = {
+        "simple": "8th grade reading level. Use short sentences. Avoid jargon. Define any technical terms.",
+        "moderate": "10th grade reading level. Keep important details but simplify complex language.",
+        "detailed": "Keep all details but improve clarity and flow."
+    }
+    
+    prompt = f"""Rewrite this meeting summary for accessibility at a {target_level} level.
+
+Instructions: {level_instructions.get(target_level, level_instructions['simple'])}
+
+Original text:
+{text}
+
+Provide the simplified version:"""
+    
+    result = call_openai_api(
+        prompt=prompt,
+        max_tokens=1000,
+        model="gpt-4o-mini",
+        temperature=0.3
+    )
+    
+    return {"simplified": result, "original_length": len(text), "simplified_length": len(result)}
+
+
+@app.post("/api/accessibility/translate")  
+async def translate_summary(req: Request):
+    """Translate summary to another language"""
+    data = await req.json()
+    text = data.get("text", "")
+    target_language = data.get("language", "Spanish")
+    
+    if not text or not OPENAI_API_KEY:
+        return {"translated": text, "error": "No text or API key"}
+    
+    prompt = f"""Translate this meeting summary to {target_language}. 
+Keep the same structure and meaning. Use clear, accessible language.
+
+Text to translate:
+{text}
+
+{target_language} translation:"""
+    
+    result = call_openai_api(
+        prompt=prompt,
+        max_tokens=1500,
+        model="gpt-4o-mini",
+        temperature=0.2
+    )
+    
+    return {"translated": result, "language": target_language}
+
+
+# ============================================================================
+# END v6.1 NEW FEATURE ENDPOINTS
 # ============================================================================
 
 

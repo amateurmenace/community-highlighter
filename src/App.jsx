@@ -16,7 +16,10 @@ import {
   apiCreateIssue, apiListIssues, apiAddMeetingToIssue, apiAutoTrackIssue, apiGetIssueTimeline,
   apiCompareMeetings,
   apiExplainJargon, apiGetJargonDictionary,
-  apiBuildKnowledgeGraph
+  apiBuildKnowledgeGraph,
+  // v6.1: New feature API calls
+  apiMeetingScorecard, apiShareMoment, apiGetSharedMoment,
+  apiSimplifyText, apiTranslateSummary
 } from "./api";
 
 // v5.2: Use relative URLs for deployment compatibility
@@ -78,11 +81,58 @@ const padTimePrecise = (x) => {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
 };
 
+// Remove internal repetition in text (e.g., "hello world hello world" -> "hello world")
+function removeInternalRepetition(text) {
+  if (!text || text.length < 10) return text;
+  
+  // Normalize whitespace
+  text = text.replace(/\s+/g, ' ').trim();
+  
+  const words = text.split(' ');
+  const n = words.length;
+  if (n < 4) return text;
+  
+  // Try splitting in half first (most common case: exact 2x repeat)
+  const half = Math.floor(n / 2);
+  const firstHalf = words.slice(0, half).join(' ');
+  const secondHalf = words.slice(half, half * 2).join(' ');
+  if (firstHalf === secondHalf) {
+    return firstHalf;
+  }
+  
+  // Try splitting in thirds (3x repeat)
+  const third = Math.floor(n / 3);
+  if (third >= 2) {
+    const p1 = words.slice(0, third).join(' ');
+    const p2 = words.slice(third, third * 2).join(' ');
+    const p3 = words.slice(third * 2, third * 3).join(' ');
+    if (p1 === p2 && p2 === p3) {
+      return p1;
+    }
+  }
+  
+  // Try to find where the text starts repeating by looking for the first word appearing again
+  const firstWord = words[0].toLowerCase();
+  for (let i = 2; i <= half + 1; i++) {
+    if (words[i] && words[i].toLowerCase() === firstWord) {
+      // Potential repeat starting at position i
+      const candidate = words.slice(0, i).join(' ');
+      const rest = words.slice(i).join(' ');
+      // Check if rest starts with candidate (allowing partial at end)
+      if (rest === candidate || rest.startsWith(candidate + ' ') || candidate.startsWith(rest)) {
+        return candidate;
+      }
+    }
+  }
+  
+  return text;
+}
+
 function parseVTT(vtt) {
   if (!vtt) return [];
   const src = String(vtt).replace(/\r/g, "").replace(/^WEBVTT[^\n]*\n?/, "");
   const rx = /(\d{1,2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?)\s*-->\s*(\d{1,2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?).*?\n([\s\S]*?)(?=\n{2,}|\n(?=\d{1,2}:\d{2}.*?--> )|$)/g;
-  let m, out = [], prev = "";
+  let m, out = [], prev = "", seenTexts = new Set();
   while ((m = rx.exec(src))) {
     const s = toSec(m[1]), e = toSec(m[2]);
     let text = cleanHtmlEntities((m[3] || ""))
@@ -92,10 +142,49 @@ function parseVTT(vtt) {
       .replace(/>>+/g, "")  // CRITICAL: Remove >> symbols
       .replace(/\s+/g, " ")
       .trim();
-    if (text && text !== prev) {
-      out.push({ start: s, end: e, text });
-      prev = text;
+    
+    // Remove internal repetition (e.g., "hello hello hello" -> "hello")
+    text = removeInternalRepetition(text);
+    
+    if (!text) continue;
+    
+    const textLower = text.toLowerCase();
+    
+    // Skip exact duplicates
+    if (seenTexts.has(textLower)) continue;
+    
+    // Check for rolling/overlapping captions
+    if (prev) {
+      const prevLower = prev.toLowerCase();
+      // If new text contains old or vice versa, it's a rolling caption
+      if (textLower.includes(prevLower) || prevLower.includes(textLower)) {
+        // Keep the longer one
+        if (text.length > prev.length && out.length > 0) {
+          out[out.length - 1].text = text;
+          seenTexts.add(textLower);
+          prev = text;
+        }
+        continue;
+      }
+      
+      // Check word overlap
+      const wordsNew = new Set(textLower.split(/\s+/));
+      const wordsPrev = new Set(prevLower.split(/\s+/));
+      const intersection = [...wordsNew].filter(w => wordsPrev.has(w));
+      const overlap = intersection.length / Math.min(wordsNew.size, wordsPrev.size);
+      if (overlap > 0.7) {
+        // High overlap = rolling caption, keep longer
+        if (text.length > prev.length && out.length > 0) {
+          out[out.length - 1].text = text;
+          prev = text;
+        }
+        continue;
+      }
     }
+    
+    seenTexts.add(textLower);
+    out.push({ start: s, end: e, text });
+    prev = text;
   }
   return out;
 }
@@ -136,7 +225,8 @@ function HowToGuide({ onOpenAssistant }) {
     }
   };
 
-  const borderColors = ['#059669', '#0891b2', '#7c3aed', '#db2777'];
+  const borderColors = ['#000000', '#000000', '#000000', '#000000'];
+  const numColors = ['#059669', '#0891b2', '#7c3aed', '#db2777'];  // Colored backgrounds for numbers
   const mainGreen = '#1e7f63';
 
   return (
@@ -163,7 +253,7 @@ function HowToGuide({ onOpenAssistant }) {
           }}
         >
           <div className="num" style={{ 
-            background: borderColors[0],
+            background: numColors[0],
             fontSize: '18px',
             width: '40px',
             height: '40px',
@@ -197,7 +287,7 @@ function HowToGuide({ onOpenAssistant }) {
           }}
         >
           <div className="num" style={{ 
-            background: borderColors[1],
+            background: numColors[1],
             fontSize: '18px',
             width: '40px',
             height: '40px',
@@ -229,7 +319,7 @@ function HowToGuide({ onOpenAssistant }) {
           }}
         >
           <div className="num" style={{ 
-            background: borderColors[2],
+            background: numColors[2],
             fontSize: '18px',
             width: '40px',
             height: '40px',
@@ -261,7 +351,7 @@ function HowToGuide({ onOpenAssistant }) {
           }}
         >
           <div className="num" style={{ 
-            background: borderColors[3],
+            background: numColors[3],
             fontSize: '18px',
             width: '40px',
             height: '40px',
@@ -335,12 +425,12 @@ function FeedbackModal({ onClose }) {
       }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h2 style={{ margin: 0, fontSize: '20px', color: '#1e7f63' }}>Share Your Feedback</h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#999' }}>Ã—</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#999' }}>Ãƒ—</button>
         </div>
         
         {sent ? (
           <div style={{ textAlign: 'center', padding: '20px' }}>
-            <div style={{ fontSize: '48px', marginBottom: '12px' }}>âœ…</div>
+            <div style={{ fontSize: '48px', marginBottom: '12px' }}>âÅ“…</div>
             <div style={{ fontSize: '16px', color: '#1e7f63' }}>Thank you for your feedback!</div>
           </div>
         ) : (
@@ -381,7 +471,7 @@ function FeedbackModal({ onClose }) {
 }
 
 // ============================================================================
-// š€ NEW: Optimization Panel Component
+// 🧠 NEW: Optimization Panel Component
 // ============================================================================
 function OptimizationPanel({ stats, onClose, onClearCache }) {
   if (!stats) return null;
@@ -411,7 +501,7 @@ function OptimizationPanel({ stats, onClose, onClearCache }) {
         paddingBottom: '12px',
         borderBottom: '2px solid var(--line)'
       }}>
-        <h3 style={{ margin: 0, fontSize: '18px' }}>š€ AI Optimizations</h3>
+        <h3 style={{ margin: 0, fontSize: '18px' }}>🧠 AI Optimizations</h3>
         <button onClick={onClose} style={{
           background: 'none',
           border: 'none',
@@ -452,7 +542,7 @@ function OptimizationPanel({ stats, onClose, onClearCache }) {
             fontSize: '12px'
           }}>
             <span style={{ color: enabled ? '#22c55e' : '#94a3b8' }}>
-              {enabled ? 'X to œ' : ' to ” to ¹'}
+              {enabled ? 'X to Å“' : ' to ” to ¹'}
             </span>
             <span style={{ textTransform: 'capitalize' }}>
               {key.replace(/_/g, ' ')}
@@ -471,7 +561,7 @@ function OptimizationPanel({ stats, onClose, onClearCache }) {
           Cache Statistics:
         </div>
         <div style={{ fontSize: '12px', color: '#64748b' }}>
-          <div>âœ¨ Cached analyses: {cache.total_entries || 0}</div>
+          <div>âÅ“¨ Cached analyses: {cache.total_entries || 0}</div>
           <div>’¾ Cache size: {cache.total_size_mb || 0} MB</div>
         </div>
       </div>
@@ -726,7 +816,7 @@ function MentionedEntitiesCard({ entities, isLoading }) {
                 className={`entity-tab ${viewMode === 'maps' ? 'active' : ''}`}
                 onClick={switchToMaps}
               >
-                âœ¨ Google Maps
+                âÅ“¨ Google Maps
               </button>
               <button
                 className={`entity-tab ${viewMode === 'wikipedia' ? 'active' : ''}`}
@@ -2552,7 +2642,7 @@ function ExportModal({ onSelect, onClose, clipCount }) {
   );
 }
 
-function ProgressIndicator({ status, percent, message, estimatedTime }) {
+function ProgressIndicator({ status, percent, message, estimatedTime, isVideoDownload }) {
   const [dots, setDots] = useState('');
   
   // Animated dots to show activity
@@ -2608,17 +2698,20 @@ function ProgressIndicator({ status, percent, message, estimatedTime }) {
         </div>
       )}
       
-      <div style={{ fontSize: '13px', opacity: 0.9, lineHeight: 1.5 }}>
-        {estimatedTime && (
-          <div style={{ marginBottom: '6px' }}>
-            ⏱️ Estimated time: ~{estimatedTime} minutes
+      {/* Only show detailed message for video downloads */}
+      {isVideoDownload && (
+        <div style={{ fontSize: '13px', opacity: 0.9, lineHeight: 1.5 }}>
+          {estimatedTime && (
+            <div style={{ marginBottom: '6px' }}>
+              ⏱️ Estimated time: ~{estimatedTime} minutes
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>💡</span>
+            <span>This could take a while - up to 10min for hours-long videos. Feel free to visit other sites while you wait, but keep this tab open. Your download will be available under the video.</span>
           </div>
-        )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span>💡</span>
-          <span>This could take a while. Feel free to visit other sites while you wait, but keep this tab open.</span>
         </div>
-      </div>
+      )}
       
       {/* CSS for spin animation */}
       <style>{`
@@ -2663,7 +2756,7 @@ function LoadingCard({ title, message, percent, bytesLoaded, bytesTotal, startTi
       {bytesLoaded && bytesTotal && (
         <div className="loading-body" style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
           {formatBytes(bytesLoaded)} / {formatBytes(bytesTotal)}
-          {timeEstimate && <span style={{ marginLeft: '8px' }}>âÂ {timeEstimate}</span>}
+          {timeEstimate && <span style={{ marginLeft: '8px' }}>âÃ‚ {timeEstimate}</span>}
         </div>
       )}
       {(percent !== undefined && percent !== null) && (
@@ -3238,6 +3331,711 @@ function KnowledgeBase({ currentVideoId, onSelectMeeting }) {
   );
 }
 
+// ============================================================================
+// v6.1 NEW COMPONENTS: Scorecard, Timeline, Share Moment, Reel Presets
+// ============================================================================
+
+// Reel Style Presets - Quick selection of video style configurations
+const REEL_PRESETS = {
+  news_brief: {
+    name: "📰 News Brief",
+    description: "Clean, professional, just the facts",
+    settings: { disableAllAdvanced: true, clipPadding: 3, transitions: false, colorFilter: 'none', normalizeAudio: false, backgroundMusic: false }
+  },
+  social_media: {
+    name: "🎬 Social Media",
+    description: "Dynamic, with transitions and music",
+    settings: { disableAllAdvanced: false, clipPadding: 4, transitions: true, colorFilter: 'warm', normalizeAudio: false, backgroundMusic: true }
+  },
+  highlights_only: {
+    name: "🔥 Quick Highlights",
+    description: "Exciting moments with upbeat music",
+    settings: { disableAllAdvanced: false, clipPadding: 2, transitions: true, colorFilter: 'high_contrast', normalizeAudio: false, backgroundMusic: true }
+  },
+  professional: {
+    name: "💼 Professional",
+    description: "Polished for presentations",
+    settings: { disableAllAdvanced: false, clipPadding: 4, transitions: true, colorFilter: 'cinematic', normalizeAudio: false, logoWatermark: true, backgroundMusic: true }
+  }
+};
+
+function ReelStylePresets({ videoOptions, setVideoOptions }) {
+  const [selectedPreset, setSelectedPreset] = useState(null);
+
+  const applyPreset = (presetKey) => {
+    const preset = REEL_PRESETS[presetKey];
+    if (preset) {
+      setVideoOptions(prev => ({ ...prev, ...preset.settings }));
+      setSelectedPreset(presetKey);
+    }
+  };
+
+  return (
+    <div style={{ marginBottom: '16px' }}>
+      <div style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b', marginBottom: '8px' }}>
+        🎬 Quick Presets
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+        {Object.entries(REEL_PRESETS).map(([key, preset]) => (
+          <button
+            key={key}
+            onClick={() => applyPreset(key)}
+            style={{
+              padding: '8px 12px',
+              borderRadius: '8px',
+              border: selectedPreset === key ? '2px solid #1E7F63' : '1px solid #e2e8f0',
+              background: selectedPreset === key ? '#f0fdf4' : 'white',
+              cursor: 'pointer',
+              fontSize: '12px',
+              textAlign: 'left',
+              minWidth: '140px'
+            }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: '2px' }}>{preset.name}</div>
+            <div style={{ color: '#64748b', fontSize: '11px' }}>{preset.description}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Meeting Scorecard - Visual summary with key metrics
+function MeetingScorecard({ transcript, highlights, entities, isLoading }) {
+  const [scorecard, setScorecard] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (transcript && transcript.length > 100) {
+      generateScorecard();
+    }
+  }, [transcript]);
+
+  const generateScorecard = async () => {
+    setLoading(true);
+    try {
+      const result = await apiMeetingScorecard({ 
+        transcript, 
+        highlights: highlights || [], 
+        entities: entities || [] 
+      });
+      setScorecard(result.scorecard);
+    } catch (err) {
+      console.error('Scorecard error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading || isLoading) {
+    return (
+      <div className="viz-card" style={{ textAlign: 'center', padding: '40px' }}>
+        <div className="spinner" style={{ margin: '0 auto 16px' }} />
+        <div style={{ color: '#64748b' }}>Generating meeting scorecard...</div>
+      </div>
+    );
+  }
+
+  if (!scorecard) return null;
+
+  return (
+    <div className="viz-card meeting-scorecard">
+      <h3>📊 Meeting Scorecard</h3>
+      <p className="viz-desc">Key metrics and engagement indicators for this meeting.</p>
+      
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '16px', marginTop: '16px' }}>
+        <div className="scorecard-metric">
+          <div style={{ fontSize: '28px', fontWeight: 700, color: '#1E7F63' }}>{scorecard.decisions_made}</div>
+          <div style={{ fontSize: '12px', color: '#64748b' }}>🗳️ Votes/Decisions</div>
+        </div>
+        <div className="scorecard-metric">
+          <div style={{ fontSize: '28px', fontWeight: 700, color: '#2563eb' }}>{scorecard.public_comments}</div>
+          <div style={{ fontSize: '12px', color: '#64748b' }}>💬 Public Comments</div>
+        </div>
+        <div className="scorecard-metric">
+          <div style={{ fontSize: '28px', fontWeight: 700, color: '#16a34a' }}>{scorecard.budget_items}</div>
+          <div style={{ fontSize: '12px', color: '#64748b' }}>💰 Budget Items</div>
+        </div>
+        <div className="scorecard-metric">
+          <div style={{ fontSize: '28px', fontWeight: 700, color: '#9333ea' }}>{scorecard.speakers}</div>
+          <div style={{ fontSize: '12px', color: '#64748b' }}>🎤 Speakers</div>
+        </div>
+        <div className="scorecard-metric">
+          <div style={{ fontSize: '28px', fontWeight: 700, color: '#64748b' }}>{scorecard.duration}</div>
+          <div style={{ fontSize: '12px', color: '#64748b' }}>⏱️ Duration</div>
+        </div>
+        <div className="scorecard-metric">
+          <div style={{ 
+            fontSize: '28px', fontWeight: 700, 
+            color: scorecard.engagement_score > 70 ? '#16a34a' : scorecard.engagement_score > 40 ? '#eab308' : '#ef4444'
+          }}>
+            {scorecard.engagement_score}%
+          </div>
+          <div style={{ fontSize: '12px', color: '#64748b' }}>ˆ Engagement</div>
+        </div>
+      </div>
+
+      {scorecard.hot_topics && scorecard.hot_topics.length > 0 && (
+        <div style={{ marginTop: '20px' }}>
+          <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>🔥 Hot Topics</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            {scorecard.hot_topics.map((topic, idx) => (
+              <span key={idx} style={{
+                background: '#fef3c7',
+                color: '#92400e',
+                padding: '4px 10px',
+                borderRadius: '16px',
+                fontSize: '12px',
+                fontWeight: 500
+              }}>
+                {topic}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Interactive Timeline with colored markers
+function InteractiveTimeline({ sents, highlights, playerRef, videoId, addToBasket, pad }) {
+  const [hoveredPoint, setHoveredPoint] = useState(null);
+  const timelineRef = useRef(null);
+
+  if (!sents || sents.length === 0) return null;
+
+  const totalDuration = sents[sents.length - 1]?.end || 100;
+
+  // Categorize timeline points
+  const timelinePoints = [];
+  
+  // Add highlight points
+  highlights?.forEach((h, idx) => {
+    if (h.start !== undefined) {
+      timelinePoints.push({
+        time: h.start,
+        type: h.category || 'highlight',
+        label: h.highlight || h.text || `Highlight ${idx + 1}`,
+        color: h.category === 'vote' ? '#ef4444' : 
+               h.category === 'budget' ? '#16a34a' : 
+               h.category === 'public_comment' ? '#2563eb' : '#f59e0b'
+      });
+    }
+  });
+
+  // Detect decision points from text
+  const decisionKeywords = ['approved', 'rejected', 'vote', 'passed', 'motion', 'unanimous'];
+  sents.forEach((sent, idx) => {
+    const lowerText = sent.text.toLowerCase();
+    if (decisionKeywords.some(kw => lowerText.includes(kw))) {
+      // Avoid duplicates near existing points
+      const nearbyPoint = timelinePoints.find(p => Math.abs(p.time - sent.start) < 30);
+      if (!nearbyPoint) {
+        timelinePoints.push({
+          time: sent.start,
+          type: 'decision',
+          label: sent.text.substring(0, 80) + (sent.text.length > 80 ? '...' : ''),
+          color: '#ef4444'
+        });
+      }
+    }
+  });
+
+  // Detect public comments
+  const publicKeywords = ['public comment', 'my name is', 'i live at', 'i\'m a resident'];
+  sents.forEach((sent, idx) => {
+    const lowerText = sent.text.toLowerCase();
+    if (publicKeywords.some(kw => lowerText.includes(kw))) {
+      const nearbyPoint = timelinePoints.find(p => Math.abs(p.time - sent.start) < 60);
+      if (!nearbyPoint) {
+        timelinePoints.push({
+          time: sent.start,
+          type: 'public_comment',
+          label: sent.text.substring(0, 80) + (sent.text.length > 80 ? '...' : ''),
+          color: '#2563eb'
+        });
+      }
+    }
+  });
+
+  const seekTo = (time) => {
+    if (playerRef?.current?.seekTo) {
+      playerRef.current.seekTo(Math.max(0, time - 2));
+    }
+  };
+
+  const formatTime = (seconds) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` 
+                 : `${m}:${String(s).padStart(2, '0')}`;
+  };
+
+  return (
+    <div className="viz-card interactive-timeline">
+      <h3>🎯 Interactive Timeline</h3>
+      <p className="viz-desc">Click any marker to jump to that moment. Colors indicate type of content.</p>
+      
+      <div style={{ display: 'flex', gap: '16px', marginBottom: '12px', flexWrap: 'wrap' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
+          <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#ef4444' }} />
+          Votes/Decisions
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
+          <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#2563eb' }} />
+          Public Comments
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
+          <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#16a34a' }} />
+          Budget
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
+          <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#f59e0b' }} />
+          Highlights
+        </span>
+      </div>
+
+      <div 
+        ref={timelineRef}
+        style={{ 
+          position: 'relative', 
+          height: '60px', 
+          background: 'linear-gradient(to right, #e2e8f0, #f1f5f9)',
+          borderRadius: '8px',
+          marginBottom: '8px'
+        }}
+      >
+        {/* Timeline track */}
+        <div style={{ 
+          position: 'absolute', 
+          top: '50%', 
+          left: '8px', 
+          right: '8px', 
+          height: '4px', 
+          background: '#cbd5e1',
+          borderRadius: '2px',
+          transform: 'translateY(-50%)'
+        }} />
+
+        {/* Timeline points */}
+        {timelinePoints.map((point, idx) => {
+          const position = (point.time / totalDuration) * 100;
+          return (
+            <div
+              key={idx}
+              onClick={() => seekTo(point.time)}
+              onMouseEnter={() => setHoveredPoint(idx)}
+              onMouseLeave={() => setHoveredPoint(null)}
+              style={{
+                position: 'absolute',
+                left: `calc(${position}% + 8px - 8px)`,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                width: '16px',
+                height: '16px',
+                borderRadius: '50%',
+                background: point.color,
+                cursor: 'pointer',
+                zIndex: hoveredPoint === idx ? 10 : 1,
+                boxShadow: hoveredPoint === idx ? '0 0 0 4px rgba(0,0,0,0.1)' : 'none',
+                transition: 'transform 0.2s, box-shadow 0.2s'
+              }}
+              title={`${formatTime(point.time)} - ${point.label}`}
+            />
+          );
+        })}
+
+        {/* Hover tooltip */}
+        {hoveredPoint !== null && timelinePoints[hoveredPoint] && (
+          <div style={{
+            position: 'absolute',
+            left: `calc(${(timelinePoints[hoveredPoint].time / totalDuration) * 100}%)`,
+            bottom: '100%',
+            transform: 'translateX(-50%)',
+            background: '#1e293b',
+            color: 'white',
+            padding: '8px 12px',
+            borderRadius: '6px',
+            fontSize: '12px',
+            maxWidth: '250px',
+            zIndex: 20,
+            whiteSpace: 'normal'
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: '4px' }}>
+              {formatTime(timelinePoints[hoveredPoint].time)}
+            </div>
+            <div>{timelinePoints[hoveredPoint].label}</div>
+          </div>
+        )}
+      </div>
+
+      {/* Time labels */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748b', padding: '0 8px' }}>
+        <span>0:00</span>
+        <span>{formatTime(totalDuration / 4)}</span>
+        <span>{formatTime(totalDuration / 2)}</span>
+        <span>{formatTime(totalDuration * 3 / 4)}</span>
+        <span>{formatTime(totalDuration)}</span>
+      </div>
+    </div>
+  );
+}
+
+// Share a Moment - Create shareable clips
+function ShareMoment({ videoId, sents, playerRef }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [startTime, setStartTime] = useState(0);
+  const [endTime, setEndTime] = useState(30);
+  const [title, setTitle] = useState('');
+  const [shareResult, setShareResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleShare = async () => {
+    setLoading(true);
+    try {
+      const result = await apiShareMoment({
+        videoId,
+        startTime,
+        endTime,
+        title: title || 'Meeting Moment',
+        description: ''
+      });
+      setShareResult(result);
+    } catch (err) {
+      console.error('Share error:', err);
+      alert('Failed to create share link');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const captureCurrentTime = () => {
+    if (playerRef?.current?.getCurrentTime) {
+      const current = playerRef.current.getCurrentTime();
+      setStartTime(Math.floor(current));
+      setEndTime(Math.floor(current) + 30);
+    }
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    alert('Copied to clipboard!');
+  };
+
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  };
+
+  if (!isOpen) {
+    return (
+      <button 
+        onClick={() => setIsOpen(true)}
+        className="btn btn-ghost"
+        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+      >
+        🔗 Share a Moment
+      </button>
+    );
+  }
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(0,0,0,0.5)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 9999
+    }}
+    onClick={() => setIsOpen(false)}
+    >
+      <div 
+        style={{
+          background: 'white',
+          borderRadius: '12px',
+          padding: '24px',
+          maxWidth: '500px',
+          width: '90%'
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 style={{ margin: '0 0 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          🔗 Share a Moment
+        </h3>
+
+        {!shareResult ? (
+          <>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', marginBottom: '4px', color: '#64748b' }}>Title</label>
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g., Budget Vote Announcement"
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: '13px', marginBottom: '4px', color: '#64748b' }}>Start Time</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="number"
+                    value={startTime}
+                    onChange={(e) => setStartTime(parseInt(e.target.value) || 0)}
+                    style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}
+                  />
+                  <span style={{ display: 'flex', alignItems: 'center', color: '#64748b', fontSize: '12px' }}>
+                    ({formatTime(startTime)})
+                  </span>
+                </div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: '13px', marginBottom: '4px', color: '#64748b' }}>End Time</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="number"
+                    value={endTime}
+                    onChange={(e) => setEndTime(parseInt(e.target.value) || 0)}
+                    style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}
+                  />
+                  <span style={{ display: 'flex', alignItems: 'center', color: '#64748b', fontSize: '12px' }}>
+                    ({formatTime(endTime)})
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={captureCurrentTime}
+              className="btn btn-ghost"
+              style={{ marginBottom: '16px', width: '100%' }}
+            >
+              ⏱️ Use Current Video Time
+            </button>
+
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button onClick={() => setIsOpen(false)} className="btn btn-ghost" style={{ flex: 1 }}>
+                Cancel
+              </button>
+              <button onClick={handleShare} className="btn btn-primary" style={{ flex: 1 }} disabled={loading}>
+                {loading ? 'Creating...' : 'Create Share Link'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '8px', marginBottom: '16px' }}>
+              <div style={{ color: '#16a34a', fontWeight: 600, marginBottom: '8px' }}>✔ Share link created!</div>
+              <div style={{ fontSize: '12px', color: '#64748b' }}>
+                Duration: {shareResult.duration} seconds
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', marginBottom: '4px', color: '#64748b' }}>YouTube Link (with timestamp)</label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  value={shareResult.youtube_url}
+                  readOnly
+                  style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px' }}
+                />
+                <button 
+                  onClick={() => copyToClipboard(shareResult.youtube_url)}
+                  className="btn btn-ghost"
+                >
+                  📋
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', marginBottom: '4px', color: '#64748b' }}>Embed Code</label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  value={shareResult.embed_code}
+                  readOnly
+                  style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '11px' }}
+                />
+                <button 
+                  onClick={() => copyToClipboard(shareResult.embed_code)}
+                  className="btn btn-ghost"
+                >
+                  📋
+                </button>
+              </div>
+            </div>
+
+            <button onClick={() => { setShareResult(null); setIsOpen(false); }} className="btn btn-primary" style={{ width: '100%' }}>
+              Done
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Accessibility Panel - Simplify text and translate
+function AccessibilityPanel({ summary, onSimplified, onTranslated }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [readingLevel, setReadingLevel] = useState('simple');
+  const [targetLanguage, setTargetLanguage] = useState('Spanish');
+  const [loading, setLoading] = useState(false);
+  const [simplifiedText, setSimplifiedText] = useState('');
+  const [translatedText, setTranslatedText] = useState('');
+
+  const handleSimplify = async () => {
+    if (!summary) return;
+    setLoading(true);
+    try {
+      const result = await apiSimplifyText({ text: summary, level: readingLevel });
+      setSimplifiedText(result.simplified);
+      if (onSimplified) onSimplified(result.simplified);
+    } catch (err) {
+      console.error('Simplify error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTranslate = async () => {
+    const textToTranslate = simplifiedText || summary;
+    if (!textToTranslate) return;
+    setLoading(true);
+    try {
+      const result = await apiTranslateSummary({ text: textToTranslate, language: targetLanguage });
+      setTranslatedText(result.translated);
+      if (onTranslated) onTranslated(result.translated);
+    } catch (err) {
+      console.error('Translate error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const languages = ['Spanish', 'Chinese', 'Vietnamese', 'Portuguese', 'French', 'Korean', 'Arabic', 'Russian', 'Japanese', 'Hindi'];
+
+  if (!summary) return null;
+
+  return (
+    <div style={{ marginTop: '16px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          fontSize: '14px',
+          fontWeight: 600,
+          color: '#1E7F63',
+          padding: 0
+        }}
+      >
+        ♿ Accessibility Options
+        <span style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }}>▼</span>
+      </button>
+
+      {isOpen && (
+        <div style={{ marginTop: '12px', padding: '16px', background: '#f8fafc', borderRadius: '8px' }}>
+          {/* Reading Level */}
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '13px', marginBottom: '8px', color: '#475569', fontWeight: 500 }}>
+              📖 Reading Level
+            </label>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {[
+                { value: 'simple', label: 'Simple (8th grade)' },
+                { value: 'moderate', label: 'Moderate (10th grade)' },
+                { value: 'detailed', label: 'Detailed (Original clarity)' }
+              ].map(level => (
+                <button
+                  key={level.value}
+                  onClick={() => setReadingLevel(level.value)}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: readingLevel === level.value ? '2px solid #1E7F63' : '1px solid #e2e8f0',
+                    background: readingLevel === level.value ? '#f0fdf4' : 'white',
+                    cursor: 'pointer',
+                    fontSize: '12px'
+                  }}
+                >
+                  {level.label}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={handleSimplify}
+              disabled={loading}
+              className="btn btn-ghost"
+              style={{ marginTop: '8px', fontSize: '12px' }}
+            >
+              {loading ? 'Processing...' : 'Simplify Summary'}
+            </button>
+          </div>
+
+          {/* Translation */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', marginBottom: '8px', color: '#475569', fontWeight: 500 }}>
+              🌐 Translate Summary
+            </label>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+              {languages.map(lang => (
+                <button
+                  key={lang}
+                  onClick={() => setTargetLanguage(lang)}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: '6px',
+                    border: targetLanguage === lang ? '2px solid #1E7F63' : '1px solid #e2e8f0',
+                    background: targetLanguage === lang ? '#f0fdf4' : 'white',
+                    cursor: 'pointer',
+                    fontSize: '11px'
+                  }}
+                >
+                  {lang}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={handleTranslate}
+              disabled={loading}
+              className="btn btn-ghost"
+              style={{ fontSize: '12px' }}
+            >
+              {loading ? 'Translating...' : `Translate to ${targetLanguage}`}
+            </button>
+          </div>
+
+          {/* Results */}
+          {(simplifiedText || translatedText) && (
+            <div style={{ marginTop: '16px', padding: '12px', background: 'white', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: '#475569' }}>
+                {translatedText ? `„ ${targetLanguage} Translation` : '„ Simplified Version'}
+              </div>
+              <div style={{ fontSize: '13px', lineHeight: 1.6, color: '#1e293b' }}>
+                {translatedText || simplifiedText}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   // v5.6: Cloud mode detection
   const { isCloudMode } = useCloudMode();
@@ -3266,6 +4064,26 @@ export default function App() {
   const [summary, setSummary] = useState({ para: "", bullets: [] });
   const [highlightsWithQuotes, setHighlightsWithQuotes] = useState([]);
   const [reelCaptionsEnabled, setReelCaptionsEnabled] = useState(true);
+  
+  // 🎬 Video editing options
+  const [videoOptions, setVideoOptions] = useState({
+    disableAllAdvanced: true,  // NEW: Master toggle to disable all processing
+    transitions: false,
+    transitionDuration: 0.5,
+    colorFilter: 'none',
+    normalizeAudio: false,
+    backgroundMusic: false,
+    clipPadding: 4,
+    logoWatermark: false,
+    introTitle: '',
+    introSubtitle: '',
+    outroTitle: '',
+    outroCta: '',
+    generateThumbnail: false,
+    addChapters: false
+  });
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+  
   const [words, setWords] = useState([]);
   const [entities, setEntities] = useState([]);
   const [loadingEntities, setLoadingEntities] = useState(false);
@@ -3278,7 +4096,7 @@ export default function App() {
     startTime: null
   });
 
-  // š€ NEW: Optimization stats state
+  // 🧠 NEW: Optimization stats state
   const [optimizationStats, setOptimizationStats] = useState(null);
   const [showOptimizationPanel, setShowOptimizationPanel] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
@@ -3293,7 +4111,7 @@ export default function App() {
   const [clipBasket, setClipBasket] = useState([]);
   const [lang, setLang] = useState("en");
   const [aiModel, setAiModel] = useState("gpt-4o");
-  const [processStatus, setProcessStatus] = useState({ active: false, message: "", percent: 0, estimatedTime: null });
+  const [processStatus, setProcessStatus] = useState({ active: false, message: "", percent: 0, estimatedTime: null, isVideoDownload: false });
   const [translation, setTranslation] = useState({ text: "", lang: "", show: false });
   const [translateLang, setTranslateLang] = useState("Spanish");
   const [showExportModal, setShowExportModal] = useState(false);
@@ -3332,7 +4150,7 @@ export default function App() {
 
     return "";
   };
-  // š€ NEW: Load optimization stats on mount
+  // 🧠 NEW: Load optimization stats on mount
   useEffect(() => {
     const loadStats = async () => {
       try {
@@ -3372,7 +4190,7 @@ export default function App() {
     setVideoTitle("");
     setLoadingEntities(true);
 
-    setProcessStatus({ active: true, message: "Loading transcript...", percent: 10 });
+    setProcessStatus({ active: true, message: "Loading transcript...", percent: 10, isVideoDownload: false });
 
     let vttText = "";
     try {
@@ -3380,7 +4198,7 @@ export default function App() {
       vttText = await apiTranscript(vid);
 
 
-      setProcessStatus({ active: true, message: "Processing transcript...", percent: 30 });
+      setProcessStatus({ active: true, message: "Processing transcript...", percent: 30, isVideoDownload: false });
     } catch (e) {
       setLoading(l => ({ ...l, transcript: false }));
       setProcessStatus({ active: false, message: "", percent: 0 });
@@ -3401,7 +4219,7 @@ export default function App() {
     const all = ss.map(s => s.text).join(" ");
     setFullText(all);
     setLoading(l => ({ ...l, transcript: false }));
-    setProcessStatus({ active: true, message: "Generating word cloud...", percent: 50 });
+    setProcessStatus({ active: true, message: "Generating word cloud...", percent: 50, isVideoDownload: false });
 
     try {
       const meta = await apiMetadata(vid);
@@ -3426,7 +4244,7 @@ export default function App() {
       console.error("Word frequency error:", e);
     }
 
-    setProcessStatus({ active: true, message: "Generating AI summary...", percent: 70 });
+    setProcessStatus({ active: true, message: "Generating AI summary...", percent: 70, isVideoDownload: false });
     try {
       const cleanTranscript = all.trim();
 
@@ -3439,7 +4257,7 @@ export default function App() {
           language: lang === "es" ? "es" : "en",
           model: aiModel,
           strategy: "concise",
-          video_id: vid  // š€ NEW: For caching
+          video_id: vid  // 🧠 NEW: For caching
         });
 
         let summaryText = "";
@@ -3450,27 +4268,27 @@ export default function App() {
         setSummary({ para: summaryText, bullets: [] });
       }
 
-      setProcessStatus({ active: true, message: "Complete!", percent: 100 });
-      setTimeout(() => setProcessStatus({ active: false, message: "", percent: 0 }), 2000);
+      setProcessStatus({ active: true, message: "Complete!", percent: 100, isVideoDownload: false });
+      setTimeout(() => setProcessStatus({ active: false, message: "", percent: 0, isVideoDownload: false }), 2000);
 
     } catch (e) {
       console.error("Summary API error:", e);
       const sentences = all.split('.').filter(s => s.trim().length > 30);
       const fallbackSummary = sentences.slice(0, 3).join('. ') + '.';
       setSummary({ para: fallbackSummary, bullets: [] });
-      setProcessStatus({ active: false, message: "", percent: 0 });
+      setProcessStatus({ active: false, message: "", percent: 0, isVideoDownload: false });
     }
 
     try {
-      setProcessStatus({ active: true, message: "Extracting entities...", percent: 85 });
+      setProcessStatus({ active: true, message: "Extracting entities...", percent: 85, isVideoDownload: false });
       const analyticsData = await apiExtendedAnalytics({
         transcript: all,
         model: aiModel,
         video_id: vid
       });
       setEntities(analyticsData.topEntities || []);
-      setProcessStatus({ active: true, message: "Complete!", percent: 100 });
-      setTimeout(() => setProcessStatus({ active: false, message: "", percent: 0 }), 2000);
+      setProcessStatus({ active: true, message: "Complete!", percent: 100, isVideoDownload: false });
+      setTimeout(() => setProcessStatus({ active: false, message: "", percent: 0, isVideoDownload: false }), 2000);
     } catch (e) {
       console.error("Analytics API error:", e);
       setEntities([]);
@@ -3547,7 +4365,7 @@ export default function App() {
     if (!fullText) return;
 
     setLoading(l => ({ ...l, summary: true }));
-    setProcessStatus({ active: true, message: "Generating AI summary...", percent: 70 });
+    setProcessStatus({ active: true, message: "Generating AI summary...", percent: 70, isVideoDownload: false });
 
     try {
       const cleanTranscript = fullText.trim();
@@ -3561,7 +4379,7 @@ export default function App() {
         language: lang === "es" ? "es" : "en",
         model: aiModel,
         strategy: "detailed",
-        video_id: videoId  // š€ NEW: For caching
+        video_id: videoId  // 🧠 NEW: For caching
       });
 
       let summaryText = "";
@@ -3571,8 +4389,8 @@ export default function App() {
       }
 
       setSummary({ para: summaryText, bullets: [] });
-      setProcessStatus({ active: true, message: "Complete!", percent: 100 });
-      setTimeout(() => setProcessStatus({ active: false, message: "", percent: 0 }), 2000);
+      setProcessStatus({ active: true, message: "Complete!", percent: 100, isVideoDownload: false });
+      setTimeout(() => setProcessStatus({ active: false, message: "", percent: 0, isVideoDownload: false }), 2000);
 
     } catch (e) {
       console.error("Summary error:", e);
@@ -3625,18 +4443,42 @@ export default function App() {
     pollIntervalRef.current = setInterval(async () => {
       try {
         const status = await apiJobStatus(jid);
+        
+        // Check if job is complete
+        const isComplete = status.status === "done" || status.status === "error";
+        
         setJob({
           id: jid,
-          percent: status.percent || 0,
+          percent: isComplete ? 100 : (status.percent || 0),
           message: status.message || "",
           status: status.status || "running",
           zip: status.zip || status.file || null
         });
+        
+        // Also update the process status bar - but only if not in final cleanup phase
+        if (!isComplete) {
+          setProcessStatus(prev => ({
+            ...prev,
+            percent: status.percent || prev.percent,
+            message: status.message || prev.message
+          }));
+        } else {
+          // Job is complete - show 100% immediately, then clear
+          setProcessStatus(prev => ({
+            ...prev,
+            percent: 100,
+            message: status.status === "done" ? "Complete! ✔" : "Error occurred"
+          }));
+        }
 
-        if (status.status === "done" || status.status === "error") {
+        if (isComplete) {
           clearInterval(pollIntervalRef.current);
           pollIntervalRef.current = null;
           setLoading(l => ({ ...l, clips: false, reel: false }));
+          // Clear the progress bar after a delay
+          setTimeout(() => {
+            setProcessStatus({ active: false, message: "", percent: 0, estimatedTime: null, isVideoDownload: false });
+          }, status.status === "done" ? 2500 : 3500);
         }
       } catch (e) {
         console.error("Poll error:", e);
@@ -3671,7 +4513,9 @@ export default function App() {
         format === 'social' ? "Creating social media reel..." :
           format === 'titled' ? "Creating professional version..." :
             "Creating highlight reel...",
-      percent: 0
+      percent: 0,
+      isVideoDownload: true,
+      estimatedTime: 5
     });
 
     try {
@@ -3728,7 +4572,7 @@ export default function App() {
           generatedHighlights = JSON.parse(text);
         } catch (e) {
           console.error("Failed to parse highlights JSON:", e);
-          const bullets = text.split(/\d+\.|Â|-/).filter(s => s.trim().length > 10);
+          const bullets = text.split(/\d+\.|Ã‚|-/).filter(s => s.trim().length > 10);
           for (let i = 0; i < Math.min(10, bullets.length); i++) {
             generatedHighlights.push({
               highlight: bullets[i].trim().split('\n')[0],
@@ -3752,9 +4596,11 @@ export default function App() {
           quotes: generatedHighlights.map(h => h.quote), // Pass ALL quotes - backend will select spread
           highlights: generatedHighlights.map(h => h.highlight), // Pass ALL highlights
           transcript: sents,
-          pad,
+          pad: videoOptions.clipPadding,  // Use advanced options padding
           format: format,
-          captions: reelCaptionsEnabled
+          captions: reelCaptionsEnabled,
+          // Video editing options
+          ...videoOptions
         });
         pollJobStatus(reelRes.jobId);
 
@@ -3767,27 +4613,45 @@ export default function App() {
     }
 
     // Highlights already exist - build reel directly
-    // Estimate processing time based on number of clips (roughly 30-60 seconds per clip)
-    const estimatedMinutes = Math.ceil((5 * 45) / 60); // 5 clips * ~45 seconds each
+    // Estimate processing time:
+    // - For short videos (<30 min): Download whole video (~2-5 min) + process clips (~2-3 min) = ~4-8 min
+    // - For long videos (>30 min): Download only segments (~1-2 min per clip * 5) = ~5-10 min
+    // Estimate video duration from transcript length (rough: ~150 words per minute of speech)
+    const wordCount = fullText ? fullText.split(/\s+/).length : 0;
+    const estimatedVideoDuration = wordCount / 150; // minutes
+    const isLongVideo = estimatedVideoDuration > 30;
+    
+    let estimatedMinutes;
+    if (isLongVideo) {
+      // Segment download strategy: ~1-2 min per clip for 5 clips
+      estimatedMinutes = Math.ceil(5 * 1.5); // ~8 min
+    } else {
+      // Full video download: depends on video length
+      estimatedMinutes = Math.ceil(Math.min(estimatedVideoDuration * 0.3, 10) + 3); // download time + processing
+    }
     
     setProcessStatus({
       active: true,
       message: format === 'social' ? "Building social media reel..." : "Building AI highlight reel...",
       percent: 0,
-      estimatedTime: estimatedMinutes
+      estimatedTime: estimatedMinutes,
+      isVideoDownload: true
     });
     setLoading(l => ({ ...l, reel: true }));
 
     try {
       // Pass ALL quotes/highlights - backend will select a spread-out sample of 5
+      console.log('[Reel] Video options being sent:', videoOptions);
       const res = await apiHighlightReel({
         videoId,
         quotes: quotes, // Pass ALL quotes
         highlights: highlights, // Pass ALL highlights  
         transcript: sents, // Pass transcript for timestamp matching
-        pad,
+        pad: videoOptions.clipPadding,  // Use advanced options padding
         format: format,
-        captions: reelCaptionsEnabled // Pass captions preference
+        captions: reelCaptionsEnabled, // Pass captions preference
+        // Video editing options
+        ...videoOptions
       });
       pollJobStatus(res.jobId);
     } catch (e) {
@@ -3799,7 +4663,7 @@ export default function App() {
   const generateHighlightsWithQuotes = async () => {
     if (!fullText) return;
 
-    setProcessStatus({ active: true, message: "Generating highlights with quotes...", percent: 0 });
+    setProcessStatus({ active: true, message: "Generating highlights with quotes...", percent: 0, isVideoDownload: false });
     setLoading(l => ({ ...l, summary: true }));
 
     try {
@@ -3816,7 +4680,7 @@ export default function App() {
         highlights = JSON.parse(text);
       } catch (e) {
         console.error("Failed to parse highlights JSON:", e);
-        const bullets = text.split(/\d+\.|Â|-/).filter(s => s.trim().length > 10);
+        const bullets = text.split(/\d+\.|Ã‚|-/).filter(s => s.trim().length > 10);
         for (let i = 0; i < Math.min(10, bullets.length); i++) {
           highlights.push({
             highlight: bullets[i].trim().split('\n')[0],
@@ -3842,7 +4706,7 @@ export default function App() {
     }
 
     setLoading(l => ({ ...l, translate: true }));
-    setProcessStatus({ active: true, message: `Translating to ${translateLang}...`, percent: 0 });
+    setProcessStatus({ active: true, message: `Translating to ${translateLang}...`, percent: 0, isVideoDownload: false });
 
     try {
       const res = await apiTranslate({
@@ -3997,7 +4861,7 @@ export default function App() {
                   borderRadius: '8px'
                 }}
               >
-                âœ•
+                âÅ“•
               </button>
             </div>
 
@@ -4037,7 +4901,7 @@ export default function App() {
                   color: investigateViewMode === 'maps' ? 'white' : '#64748b'
                 }}
               >
-                —ºï¸ Google Maps
+                —ºÃ¯¸ Google Maps
               </button>
               <button
                 onClick={() => setInvestigateViewMode('wikipedia')}
@@ -4052,7 +4916,7 @@ export default function App() {
                   color: investigateViewMode === 'wikipedia' ? 'white' : '#64748b'
                 }}
               >
-                “š Wikipedia
+                “Å¡ Wikipedia
               </button>
             </div>
 
@@ -4106,7 +4970,7 @@ export default function App() {
                 className="btn btn-primary"
                 style={{ textDecoration: 'none' }}
               >
-                Open in New Tab â†—
+                Open in New Tab â—
               </a>
               <button 
                 className="btn btn-ghost" 
@@ -4171,6 +5035,7 @@ export default function App() {
             percent={processStatus.percent}
             message={processStatus.message}
             estimatedTime={processStatus.estimatedTime}
+            isVideoDownload={processStatus.isVideoDownload}
           />
         )}
 
@@ -4332,6 +5197,25 @@ export default function App() {
                     <div key={i} className="highlight-item" style={{ marginBottom: 16 }}>
                       <div style={{ fontWeight: 600, marginBottom: 4 }}>
                         {i + 1}. {item.highlight}
+                        {item.category && (
+                          <span style={{
+                            marginLeft: '8px',
+                            fontSize: '11px',
+                            padding: '2px 8px',
+                            borderRadius: '12px',
+                            background: item.category === 'vote' ? '#fee2e2' : 
+                                       item.category === 'budget' ? '#dcfce7' :
+                                       item.category === 'public_comment' ? '#dbeafe' : '#fef3c7',
+                            color: item.category === 'vote' ? '#991b1b' : 
+                                   item.category === 'budget' ? '#166534' :
+                                   item.category === 'public_comment' ? '#1e40af' : '#92400e'
+                          }}>
+                            {item.category === 'vote' ? '🗳️ Vote' :
+                             item.category === 'budget' ? '💰 Budget' :
+                             item.category === 'public_comment' ? '💬 Public' :
+                             item.category === 'announcement' ? '¢ Announcement' : ''}
+                          </span>
+                        )}
                       </div>
                       {item.quote && (
                         <div style={{
@@ -4345,6 +5229,11 @@ export default function App() {
                           paddingBottom: 4
                         }}>
                           "{item.quote}"
+                          {item.speaker && (
+                            <span style={{ display: 'block', marginTop: '4px', fontStyle: 'normal', color: '#94a3b8', fontSize: '12px' }}>
+                              — {item.speaker}
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
@@ -4352,6 +5241,13 @@ export default function App() {
                 </div>
               </div>
             )}
+
+            {/* v6.1: Accessibility Panel for simplifying and translating */}
+            <AccessibilityPanel 
+              summary={summary.para}
+              onSimplified={(text) => console.log('Simplified:', text)}
+              onTranslated={(text) => console.log('Translated:', text)}
+            />
           </section>
         )}
 
@@ -4583,6 +5479,9 @@ export default function App() {
                     </div>
                   </div>
                 )}
+
+                {/* Jargon Translator - directly under Word Cloud */}
+                <JargonTranslatorPanel />
               </>
             )}
 
@@ -4754,6 +5653,173 @@ export default function App() {
                   </button>
                 </div>
 
+                {/* v6.1: Reel Style Presets */}
+                <ReelStylePresets 
+                  videoOptions={videoOptions}
+                  setVideoOptions={setVideoOptions}
+                />
+
+                {/* v6.1: Share a Moment button */}
+                {videoId && (
+                  <ShareMoment 
+                    videoId={videoId}
+                    sents={sents}
+                    playerRef={playerRef}
+                  />
+                )}
+
+                {/* 🎬 Advanced Video Options */}
+                <div style={{
+                  background: '#f1f5f9',
+                  borderRadius: '8px',
+                  marginBottom: '12px',
+                  border: '1px solid #e2e8f0',
+                  overflow: 'hidden'
+                }}>
+                  <button
+                    onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
+                    style={{
+                      width: '100%',
+                      padding: '12px 16px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: '#475569'
+                    }}
+                  >
+                    <span>🎬 Advanced Video Options</span>
+                    <span style={{ transform: showAdvancedOptions ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }}>▼</span>
+                  </button>
+                  
+                  {showAdvancedOptions && (
+                    <div style={{ padding: '0 16px 16px 16px' }}>
+                      {/* MASTER TOGGLE - Disable All Processing */}
+                      <div style={{ 
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', 
+                        marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #e2e8f0'
+                      }}>
+                        <div>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b' }}>Skip All Processing</span>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>Fastest export, no effects</div>
+                        </div>
+                        <button
+                          onClick={() => setVideoOptions(v => ({ ...v, disableAllAdvanced: !v.disableAllAdvanced }))}
+                          style={{
+                            width: '40px', height: '22px', borderRadius: '11px', border: 'none', cursor: 'pointer',
+                            background: videoOptions.disableAllAdvanced ? '#1E7F63' : '#cbd5e1', position: 'relative'
+                          }}
+                        >
+                          <div style={{
+                            width: '18px', height: '18px', borderRadius: '50%', background: 'white',
+                            position: 'absolute', top: '2px', left: videoOptions.disableAllAdvanced ? '20px' : '2px',
+                            transition: 'left 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                          }} />
+                        </button>
+                      </div>
+
+                      {/* Only show other options when processing is enabled */}
+                      <div style={{ opacity: videoOptions.disableAllAdvanced ? 0.4 : 1, pointerEvents: videoOptions.disableAllAdvanced ? 'none' : 'auto' }}>
+                        {/* Clip Padding */}
+                        <div style={{ marginBottom: '12px' }}>
+                          <label style={{ fontSize: '13px', color: '#64748b', display: 'block', marginBottom: '4px' }}>Clip Padding (seconds before/after)</label>
+                          <select
+                            value={videoOptions.clipPadding}
+                            onChange={(e) => setVideoOptions(v => ({ ...v, clipPadding: parseInt(e.target.value) }))}
+                            style={{
+                              width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0',
+                              fontSize: '13px', background: 'white'
+                            }}
+                          >
+                            <option value="2">2 seconds (tight)</option>
+                            <option value="3">3 seconds</option>
+                            <option value="4">4 seconds (recommended)</option>
+                            <option value="5">5 seconds</option>
+                            <option value="6">6 seconds (relaxed)</option>
+                          </select>
+                        </div>
+
+                        {/* Transitions */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                          <span style={{ fontSize: '13px', color: '#64748b' }}>Fade Transitions</span>
+                          <button
+                            onClick={() => setVideoOptions(v => ({ ...v, transitions: !v.transitions }))}
+                            style={{
+                              width: '40px', height: '22px', borderRadius: '11px', border: 'none', cursor: 'pointer',
+                              background: videoOptions.transitions ? '#1E7F63' : '#cbd5e1', position: 'relative'
+                            }}
+                          >
+                            <div style={{
+                              width: '18px', height: '18px', borderRadius: '50%', background: 'white',
+                              position: 'absolute', top: '2px', left: videoOptions.transitions ? '20px' : '2px',
+                              transition: 'left 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                            }} />
+                          </button>
+                        </div>
+
+                        {/* Color Filter */}
+                        <div style={{ marginBottom: '12px' }}>
+                          <label style={{ fontSize: '13px', color: '#64748b', display: 'block', marginBottom: '4px' }}>Color Filter</label>
+                          <select
+                            value={videoOptions.colorFilter}
+                            onChange={(e) => setVideoOptions(v => ({ ...v, colorFilter: e.target.value }))}
+                            style={{
+                              width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0',
+                              fontSize: '13px', background: 'white'
+                            }}
+                          >
+                            <option value="none">None</option>
+                            <option value="warm">Warm</option>
+                            <option value="cool">Cool</option>
+                            <option value="high_contrast">High Contrast</option>
+                            <option value="cinematic">Cinematic</option>
+                          </select>
+                        </div>
+
+                        {/* Audio Normalize */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                          <span style={{ fontSize: '13px', color: '#64748b' }}>Normalize Audio</span>
+                          <button
+                            onClick={() => setVideoOptions(v => ({ ...v, normalizeAudio: !v.normalizeAudio }))}
+                            style={{
+                              width: '40px', height: '22px', borderRadius: '11px', border: 'none', cursor: 'pointer',
+                              background: videoOptions.normalizeAudio ? '#1E7F63' : '#cbd5e1', position: 'relative'
+                            }}
+                          >
+                            <div style={{
+                              width: '18px', height: '18px', borderRadius: '50%', background: 'white',
+                              position: 'absolute', top: '2px', left: videoOptions.normalizeAudio ? '20px' : '2px',
+                              transition: 'left 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                            }} />
+                          </button>
+                        </div>
+
+                        {/* Logo Watermark */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                          <span style={{ fontSize: '13px', color: '#64748b' }}>🏷️ Logo Watermark</span>
+                          <button
+                            onClick={() => setVideoOptions(v => ({ ...v, logoWatermark: !v.logoWatermark }))}
+                            style={{
+                              width: '40px', height: '22px', borderRadius: '11px', border: 'none', cursor: 'pointer',
+                              background: videoOptions.logoWatermark ? '#1E7F63' : '#cbd5e1', position: 'relative'
+                            }}
+                          >
+                            <div style={{
+                              width: '18px', height: '18px', borderRadius: '50%', background: 'white',
+                              position: 'absolute', top: '2px', left: videoOptions.logoWatermark ? '20px' : '2px',
+                              transition: 'left 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                            }} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <button
                   className="btn-full-width btn-muted-primary"
                   onClick={() => buildReel('combined')}
@@ -4909,18 +5975,34 @@ export default function App() {
               Meeting Analytics
             </h2>
             <div className="data-viz-container">
-              <DecisionTimeline
+              {/* v6.1: Meeting Scorecard - Key Metrics at a Glance */}
+              <MeetingScorecard
+                transcript={fullText}
+                highlights={highlightsWithQuotes}
+                entities={entities}
+                isLoading={loadingEntities}
+              />
+
+              {/* v6.1: Interactive Timeline with colored markers */}
+              <InteractiveTimeline
                 sents={sents}
+                highlights={highlightsWithQuotes}
                 playerRef={playerRef}
                 videoId={videoId}
                 addToBasket={addToBasket}
                 pad={pad}
-                openExpandedAt={openExpandedAt}
               />
 
+              {/* Row: People/Places/Things + Topic Subscriptions */}
               <MentionedEntitiesCard
                 entities={entities}
                 isLoading={loadingEntities}
+              />
+
+              <TopicSubscriptionsPanel
+                transcript={fullText}
+                videoId={videoId}
+                videoTitle={videoTitle}
               />
 
               <TopicHeatMap
@@ -4955,29 +6037,16 @@ export default function App() {
                 videoId={videoId}
               />
 
-              {/* v6.0: NEW FEATURES */}
-              <TopicSubscriptionsPanel
-                transcript={fullText}
-                videoId={videoId}
-                videoTitle={videoTitle}
-              />
-
-              <IssueTimelinePanel
-                transcript={fullText}
-                videoId={videoId}
-                videoTitle={videoTitle}
-                entities={entities}
-              />
-
-              <JargonTranslatorPanel />
-
-              <CrossMeetingAnalysisPanel
-                currentVideoId={videoId}
-                currentTitle={videoTitle}
-                currentTranscript={fullText}
-                currentEntities={entities}
-                currentSummary={summary.para}
-              />
+              {/* Full-width Issue Tracker & Meeting Comparison */}
+              <div style={{ gridColumn: '1 / -1' }}>
+                <CrossMeetingAnalysisPanel
+                  currentVideoId={videoId}
+                  currentTitle={videoTitle}
+                  currentTranscript={fullText}
+                  currentEntities={entities}
+                  currentSummary={summary.para}
+                />
+              </div>
 
 
             </div>
@@ -5060,7 +6129,7 @@ export default function App() {
       </footer>
 
 
-      {/* š€ NEW: Optimization Panel */}
+      {/* 🧠 NEW: Optimization Panel */}
       {showOptimizationPanel && optimizationStats && (
         <OptimizationPanel
           stats={optimizationStats}
@@ -5068,7 +6137,7 @@ export default function App() {
           onClearCache={async () => {
             try {
               await apiClearCache();
-              alert("âœ… Cache cleared!");
+              alert("âÅ“… Cache cleared!");
               const newStats = await apiOptimizationStats();
               setOptimizationStats(newStats);
             } catch (e) {
