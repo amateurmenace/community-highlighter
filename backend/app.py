@@ -1,6 +1,7 @@
 import os, json, uuid, tempfile, shutil, subprocess, threading, re, html, asyncio
 from collections import Counter, defaultdict
 from datetime import datetime
+from urllib.parse import quote, unquote
 import nltk
 from nltk.corpus import stopwords
 from textblob import TextBlob
@@ -360,7 +361,7 @@ def clean_text(text):
 
 
 # FIXED: Balanced chunking strategy - eliminates excessive chunks
-def chunk_transcript_with_overlap(transcript, model="gpt-4o", strategy="balanced"):
+def chunk_transcript_with_overlap(transcript, model="gpt-5.1", strategy="balanced"):
     """
     SIMPLIFIED CHUNKING - Max 3-4 chunks to avoid rate limiting
     Fast and reliable approach
@@ -394,7 +395,7 @@ def chunk_transcript_with_overlap(transcript, model="gpt-4o", strategy="balanced
         ], True
 
 
-def extract_key_points_from_chunk(chunk, chunk_num, total_chunks, model="gpt-4o"):
+def extract_key_points_from_chunk(chunk, chunk_num, total_chunks, model="gpt-5.1"):
     """Extract key points from a single chunk with minimal delay"""
     if not OPENAI_API_KEY:
         return None
@@ -434,13 +435,13 @@ Respond in this JSON format:
         temperature=0.2,
         system_prompt=system_prompt,
         response_format="json_object",
-        retry_on_rate_limit=True,  # Enable retry on rate limit
+        retry_on_rate_limit=True,
     )
 
     return result
 
 
-def synthesize_full_meeting(all_key_points, model="gpt-4o", strategy="concise"):
+def synthesize_full_meeting(all_key_points, model="gpt-5.1", strategy="concise"):
     """Synthesize all extracted key points into final summary"""
     if not OPENAI_API_KEY or not all_key_points:
         return None
@@ -480,42 +481,47 @@ PRIORITIZE these types of moments (in order):
 5. KEY ANNOUNCEMENTS - New projects, policy changes, timeline updates
 6. CONTROVERSIES - Debates, split opinions, contentious issues
 
-CRITICAL RULES:
+CRITICAL REQUIREMENTS:
+- You MUST return EXACTLY 10 highlights - no more, no less
 - Each highlight must be SPECIFIC with names, numbers, or concrete details
 - Quotes must be COMPLETE sentences, never fragments
 - Prioritize diversity - cover DIFFERENT topics, not multiple highlights about same thing
 - Include at least 2 public comments/resident voices if present
-- Flag any votes with the vote count (e.g., "passed 4-1")"""
+- Flag any votes with the vote count (e.g., "passed 4-1")
+- If you cannot find 10 distinct highlights, create highlights for procedural items like "call to order" or "adjournment\""""
 
-        user_prompt = f"""Based on the key information extracted from a civic meeting, create 10 compelling highlights with supporting quotes.
+        user_prompt = f"""Based on the key information extracted from a civic meeting, create EXACTLY 10 compelling highlights with supporting quotes.
 
 KEY INFORMATION FROM MEETING:
 
 DECISIONS & VOTES MADE:
-{chr(10).join(f" â€¢ {d}" for d in combined_decisions[:20])}
+{chr(10).join(f" • {d}" for d in combined_decisions[:20])}
 
 MAJOR DISCUSSIONS:
-{chr(10).join(f" â€¢ {d}" for d in combined_discussions[:20])}
+{chr(10).join(f" • {d}" for d in combined_discussions[:20])}
 
 ACTION ITEMS:
-{chr(10).join(f" â€¢ {a}" for a in combined_actions[:15])}
+{chr(10).join(f" • {a}" for a in combined_actions[:15])}
 
 NOTABLE QUOTES (use ONLY complete quotes):
 {chr(10).join(f' "{q}"' for q in combined_quotes[:20])}
 
-Create exactly 10 highlights following these requirements:
+MANDATORY: Create EXACTLY 10 highlights. This is critical - the array MUST have exactly 10 items.
+
+Requirements for the 10 highlights:
 1. At least 2 highlights about VOTES or DECISIONS (include vote counts if available)
 2. At least 1 highlight about BUDGET or MONEY (include specific dollar amounts)
 3. At least 2 highlights featuring PUBLIC COMMENTS or resident voices
 4. Remaining highlights should cover DIFFERENT topics for variety
 5. Each quote must be a COMPLETE sentence from the meeting
+6. DO NOT skip any highlights - return all 10
 
 For each highlight, also provide:
 - category: one of "vote", "budget", "public_comment", "announcement", "controversy", "action_item"
 - importance: 1-5 (5 = most important)
 - speaker: who said the quote (if identifiable)
 
-Respond in this EXACT JSON format:
+Respond in this EXACT JSON format with EXACTLY 10 items in the highlights array:
 {{
   "highlights": [
     {{
@@ -525,7 +531,7 @@ Respond in this EXACT JSON format:
       "importance": 5,
       "speaker": "Mayor Smith"
     }},
-    ...
+    // ... 9 more items for a total of 10
   ],
   "meeting_stats": {{
     "total_votes": 0,
@@ -536,7 +542,7 @@ Respond in this EXACT JSON format:
   }}
 }}"""
 
-        max_tokens = 3500
+        max_tokens = 4000  # Increased for 10 full highlights
 
     else:
         system_prompt = """You are an expert at writing executive summaries for civic and government meetings.
@@ -594,7 +600,7 @@ CRITICAL: Always begin with "At this meeting," and write in complete, flowing pa
         prompt=user_prompt,
         max_tokens=max_tokens,
         model=model,
-        temperature=0.3,
+        temperature=0.5 if strategy == "highlights_with_quotes" else 0.3,
         system_prompt=system_prompt,
         response_format="json_object" if strategy == "highlights_with_quotes" else None,
     )
@@ -605,144 +611,249 @@ CRITICAL: Always begin with "At this meeting," and write in complete, flowing pa
 def call_openai_api(
     prompt,
     max_tokens=400,
-    model="gpt-4o",
+    model="gpt-5.1",
     temperature=0.3,
     system_prompt=None,
     response_format=None,
     retry_on_rate_limit=True,
 ):
-    """Enhanced OpenAI API call with rate limit handling"""
+    """Enhanced OpenAI API call with GPT-5.1 support and automatic fallback.
+    
+    Args:
+        prompt: User prompt
+        max_tokens: Maximum output tokens
+        model: Model identifier (gpt-5.1, gpt-4o, etc.)
+        temperature: Response randomness (0-1)
+        system_prompt: System instructions
+        response_format: "json_object" for JSON mode
+        retry_on_rate_limit: Whether to retry on 429 errors
+    """
     if not OPENAI_API_KEY:
+        print("[OpenAI] ERROR: No API key configured")
         return None
 
-    max_retries = 2  # Reduced from 3
-    retry_delay = 1  # Start with 1 second delay (reduced from 2)
+    # Model fallback chain
+    models_to_try = [model]
+    if model not in ["gpt-4o", "gpt-4o-mini"]:
+        models_to_try.append("gpt-4o")
+    if "gpt-4o-mini" not in models_to_try:
+        models_to_try.append("gpt-4o-mini")
 
-    for attempt in range(max_retries):
-        try:
-            headers = {
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            }
+    max_retries = 2
+    retry_delay = 1
 
-            if system_prompt is None:
-                system_prompt = (
-                    "You are a helpful assistant that analyzes meeting transcripts."
+    for current_model in models_to_try:
+        print(f"[OpenAI] Trying model: {current_model}")
+        
+        for attempt in range(max_retries):
+            try:
+                headers = {
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                }
+
+                if system_prompt is None:
+                    system_prompt = (
+                        "You are a helpful assistant that analyzes meeting transcripts."
+                    )
+
+                data = {
+                    "model": current_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                }
+
+                if response_format == "json_object":
+                    data["response_format"] = {"type": "json_object"}
+
+                response = httpx.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers=headers,
+                    json=data,
+                    timeout=180.0,
                 )
 
-            data = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-            }
+                if response.status_code == 200:
+                    result = response.json()
+                    content = result["choices"][0]["message"]["content"]
+                    
+                    # Log token usage for cost monitoring
+                    usage = result.get("usage", {})
+                    if usage:
+                        print(f"[OpenAI] Success with {current_model}: {len(content)} chars, tokens: {usage.get('total_tokens', 'N/A')}")
+                    else:
+                        print(f"[OpenAI] Success with {current_model}: {len(content)} chars")
+                    return content
 
-            if response_format == "json_object":
-                data["response_format"] = {"type": "json_object"}
+                elif response.status_code == 429 and retry_on_rate_limit:
+                    print(f"[OpenAI] Rate limited on {current_model}, waiting {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
 
-            response = httpx.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers=headers,
-                json=data,
-                timeout=120.0,
-            )
+                elif response.status_code == 404:
+                    # Model not found - try next model
+                    print(f"[OpenAI] Model {current_model} not found (404), trying fallback...")
+                    break  # Move to next model
 
-            if response.status_code == 200:
-                result = response.json()
-                return result["choices"][0]["message"]["content"]
+                else:
+                    try:
+                        error_body = response.json()
+                        error_msg = error_body.get("error", {}).get("message", "Unknown error")
+                        print(f"[OpenAI] API error {response.status_code}: {error_msg}")
+                        
+                        # Check for specific errors
+                    except:
+                        print(f"[OpenAI] API error {response.status_code}: {response.text[:200]}")
+                    
+                    if response.status_code >= 500:
+                        # Server error - retry
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        # Client error - try next model
+                        break
 
-            elif response.status_code == 429 and retry_on_rate_limit:
-                # Rate limited - wait and retry
-                print(f"    Rate limited, waiting {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                retry_delay *= 2  # Exponential backoff
-                continue
+            except httpx.TimeoutException:
+                print(f"[OpenAI] Timeout on attempt {attempt + 1}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+            except Exception as e:
+                print(f"[OpenAI] Exception: {type(e).__name__}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
 
-            else:
-                print(f"OpenAI API error: {response.status_code}")
-                if response.status_code == 429:
-                    print("    Tip: Upgrade your OpenAI plan or add delays")
-                return None
-
-        except Exception as e:
-            print(f"OpenAI API call error: {e}")
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-                continue
-            return None
-
-    print("    Max retries reached")
+    print("[OpenAI] All models failed")
     return None
 
 
 def generate_fallback_summary(transcript):
-    """Generate summary without AI - CLEANED"""
+    """Generate a sensible generic summary when AI is unavailable.
+    NEVER includes raw transcript text to avoid nonsensical output."""
     transcript = clean_text(transcript)
-
-    sentences = [s.strip() for s in transcript.split(".") if len(s.strip()) > 20][:20]
-    if len(sentences) >= 3:
-        summary = f"{sentences[0]}. {sentences[len(sentences)//2]}. {sentences[-1] if len(sentences) > 2 else sentences[1]}."
-        summary = re.sub(r"\s+", " ", summary)
-        summary = re.sub(r">>+", "", summary)
-        if len(summary) > 500:
-            summary = summary[:497] + "..."
-        return summary
-    else:
-        return "This meeting covered important community topics and initiatives. Various proposals and concerns were discussed by the committee."
+    
+    # Extract meeting metadata hints from transcript
+    sentences = [s.strip() for s in transcript.split(".") if len(s.strip()) > 20]
+    transcript_lower = transcript.lower()
+    
+    # Detect meeting type
+    meeting_type = "civic meeting"
+    if "select board" in transcript_lower or "selectboard" in transcript_lower:
+        meeting_type = "Select Board meeting"
+    elif "city council" in transcript_lower:
+        meeting_type = "City Council meeting"
+    elif "school committee" in transcript_lower or "school board" in transcript_lower:
+        meeting_type = "School Committee meeting"
+    elif "planning board" in transcript_lower or "planning commission" in transcript_lower:
+        meeting_type = "Planning Board meeting"
+    elif "zoning" in transcript_lower:
+        meeting_type = "Zoning Board meeting"
+    elif "finance committee" in transcript_lower:
+        meeting_type = "Finance Committee meeting"
+    elif "town meeting" in transcript_lower:
+        meeting_type = "Town Meeting"
+    
+    # Count key activities
+    vote_count = len(re.findall(r'\b(vote[ds]?|motion|approve[ds]?|pass(?:ed)?|unanimous)\b', transcript_lower))
+    discussion_count = len(re.findall(r'\b(discuss(?:ed|ion)?|consider(?:ed)?|review(?:ed)?|present(?:ed|ation)?)\b', transcript_lower))
+    public_comment = 'public comment' in transcript_lower or 'resident' in transcript_lower
+    
+    # Build a clean, generic summary
+    summary_parts = [f"At this {meeting_type}, "]
+    
+    if vote_count > 3:
+        summary_parts.append("several votes were taken on various agenda items. ")
+    elif vote_count > 0:
+        summary_parts.append("votes were held on key agenda items. ")
+    
+    if discussion_count > 5:
+        summary_parts.append("The board engaged in extensive discussion on multiple topics of community interest. ")
+    elif discussion_count > 0:
+        summary_parts.append("Various matters were discussed by the committee. ")
+    
+    if public_comment:
+        summary_parts.append("Residents participated in the public comment period. ")
+    
+    # Estimate meeting length
+    word_count = len(transcript.split())
+    if word_count > 10000:
+        summary_parts.append("This was a comprehensive meeting covering numerous agenda items. ")
+    elif word_count > 5000:
+        summary_parts.append("Multiple agenda items were addressed during this session. ")
+    
+    summary_parts.append("Please review the full transcript or watch the video for complete details on specific decisions and discussions.")
+    
+    summary = "".join(summary_parts)
+    summary = re.sub(r"\s+", " ", summary).strip()
+    
+    return summary
 
 
 def generate_fallback_highlights(transcript):
-    """Generate highlights without AI"""
-    highlights = []
-    sentences = [s.strip() for s in transcript.split(".") if len(s.strip()) > 30]
-
-    important_keywords = [
-        "approve",
-        "decision",
-        "vote",
-        "budget",
-        "motion",
-        "proposal",
-        "concern",
-        "issue",
-        "plan",
-        "project",
-        "recommend",
-        "policy",
+    """Generate sensible generic highlights when AI is unavailable.
+    Returns 10 highlights with generic but relevant content - NEVER raw transcript."""
+    
+    transcript_lower = transcript.lower()
+    
+    # Detect topics mentioned in the transcript
+    detected_topics = []
+    
+    topic_patterns = [
+        ("budget", "Budget and Financial Review", "Financial matters and budget allocations were discussed during this portion of the meeting."),
+        ("vote", "Voting on Agenda Items", "The board voted on various items requiring official action."),
+        ("motion", "Motions and Approvals", "Formal motions were made and seconded for consideration."),
+        ("public comment", "Public Comment Period", "Community members had the opportunity to address the board during public comment."),
+        ("zoning", "Zoning and Land Use", "Zoning regulations and land use matters were reviewed."),
+        ("permit", "Permits and Applications", "Permit applications and related matters were considered."),
+        ("school", "Education and Schools", "Educational matters and school-related topics were discussed."),
+        ("police", "Public Safety", "Public safety and law enforcement matters were addressed."),
+        ("road", "Infrastructure and Roads", "Infrastructure projects and road maintenance were discussed."),
+        ("park", "Parks and Recreation", "Parks, recreation, and community spaces were discussed."),
+        ("water", "Water and Utilities", "Water, sewer, and utility matters were reviewed."),
+        ("tax", "Tax and Revenue", "Tax rates and revenue matters were discussed."),
+        ("appoint", "Appointments and Personnel", "Board appointments and personnel matters were addressed."),
+        ("contract", "Contracts and Agreements", "Contracts and formal agreements were reviewed."),
+        ("plan", "Planning and Development", "Planning initiatives and development projects were considered."),
     ]
-
-    important_sentences = []
-    for sent in sentences[:100]:
-        sent_lower = sent.lower()
-        score = sum(1 for keyword in important_keywords if keyword in sent_lower)
-        if score > 0:
-            important_sentences.append((sent, score))
-
-    important_sentences.sort(key=lambda x: x[1], reverse=True)
-
-    topics = [
-        "meeting opening and agenda",
-        "budget and financial matters",
-        "community development initiatives",
-        "public safety and services",
-        "infrastructure improvements",
+    
+    for keyword, title, description in topic_patterns:
+        if keyword in transcript_lower:
+            detected_topics.append({
+                "highlight": title,
+                "quote": description,
+                "category": "announcement",
+                "importance": 3
+            })
+    
+    # Fill remaining slots with generic civic meeting topics
+    generic_topics = [
+        {"highlight": "Meeting Called to Order", "quote": "The meeting was officially opened with roll call and approval of the agenda.", "category": "announcement", "importance": 2},
+        {"highlight": "Approval of Minutes", "quote": "Minutes from previous meetings were reviewed and approved.", "category": "announcement", "importance": 2},
+        {"highlight": "Committee Reports", "quote": "Various committee chairs presented updates on their activities.", "category": "announcement", "importance": 2},
+        {"highlight": "New Business Discussion", "quote": "New items were introduced for the board's consideration.", "category": "announcement", "importance": 3},
+        {"highlight": "Old Business Follow-up", "quote": "Previously tabled items were revisited for further action.", "category": "announcement", "importance": 3},
+        {"highlight": "Administrative Updates", "quote": "Administrative staff provided updates on ongoing operations.", "category": "announcement", "importance": 2},
+        {"highlight": "Future Agenda Items", "quote": "Items for upcoming meetings were discussed and scheduled.", "category": "announcement", "importance": 2},
+        {"highlight": "Meeting Adjournment", "quote": "The meeting was formally adjourned following completion of all agenda items.", "category": "announcement", "importance": 1},
     ]
-
-    for i in range(min(10, len(important_sentences))):
-        quote = important_sentences[i][0][:200]
-        if not quote.endswith("."):
-            quote = quote[: quote.rfind(" ")] + "..."
-        highlights.append(
-            {
-                "highlight": f"Discussion about {topics[i % len(topics)]}",
-                "quote": quote,
-            }
-        )
-
-    return highlights
+    
+    # Combine detected and generic, prioritizing detected
+    highlights = detected_topics[:10]
+    
+    # Fill remaining slots with generic topics
+    generic_index = 0
+    while len(highlights) < 10 and generic_index < len(generic_topics):
+        if generic_topics[generic_index]["highlight"] not in [h["highlight"] for h in highlights]:
+            highlights.append(generic_topics[generic_index])
+        generic_index += 1
+    
+    return highlights[:10]
 
 
 def generate_fallback_entities(transcript):
@@ -1327,18 +1438,23 @@ async def summary_ai(req: Request):
     language = data.get("language", "en")
     model = data.get("model", "gpt-4o")
     strategy = data.get("strategy", "concise")
+    force_refresh = data.get("forceRefresh", False)  # New: bypass cache and get fresh results
+
+    # Validate and normalize model name - ensure we use a valid OpenAI model
+    valid_models = ["gpt-5.1", "gpt-5.1-chat-latest", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
+    if model not in valid_models:
+        print(f"[summary_ai] Invalid model '{model}', defaulting to gpt-5.1")
+        model = "gpt-5.1"
 
     if not transcript:
         raise HTTPException(400, "No transcript provided")
 
-    print(
-        f" Processing transcript: {len(transcript):,} characters, strategy={strategy}"
-    )
+    print(f"[summary_ai] Processing transcript: {len(transcript):,} characters, strategy={strategy}, model={model}, force_refresh={force_refresh}")
 
     chunks, needs_processing = chunk_transcript_with_overlap(transcript, model)
 
     if needs_processing and len(chunks) > 1:
-        print(f" Using map-reduce for {len(chunks)} chunks")
+        print(f"[summary_ai] Using map-reduce for {len(chunks)} chunks")
 
         all_key_points = []
         for i, chunk in enumerate(chunks):
@@ -1361,7 +1477,7 @@ async def summary_ai(req: Request):
                 "strategy": "fallback",
             }
 
-        print(f" Synthesizing final {strategy}...")
+        print(f"[summary_ai] Synthesizing final {strategy}...")
         ai_result = synthesize_full_meeting(all_key_points, model, strategy)
 
         if ai_result:
@@ -1371,7 +1487,7 @@ async def summary_ai(req: Request):
                     highlights = parsed.get("highlights", [])
 
                     if isinstance(highlights, list) and len(highlights) > 0:
-                        print(f" Generated {len(highlights)} highlights")
+                        print(f"[summary_ai] Generated {len(highlights)} highlights")
                         return {
                             "summarySentences": json.dumps(highlights),
                             "strategy": strategy,
@@ -1379,33 +1495,53 @@ async def summary_ai(req: Request):
                 except json.JSONDecodeError:
                     print("Ã‚Â  JSON parsing failed")
             else:
-                print(f" Generated summary ({len(ai_result)} chars)")
+                print(f"[summary_ai] Generated summary ({len(ai_result)} chars)")
                 return {"summarySentences": ai_result, "strategy": strategy}
 
     else:
-        print(" Transcript fits in one chunk")
+        print("[summary_ai] Transcript fits in one chunk")
 
         if strategy == "highlights_with_quotes":
-            system_prompt = """You are an expert at analyzing civic meetings."""
+            system_prompt = """You are an expert at analyzing civic and government meetings. 
+You identify the most important moments, decisions, and discussions that matter to residents.
+You ALWAYS return exactly 10 highlights, no more, no less."""
 
-            user_prompt = f"""Analyze this civic meeting and create 10 key highlights with direct quotes.
+            user_prompt = f"""Analyze this civic meeting transcript and create EXACTLY 10 key highlights with direct quotes.
 
 TRANSCRIPT:
-{transcript}
+{transcript[:80000]}
 
-Respond in this EXACT JSON format:
+MANDATORY: Return EXACTLY 10 highlights. The highlights array MUST have 10 items.
+
+For each highlight:
+1. Write a brief summary of the key point
+2. Include a COMPLETE quote (full sentence) from the transcript supporting it
+3. Assign a category: "vote", "budget", "public_comment", "announcement", "controversy", or "action_item"
+4. Rate importance 1-5 (5 = most critical)
+5. Identify the speaker if possible
+
+Cover DIFFERENT topics - don't repeat similar highlights.
+Include: votes/decisions, budget items, public comments, announcements.
+
+Respond in this EXACT JSON format with EXACTLY 10 items:
 {{
   "highlights": [
-    {{"highlight": "Summary of key point", "quote": "Direct quote from transcript"}},
-    ...
+    {{
+      "highlight": "Summary of key point",
+      "quote": "Complete direct quote from transcript",
+      "category": "vote",
+      "importance": 5,
+      "speaker": "Speaker name or Unknown"
+    }},
+    // ... must have exactly 10 items total
   ]
 }}"""
 
             ai_result = call_openai_api(
                 prompt=user_prompt,
-                max_tokens=2500,
+                max_tokens=4000,
                 model=model,
-                temperature=0.3,
+                temperature=0.5,
                 system_prompt=system_prompt,
                 response_format="json_object",
             )
@@ -1414,23 +1550,51 @@ Respond in this EXACT JSON format:
                 try:
                     parsed = json.loads(ai_result)
                     highlights = parsed.get("highlights", [])
+                    print(f"[summary_ai] Single chunk returned {len(highlights)} highlights")
                     if isinstance(highlights, list) and len(highlights) > 0:
+                        # Don't pad - if GPT-5.1 returns fewer than 10, show what it returned
+                        # Quality over quantity - no placeholder text
                         return {
-                            "summarySentences": json.dumps(highlights),
+                            "summarySentences": json.dumps(highlights[:10]),
                             "strategy": strategy,
                         }
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[summary_ai] JSON parse error: {e}")
 
         else:
-            system_prompt = """You are an expert at summarizing civic meetings."""
+            system_prompt = """You are an expert at summarizing civic and government meetings.
+Write clear, concise summaries that help residents understand what happened.
+Always start with "At this meeting," and write in flowing paragraphs without bullet points."""
 
-            user_prompt = f"""Summarize this civic meeting.
+            if strategy == "concise":
+                user_prompt = f"""Summarize this civic meeting transcript in 3-5 sentences.
 
 TRANSCRIPT:
-{transcript}
+{transcript[:60000]}
 
-{"Provide 3-5 key sentences covering main decisions and outcomes." if strategy == "concise" else "Provide 2-3 paragraphs covering decisions, discussions, and next steps."}"""
+Requirements:
+1. Start with "At this meeting,"
+2. Cover the main topics discussed
+3. Mention any key decisions or votes
+4. Note important next steps if any
+5. Write in clear, conversational paragraphs - no bullet points
+
+Write a focused 3-5 sentence summary."""
+            else:
+                user_prompt = f"""Summarize this civic meeting transcript in 2-3 paragraphs.
+
+TRANSCRIPT:
+{transcript[:60000]}
+
+Requirements:
+1. Start with "At this meeting,"
+2. Cover all major topics discussed
+3. Detail any decisions, votes, or approvals
+4. Explain implications for residents
+5. Note upcoming action items
+6. Write in flowing paragraphs - no bullet points
+
+Write a comprehensive 2-3 paragraph summary."""
 
             ai_result = call_openai_api(
                 prompt=user_prompt,
@@ -1443,7 +1607,7 @@ TRANSCRIPT:
             if ai_result:
                 return {"summarySentences": ai_result, "strategy": strategy}
 
-    print("Ã‚Â  Using fallback")
+    print("[summary_ai] All AI methods failed, using improved fallback")
     if strategy == "highlights_with_quotes":
         return {
             "summarySentences": json.dumps(generate_fallback_highlights(transcript)),
@@ -1460,7 +1624,7 @@ async def summary_full(req: Request):
     """Generate summary using full transcript with GPT-4"""
     data = await req.json()
     transcript = clean_text(data.get("transcript", ""))
-    model = data.get("model", "gpt-4")  # Default to GPT-4
+    model = data.get("model", "gpt-4o")  # Default to GPT-4
 
     if not transcript:
         raise HTTPException(400, "No transcript provided")
@@ -1582,7 +1746,7 @@ async def get_metadata(req: Request):
         return {"title": "", "description": "", "duration": 0}
 
 
-async def get_ai_entities_improved(transcript, model="gpt-4o"):
+async def get_ai_entities_improved(transcript, model="gpt-5.1"):
     """v5.2: STRICT entity extraction - full names, places, organizations only"""
     if not OPENAI_API_KEY:
         print("[!] No OpenAI key, using fallback")
@@ -1728,6 +1892,387 @@ Be strict - fewer high-quality entities is better than many low-quality ones."""
         print(f"[!] Entity extraction failed: {e}")
         return generate_fallback_entities(transcript)
 
+
+
+# ============================================================================
+# YouTube API Endpoints (for Civic Meeting Finder and Playlist Loading)
+# ============================================================================
+
+YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
+
+# Log API key status at startup
+if YOUTUBE_API_KEY:
+    print(f"[YouTube] API key configured: {YOUTUBE_API_KEY[:8]}...{YOUTUBE_API_KEY[-4:]}")
+else:
+    print("[YouTube] WARNING: No YOUTUBE_API_KEY environment variable set!")
+    print("[YouTube] Set it with: export YOUTUBE_API_KEY='your-api-key-here'")
+
+
+@app.get("/api/youtube-status")
+async def youtube_status():
+    """Check if YouTube API is configured"""
+    return {
+        "configured": bool(YOUTUBE_API_KEY),
+        "key_preview": f"{YOUTUBE_API_KEY[:8]}..." if YOUTUBE_API_KEY else None
+    }
+
+
+@app.get("/api/youtube-search")
+async def youtube_search(q: str, type: str = "video", maxResults: int = 10, order: str = "date"):
+    """Search YouTube for videos (used by Civic Meeting Finder)"""
+    if not YOUTUBE_API_KEY:
+        print("[YouTube] No API key configured - returning error")
+        return {
+            "items": [],
+            "error": "YouTube API key not configured. Set YOUTUBE_API_KEY environment variable.",
+            "setup_help": "Go to console.cloud.google.com, enable YouTube Data API v3, and create an API key."
+        }
+    
+    try:
+        # Add civic meeting keywords to improve search results
+        civic_keywords = "city council OR town meeting OR board meeting OR selectboard"
+        enhanced_query = f"{q} {civic_keywords}"
+        
+        params = {
+            "part": "snippet",
+            "q": enhanced_query,
+            "type": type,
+            "maxResults": min(maxResults, 25),
+            "order": order,
+            "key": YOUTUBE_API_KEY,
+            "relevanceLanguage": "en",
+            "regionCode": "US"
+        }
+        
+        print(f"[YouTube] Searching for: {q}")
+        
+        response = httpx.get(
+            "https://www.googleapis.com/youtube/v3/search",
+            params=params,
+            timeout=15.0
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"[YouTube] Found {len(data.get('items', []))} results")
+            return data
+        elif response.status_code == 403:
+            error_data = response.json()
+            error_msg = error_data.get("error", {}).get("message", "API access denied")
+            print(f"[YouTube] API Error 403: {error_msg}")
+            return {
+                "items": [],
+                "error": f"YouTube API access denied: {error_msg}",
+                "help": "Check that YouTube Data API v3 is enabled in your Google Cloud project."
+            }
+        elif response.status_code == 400:
+            error_data = response.json()
+            error_msg = error_data.get("error", {}).get("message", "Bad request")
+            print(f"[YouTube] API Error 400: {error_msg}")
+            return {"items": [], "error": f"Invalid request: {error_msg}"}
+        else:
+            print(f"[YouTube] Search error: {response.status_code} - {response.text[:200]}")
+            return {"items": [], "error": f"Search failed with status {response.status_code}"}
+            
+    except httpx.TimeoutException:
+        print("[YouTube] Request timed out")
+        return {"items": [], "error": "Request timed out. Try again."}
+    except Exception as e:
+        print(f"[YouTube] Search exception: {e}")
+        return {"items": [], "error": str(e)}
+
+
+@app.get("/api/youtube-playlist")
+async def youtube_playlist(playlistId: str, maxResults: int = 25):
+    """Get videos from a YouTube playlist (used by Issue Tracker playlist feature)"""
+    if not YOUTUBE_API_KEY:
+        print("[YouTube] No API key configured for playlist")
+        return {
+            "items": [],
+            "error": "YouTube API key not configured. Set YOUTUBE_API_KEY environment variable."
+        }
+    
+    try:
+        params = {
+            "part": "snippet",
+            "playlistId": playlistId,
+            "maxResults": min(maxResults, 50),
+            "key": YOUTUBE_API_KEY
+        }
+        
+        print(f"[YouTube] Loading playlist: {playlistId}")
+        
+        response = httpx.get(
+            "https://www.googleapis.com/youtube/v3/playlistItems",
+            params=params,
+            timeout=15.0
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Sort by date (newest first)
+            if "items" in data:
+                data["items"] = sorted(
+                    data["items"],
+                    key=lambda x: x.get("snippet", {}).get("publishedAt", ""),
+                    reverse=True
+                )
+            print(f"[YouTube] Loaded {len(data.get('items', []))} playlist items")
+            return data
+        elif response.status_code == 404:
+            return {"items": [], "error": "Playlist not found. Make sure it's a public playlist."}
+        elif response.status_code == 403:
+            error_data = response.json()
+            error_msg = error_data.get("error", {}).get("message", "Access denied")
+            return {"items": [], "error": f"Access denied: {error_msg}"}
+        else:
+            print(f"[YouTube] Playlist error: {response.status_code}")
+            return {"items": [], "error": f"Failed to load playlist (status {response.status_code})"}
+                
+    except Exception as e:
+        print(f"[YouTube] Playlist exception: {e}")
+        return {"items": [], "error": str(e)}
+
+
+# ============================================================================
+# Relevant Documents Finder - AI-powered document search
+# ============================================================================
+
+@app.post("/api/find-relevant-documents")
+async def find_relevant_documents(req: Request):
+    """
+    Use AI to find publicly available documents related to a meeting.
+    Searches for agendas, minutes, proposals, RFPs, contracts, presentations, etc.
+    """
+    data = await req.json()
+    video_title = data.get("video_title", "")
+    transcript = data.get("transcript", "")
+    entities = data.get("entities", [])
+    
+    if not video_title and not transcript:
+        return {"documents": [], "error": "No meeting information provided"}
+    
+    print(f"[Documents] Finding relevant documents for: {video_title[:50]}...")
+    
+    try:
+        # Step 1: Use AI to extract key search terms and document types to look for
+        if OPENAI_API_KEY:
+            # Build context from entities
+            entity_names = [e.get("text", "") for e in entities[:20] if e.get("text")]
+            entity_context = ", ".join(entity_names) if entity_names else ""
+            
+            # Extract a sample of the transcript for context
+            transcript_sample = transcript[:2000] if transcript else ""
+            
+            prompt = f"""Analyze this civic meeting and suggest specific search queries to find related public documents.
+
+Meeting Title: {video_title}
+
+Key Entities/Topics: {entity_context}
+
+Transcript Sample: {transcript_sample}
+
+Based on this meeting, generate 4-6 specific search queries that would find:
+1. The official meeting agenda or minutes
+2. Any proposals, RFPs, or contracts mentioned
+3. Related presentations or reports
+4. Relevant city/town official documents
+
+For each query, also identify what type of document it would find.
+
+Respond in this exact JSON format (no markdown):
+{{
+  "organization": "Name of city/town/organization if identifiable",
+  "meeting_date": "Date if mentioned (YYYY-MM-DD or null)",
+  "searches": [
+    {{"query": "specific search query", "doc_type": "agenda|minutes|proposal|contract|presentation|report|ordinance|resolution|budget|other", "description": "Brief description of what this would find"}}
+  ]
+}}"""
+
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",  # Use fast model for this
+                messages=[
+                    {"role": "system", "content": "You are an expert at finding public government documents. Generate specific, targeted search queries. Always respond with valid JSON only."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=800,
+                temperature=0.3
+            )
+            
+            ai_response = response.choices[0].message.content.strip()
+            
+            # Clean up response if needed
+            if ai_response.startswith("```"):
+                ai_response = ai_response.split("```")[1]
+                if ai_response.startswith("json"):
+                    ai_response = ai_response[4:]
+            ai_response = ai_response.strip()
+            
+            try:
+                search_data = json.loads(ai_response)
+            except json.JSONDecodeError:
+                # Fallback: generate basic searches from title
+                search_data = {
+                    "organization": "",
+                    "meeting_date": None,
+                    "searches": [
+                        {"query": f"{video_title} agenda", "doc_type": "agenda", "description": "Meeting agenda"},
+                        {"query": f"{video_title} minutes", "doc_type": "minutes", "description": "Meeting minutes"},
+                    ]
+                }
+            
+            print(f"[Documents] AI generated {len(search_data.get('searches', []))} search queries")
+            
+        else:
+            # Fallback without AI - use simple keyword extraction
+            search_data = {
+                "organization": "",
+                "meeting_date": None,
+                "searches": [
+                    {"query": f"{video_title} agenda PDF", "doc_type": "agenda", "description": "Meeting agenda"},
+                    {"query": f"{video_title} minutes PDF", "doc_type": "minutes", "description": "Official minutes"},
+                ]
+            }
+        
+        # Step 2: Perform web searches for each query
+        documents = []
+        search_queries = search_data.get("searches", [])[:6]  # Limit to 6 searches
+        
+        for search_item in search_queries:
+            query = search_item.get("query", "")
+            doc_type = search_item.get("doc_type", "other")
+            description = search_item.get("description", "")
+            
+            if not query:
+                continue
+            
+            try:
+                # Use DuckDuckGo for web search (no API key needed)
+                search_url = f"https://html.duckduckgo.com/html/?q={quote(query + ' filetype:pdf OR site:.gov OR site:.org')}"
+                
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                }
+                
+                response = httpx.get(search_url, headers=headers, timeout=10.0, follow_redirects=True)
+                
+                if response.status_code == 200:
+                    html = response.text
+                    
+                    # Parse results (simple regex extraction)
+                    import re
+                    
+                    # Find result links
+                    result_pattern = r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>'
+                    matches = re.findall(result_pattern, html)
+                    
+                    # Also try alternative pattern
+                    if not matches:
+                        result_pattern = r'<a[^>]*href="(https?://[^"]+)"[^>]*>([^<]{10,100})</a>'
+                        matches = re.findall(result_pattern, html)
+                    
+                    for url, title in matches[:3]:  # Take top 3 results per query
+                        # Skip internal DuckDuckGo links
+                        if 'duckduckgo.com' in url:
+                            continue
+                        
+                        # Clean URL (DuckDuckGo uses redirect URLs)
+                        if 'uddg=' in url:
+                            url_match = re.search(r'uddg=([^&]+)', url)
+                            if url_match:
+                                from urllib.parse import unquote
+                                url = unquote(url_match.group(1))
+                        
+                        # Determine document type from URL/title
+                        detected_type = doc_type
+                        url_lower = url.lower()
+                        title_lower = title.lower()
+                        
+                        if '.pdf' in url_lower:
+                            if 'agenda' in url_lower or 'agenda' in title_lower:
+                                detected_type = 'agenda'
+                            elif 'minute' in url_lower or 'minute' in title_lower:
+                                detected_type = 'minutes'
+                            elif 'budget' in url_lower or 'budget' in title_lower:
+                                detected_type = 'budget'
+                            elif 'proposal' in url_lower or 'rfp' in url_lower:
+                                detected_type = 'proposal'
+                        
+                        # Check if we already have this URL
+                        if not any(d['url'] == url for d in documents):
+                            documents.append({
+                                "title": title.strip()[:100],
+                                "url": url,
+                                "type": detected_type,
+                                "description": description,
+                                "source": url.split('/')[2] if '/' in url else url,
+                            })
+                
+            except Exception as e:
+                print(f"[Documents] Search error for '{query}': {e}")
+                continue
+        
+        # Step 3: Also search YouTube for related video content (presentations, etc.)
+        if YOUTUBE_API_KEY and video_title:
+            try:
+                # Extract org name from title for better search
+                org_search = search_data.get("organization", "") or video_title.split()[0:3]
+                if isinstance(org_search, list):
+                    org_search = " ".join(org_search)
+                
+                yt_params = {
+                    "part": "snippet",
+                    "q": f"{org_search} presentation OR budget OR proposal",
+                    "type": "video",
+                    "maxResults": 3,
+                    "key": YOUTUBE_API_KEY
+                }
+                
+                yt_response = httpx.get(
+                    "https://www.googleapis.com/youtube/v3/search",
+                    params=yt_params,
+                    timeout=10.0
+                )
+                
+                if yt_response.status_code == 200:
+                    yt_data = yt_response.json()
+                    for item in yt_data.get("items", [])[:2]:
+                        vid_id = item.get("id", {}).get("videoId")
+                        snippet = item.get("snippet", {})
+                        if vid_id:
+                            documents.append({
+                                "title": snippet.get("title", "")[:100],
+                                "url": f"https://www.youtube.com/watch?v={vid_id}",
+                                "type": "presentation",
+                                "description": "Related video content",
+                                "source": "YouTube",
+                                "thumbnail": snippet.get("thumbnails", {}).get("default", {}).get("url")
+                            })
+            except Exception as e:
+                print(f"[Documents] YouTube search error: {e}")
+        
+        # Deduplicate and limit results
+        seen_urls = set()
+        unique_docs = []
+        for doc in documents:
+            if doc['url'] not in seen_urls:
+                seen_urls.add(doc['url'])
+                unique_docs.append(doc)
+        
+        print(f"[Documents] Found {len(unique_docs)} relevant documents")
+        
+        return {
+            "documents": unique_docs[:12],  # Limit to 12 results
+            "organization": search_data.get("organization", ""),
+            "meeting_date": search_data.get("meeting_date"),
+            "searches_performed": len(search_queries)
+        }
+        
+    except Exception as e:
+        print(f"[Documents] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"documents": [], "error": str(e)}
 
 
 @app.post("/api/analytics/extended")
@@ -2249,17 +2794,17 @@ def get_responsive_text_sizes(video_height, video_width):
     scale_factor = max(0.7, min(2.5, scale_factor))
     
     # Base sizes optimized for 720p, will scale proportionally
-    # These are LARGER than before to ensure readability
-    base_title = 32  # Was 24
-    base_caption = 24  # Was 18
-    base_lower_third = 20  # Was 16
-    base_watermark = 14  # Was 12
+    # These are LARGER for better readability in highlight reels
+    base_title = 42  # Increased from 32
+    base_caption = 32  # Increased from 24
+    base_lower_third = 26  # Increased from 20
+    base_watermark = 16  # Increased from 14
     
     return {
-        'title': max(18, min(72, int(base_title * scale_factor))),
-        'caption': max(14, min(54, int(base_caption * scale_factor))),
-        'lower_third': max(12, min(48, int(base_lower_third * scale_factor))),
-        'watermark': max(10, min(32, int(base_watermark * scale_factor))),
+        'title': max(24, min(96, int(base_title * scale_factor))),
+        'caption': max(18, min(72, int(base_caption * scale_factor))),
+        'lower_third': max(16, min(60, int(base_lower_third * scale_factor))),
+        'watermark': max(12, min(40, int(base_watermark * scale_factor))),
         'max_chars_horizontal': max(35, min(80, int(55 * scale_factor))),
         'max_chars_vertical': max(20, min(45, int(35 * scale_factor)))
     }
@@ -2596,105 +3141,155 @@ def create_chapter_markers(clips, output_path):
 
 
 def generate_upbeat_background_music(output_path, duration_seconds):
-    """Generate an upbeat but light background music track using FFmpeg's built-in audio generators.
-    Creates a pleasant, unobtrusive corporate-style background music.
+    """Generate background music using a simple, proven FFmpeg approach.
+    Creates a pleasant sine wave chord that definitely works.
     """
     try:
-        # Create a pleasant, upbeat but unobtrusive background track
-        # Uses multiple sine waves at harmonically related frequencies + some rhythm
-        # Base frequency: 220 Hz (A3), with harmonics at musical intervals
+        duration = int(duration_seconds) + 1
         
-        # Build a layered synth sound with rhythm
-        filter_complex = (
-            # Base pad (warm, sustained)
-            f"sine=f=220:d={duration_seconds}[bass];"
-            # Fifth above (adds brightness)
-            f"sine=f=330:d={duration_seconds}[fifth];"
-            # Octave (high brightness)
-            f"sine=f=440:d={duration_seconds}[oct];"
-            # Simple rhythmic pulse using tremolo
-            f"sine=f=261.6:d={duration_seconds},tremolo=f=4:d=0.7[rhythm];"
-            # Mix layers with appropriate volumes
-            "[bass]volume=0.15[b];"
-            "[fifth]volume=0.08[f];"
-            "[oct]volume=0.05[o];"
-            "[rhythm]volume=0.1[r];"
-            # Combine all layers
-            "[b][f][o][r]amix=inputs=4:duration=longest[premix];"
-            # Add gentle fade in/out
-            f"[premix]afade=t=in:st=0:d=2,afade=t=out:st={duration_seconds-2}:d=2[out]"
+        # Use a single filter_complex with aevalsrc which is more reliable
+        # Creates a C major chord (C-E-G) with slight modulation for interest
+        # This approach is simpler and more compatible
+        filter_expr = (
+            f"aevalsrc="
+            f"'0.3*sin(261.63*2*PI*t)"  # C4
+            f"+0.25*sin(329.63*2*PI*t)"  # E4  
+            f"+0.2*sin(392.00*2*PI*t)"   # G4
+            f"+0.15*sin(523.25*2*PI*t)"  # C5 (octave)
+            f"+0.1*sin(261.63*2*PI*t)*sin(4*PI*t)'"  # Tremolo for rhythm
+            f":c=stereo:s=44100:d={duration}"
         )
         
         cmd = [
-            "ffmpeg",
+            "ffmpeg", "-y",
             "-f", "lavfi",
-            "-i", f"anullsrc=r=44100:cl=stereo:d={duration_seconds}",  # Silent base
-            "-filter_complex", filter_complex,
-            "-map", "[out]",
-            "-c:a", "aac", "-b:a", "128k",
-            "-t", str(duration_seconds),
-            output_path, "-y"
+            "-i", filter_expr,
+            "-af", f"afade=t=in:st=0:d=2,afade=t=out:st={max(0, duration-3)}:d=3,volume=1.5",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            output_path
         ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        print(f"[bg_music] Generating {duration}s music track...")
+        print(f"[bg_music] Command: {' '.join(cmd[:10])}...")
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        
         if result.returncode == 0 and os.path.exists(output_path):
-            print(f"[bg_music] Generated {duration_seconds}s background music track")
-            return True
+            file_size = os.path.getsize(output_path)
+            print(f"[bg_music] Generated music: {file_size} bytes")
+            if file_size > 500:
+                return True
+            else:
+                print(f"[bg_music] File too small, generation failed")
+                return False
         else:
-            print(f"[bg_music] FFmpeg error: {result.stderr[:200]}")
+            print(f"[bg_music] FFmpeg failed: {result.stderr[:400] if result.stderr else 'no error'}")
+            print(f"[bg_music] Return code: {result.returncode}")
             return False
+            
     except Exception as e:
-        print(f"[bg_music] Failed to generate music: {e}")
+        print(f"[bg_music] Exception: {type(e).__name__}: {e}")
         return False
 
 
-def add_upbeat_background_music(video_path, output_path, music_volume=0.12):
-    """Add generated upbeat background music to video at low volume"""
+def add_upbeat_background_music(video_path, output_path, music_volume=0.5):
+    """Add background music to video. Uses higher default volume (0.5) to ensure audibility."""
     try:
-        # Get video duration
+        # Get video info
         info = get_video_info(video_path)
-        duration = info['duration']
+        duration = info.get('duration', 0)
         
         if duration <= 0:
-            print("[bg_music] Could not determine video duration")
+            print("[bg_music] Cannot determine video duration")
             return False
         
-        # Generate background music
+        print(f"[bg_music] Video duration: {duration:.1f}s, music volume: {music_volume}")
+        
+        # Generate music file
         work_dir = os.path.dirname(output_path)
-        music_path = os.path.join(work_dir, "bg_music_temp.aac")
+        music_path = os.path.join(work_dir, f"music_{int(time.time())}.aac")
         
-        if not generate_upbeat_background_music(music_path, duration + 5):  # +5 for safety
+        if not generate_upbeat_background_music(music_path, duration + 2):
+            print("[bg_music] Failed to generate music")
             return False
         
-        # Mix music with video audio
+        if not os.path.exists(music_path):
+            print("[bg_music] Music file doesn't exist")
+            return False
+        
+        # Simpler FFmpeg command to mix audio
+        # Using amerge instead of amix for more reliable results
         cmd = [
-            "ffmpeg",
+            "ffmpeg", "-y",
             "-i", video_path,
             "-i", music_path,
             "-filter_complex",
-            f"[1:a]volume={music_volume}[music];"
-            f"[0:a][music]amix=inputs=2:duration=first:dropout_transition=2[aout]",
-            "-map", "0:v", "-map", "[aout]",
+            f"[1:a]volume={music_volume}[m];[0:a][m]amerge=inputs=2,pan=stereo|c0<c0+c2|c1<c1+c3[a]",
+            "-map", "0:v",
+            "-map", "[a]",
             "-c:v", "copy",
-            "-c:a", "aac", "-b:a", "192k",
+            "-c:a", "aac",
+            "-b:a", "192k",
             "-shortest",
-            output_path, "-y"
+            output_path
         ]
         
+        print(f"[bg_music] Mixing music into video...")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         
-        # Clean up temp music file
+        # Cleanup
         if os.path.exists(music_path):
             os.remove(music_path)
         
         if result.returncode == 0 and os.path.exists(output_path):
-            print(f"[bg_music] Added background music to video")
+            size = os.path.getsize(output_path)
+            print(f"[bg_music] SUCCESS! Output: {size} bytes")
             return True
         else:
-            print(f"[bg_music] Mix failed: {result.stderr[:200]}")
-            return False
+            print(f"[bg_music] Mix failed: {result.stderr[:300] if result.stderr else 'unknown'}")
+            
+            # Try simpler fallback - just use amix
+            print("[bg_music] Trying fallback method...")
+            if not generate_upbeat_background_music(music_path, duration + 2):
+                return False
+                
+            cmd2 = [
+                "ffmpeg", "-y",
+                "-i", video_path,
+                "-i", music_path,
+                "-filter_complex",
+                f"[0:a]volume=1.0[v];[1:a]volume={music_volume}[m];[v][m]amix=inputs=2:duration=first[a]",
+                "-map", "0:v",
+                "-map", "[a]",
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-shortest",
+                output_path
+            ]
+            
+            result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=300)
+            
+            if os.path.exists(music_path):
+                os.remove(music_path)
+                
+            if result2.returncode == 0 and os.path.exists(output_path):
+                print(f"[bg_music] Fallback SUCCESS!")
+                return True
+            else:
+                print(f"[bg_music] Fallback also failed: {result2.stderr[:200] if result2.stderr else 'unknown'}")
+                return False
+                
     except Exception as e:
-        print(f"[bg_music] Failed: {e}")
+        print(f"[bg_music] Exception: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+            
+    except Exception as e:
+        print(f"[bg_music] Exception: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -2936,123 +3531,209 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
         return text
     
     def create_text_overlay_filter(text, work_dir, prefix, video_width=1920, video_height=1080,
-                                   fontcolor="yellow", bordercolor="black", position="top",
+                                   fontcolor="white", bordercolor="black", position="top",
                                    text_type="title"):
-        """Create a responsive drawtext filter with text saved to file.
+        """Create drawtext filter for LARGE highlight text at TOP of video.
         
-        Args:
-            text: The text to display
-            work_dir: Working directory for temp files
-            prefix: Prefix for the temp text file
-            video_width: Video width for responsive sizing
-            video_height: Video height for responsive sizing
-            fontcolor: Font color
-            bordercolor: Border color  
-            position: "top" or "bottom"
-            text_type: "title" for highlight text, "caption" for transcript captions
-            
-        Returns:
-            FFmpeg filter string
+        Highlight text is BIG and PROMINENT - uses 6% of video height.
+        This gives ~65px on 1080p which is very readable.
+        Uses green color (#1E7F63) to match site branding with friendly rounded font.
         """
         if not text:
             return None
         
-        # Calculate responsive sizes based on video resolution
-        sizes = get_responsive_text_sizes(video_height, video_width)
+        # HIGHLIGHT TEXT = BIG (6% of height)
+        # 1080p → 65px, 720p → 43px, 1920 vertical → 115px
+        fontsize = max(36, min(100, int(video_height * 0.06)))
         
-        if text_type == "title":
-            fontsize = sizes['title']
-            borderw = max(2, fontsize // 10)  # Thicker border for visibility
-        else:  # caption
-            fontsize = sizes['caption']
-            borderw = max(2, fontsize // 10)
+        # Calculate safe margins (4% from edges)
+        margin_x = int(video_width * 0.04)
+        margin_y = int(video_height * 0.03)
+        usable_width = video_width - (2 * margin_x)
         
-        # Determine max chars based on aspect ratio - be more conservative to prevent cut-off
-        aspect = video_width / video_height if video_height > 0 else 16/9
-        if aspect < 1:  # Vertical video (9:16)
-            max_chars = max(20, min(35, int(video_width / (fontsize * 0.55))))
-        else:  # Horizontal video (16:9)
-            max_chars = max(30, min(60, int(video_width / (fontsize * 0.55))))
-            
-        # Wrap text manually with conservative character limit
+        # Calculate max characters per line
+        char_width = fontsize * 0.52
+        max_chars = max(12, int(usable_width / char_width))
+        
+        print(f"[HIGHLIGHT] Video: {video_width}x{video_height}, fontsize={fontsize}px, max_chars={max_chars}")
+        
+        # Word wrap
         words = text.split()
         lines = []
         current_line = ""
         
         for word in words:
-            # Truncate very long words
-            if len(word) > max_chars - 5:
-                word = word[:max_chars-8] + "..."
+            while len(word) > max_chars - 2:
+                if current_line:
+                    lines.append(current_line)
+                    current_line = ""
+                lines.append(word[:max_chars-2] + "-")
+                word = word[max_chars-2:]
             
-            if len(current_line) + len(word) + 1 <= max_chars:
-                current_line = current_line + " " + word if current_line else word
+            test = f"{current_line} {word}".strip() if current_line else word
+            if len(test) <= max_chars:
+                current_line = test
             else:
                 if current_line:
                     lines.append(current_line)
                 current_line = word
-        
         if current_line:
             lines.append(current_line)
         
-        # Limit to 2 lines for title, 3 for caption to prevent overflow
-        max_lines = 2 if text_type == "title" else 3
-        if len(lines) > max_lines:
-            lines = lines[:max_lines]
-            if len(lines[-1]) > max_chars - 3:
-                lines[-1] = lines[-1][:max_chars-6] + "..."
-            else:
-                lines[-1] = lines[-1] + "..."
+        # Max 4 lines
+        if len(lines) > 4:
+            lines = lines[:4]
+            lines[-1] = lines[-1][:max_chars-3] + "..."
         
-        wrapped_text = '\n'.join(lines)
+        wrapped = '\n'.join(lines)
         
-        # Write to temp file (FFmpeg textfile is more reliable for multi-line)
-        text_file = os.path.join(work_dir, f"{prefix}_text.txt")
+        # Write to file
+        text_file = os.path.join(work_dir, f"{prefix}_highlight.txt")
         with open(text_file, 'w', encoding='utf-8') as f:
-            f.write(wrapped_text)
+            f.write(wrapped)
         
-        # Escape the file path for FFmpeg
-        text_file_escaped = text_file.replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
+        text_escaped = text_file.replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
         
-        # Calculate Y position with safe margins (5% from edges)
-        safe_margin = int(video_height * 0.05)
+        # Position at TOP with safe margin
+        y_pos = margin_y
         
-        if position == "top":
-            # Position from top with safe margin
-            y_expr = str(safe_margin)
-        else:
-            # Position from bottom with safe margin, accounting for text height
-            # th = text height, use larger margin for multi-line text
-            y_expr = f"h-th-{safe_margin}"
+        # Strong shadow/border for readability
+        shadow = max(3, fontsize // 12)
+        border = max(3, fontsize // 10)
         
-        # Build filter string using textfile
+        # GREEN color (#1E7F63) to match site branding
+        # FFmpeg uses BGR format, so #1E7F63 becomes 0x637F1E
+        # Using a lighter green (#22C55E) for better video visibility -> 0x5EC522
+        green_color = "0x22C55E"  # Bright green, very readable on video
+        
+        # Try friendly fonts in order of preference (macOS/Linux compatible)
+        # These are rounded, friendly fonts that look good on video
+        font_options = "Arial Rounded MT Bold:Avenir Next Rounded:SF Pro Rounded:Helvetica Neue:Arial"
+        
         filter_str = (
-            f"drawtext=textfile='{text_file_escaped}'"
+            f"drawtext=textfile='{text_escaped}'"
             f":fontsize={fontsize}"
-            f":fontcolor={fontcolor}"
-            f":borderw={borderw}"
-            f":bordercolor={bordercolor}"
+            f":fontcolor={green_color}"
+            f":shadowcolor=black@0.9"
+            f":shadowx={shadow}:shadowy={shadow}"
+            f":borderw={border}"
+            f":bordercolor=white@0.95"
             f":x=(w-tw)/2"
-            f":y={y_expr}"
-            f":font=Arial"
+            f":y={y_pos}"
+            f":line_spacing={int(fontsize * 0.2)}"
         )
         
-        print(f"[text_overlay] Created filter: fontsize={fontsize}, max_chars={max_chars}, lines={len(lines)}, video={video_width}x{video_height}")
+        print(f"[HIGHLIGHT] {len(lines)} lines at y={y_pos}, color=GREEN")
         return filter_str
+
+    def create_subtitle_filter(segments, work_dir, prefix, video_width=1920, video_height=1080):
+        """Create FFmpeg subtitle filter for SMALL captions at BOTTOM of video.
         
-        # Build filter string using textfile
-        filter_str = (
-            f"drawtext=textfile='{text_file_escaped}'"
-            f":fontsize={fontsize}"
-            f":fontcolor={fontcolor}"
-            f":borderw={borderw}"
-            f":bordercolor={bordercolor}"
-            f":x=(w-tw)/2"
-            f":y={y_expr}"
-            f":font=Arial"
+        Captions are SMALLER than highlight text (2.2% vs 6% of height).
+        Positioned at the bottom with generous margin.
+        """
+        if not segments:
+            print("[CAPTION] No segments provided")
+            return None, None
+        
+        # Create SRT file
+        srt_file = os.path.join(work_dir, f"{prefix}_captions.srt")
+        
+        # CAPTIONS = SMALL (2.2% of height, about 1/3 of highlight size)
+        # 1080p → 24px, 720p → 16px, 1920 vertical → 42px
+        fontsize = max(16, min(42, int(video_height * 0.022)))
+        
+        # Large bottom margin to stay away from bottom edge
+        # Horizontal: 10% from bottom, Vertical: 18% from bottom
+        aspect = video_width / video_height if video_height > 0 else 16/9
+        if aspect < 1:  # Vertical (9:16)
+            margin_v = int(video_height * 0.18)
+        else:  # Horizontal (16:9)
+            margin_v = int(video_height * 0.10)
+        
+        print(f"[CAPTION] Video: {video_width}x{video_height}, fontsize={fontsize}px, margin_v={margin_v}px")
+        
+        def format_srt_time(seconds):
+            """Format seconds to SRT time (HH:MM:SS,mmm)"""
+            if seconds < 0:
+                seconds = 0
+            h = int(seconds // 3600)
+            m = int((seconds % 3600) // 60)
+            s = int(seconds % 60)
+            ms = int((seconds % 1) * 1000)
+            return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+        
+        # Max chars for wrapping
+        char_width = fontsize * 0.55
+        usable_width = video_width - (2 * int(video_width * 0.05))
+        max_chars = max(30, int(usable_width / char_width))
+        
+        # Build SRT
+        srt_content = ""
+        idx = 1
+        
+        for seg in segments:
+            start = seg.get('start', 0)
+            end = seg.get('end', start + 2)
+            text = seg.get('text', '').strip()
+            
+            if not text:
+                continue
+            
+            # Min 0.5s display
+            if end - start < 0.5:
+                end = start + 0.5
+            
+            # Word wrap (max 2 lines for captions)
+            if len(text) > max_chars:
+                words = text.split()
+                lines = []
+                cur = ""
+                for w in words:
+                    if len(cur) + len(w) + 1 <= max_chars:
+                        cur = f"{cur} {w}".strip() if cur else w
+                    else:
+                        if cur:
+                            lines.append(cur)
+                        cur = w
+                if cur:
+                    lines.append(cur)
+                text = '\n'.join(lines[:2])
+            
+            srt_content += f"{idx}\n"
+            srt_content += f"{format_srt_time(start)} --> {format_srt_time(end)}\n"
+            srt_content += f"{text}\n\n"
+            idx += 1
+        
+        if idx == 1:
+            print("[CAPTION] No valid entries")
+            return None, None
+        
+        # Write SRT
+        with open(srt_file, 'w', encoding='utf-8') as f:
+            f.write(srt_content)
+        
+        print(f"[CAPTION] Created {idx - 1} caption entries")
+        
+        # Escape for FFmpeg
+        srt_escaped = srt_file.replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
+        
+        # Style: small white text with outline, at bottom
+        style = (
+            f"FontSize={fontsize},"
+            f"FontName=DejaVu Sans,"
+            f"PrimaryColour=&H00FFFFFF,"
+            f"OutlineColour=&H00000000,"
+            f"BackColour=&H80000000,"
+            f"Outline=2,"
+            f"Shadow=1,"
+            f"MarginV={margin_v},"
+            f"Alignment=2"
         )
         
-        print(f"[text_overlay] Created filter: fontsize={fontsize}, max_chars={max_chars}, lines={len(lines)}")
-        return filter_str
+        filter_str = f"subtitles='{srt_escaped}':force_style='{style}'"
+        
+        return filter_str, srt_file
 
     try:
         video_file = os.path.join(work, "video.mp4")
@@ -3212,7 +3893,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             print(f"[individual] Failed to download segment {i+1}, skipping")
                             continue
 
-                    # Build FFmpeg filter for highlight text only
+                    # Build FFmpeg filter for highlight text and subtitles
                     vf_filters = []
                     
                     # Add highlight text at top (the AI-generated summary label)
@@ -3220,15 +3901,24 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                         highlight_filter = create_text_overlay_filter(
                             highlight_text, work, f"ind_highlight_{i}",
                             video_width=clip_video_width, video_height=clip_video_height,
-                            fontcolor="yellow", bordercolor="black",
+                            fontcolor="white", bordercolor="black",
                             position="top", text_type="title"
                         )
                         if highlight_filter:
                             vf_filters.append(highlight_filter)
-                            print(f"[individual] Adding highlight label: {highlight_text[:50]}...")
-                    
-                    # NOTE: Removed static caption text block - captions should follow speech timing
-                    # not be displayed as one big static block
+                            print(f"[individual] Adding highlight label: {highlight_text[:80]}...")
+                        
+                        # Add timed subtitles that follow speaker timing
+                        if transcript_data:
+                            clip_transcript = get_transcript_for_timerange(orig_start, orig_end, transcript_data)
+                            if clip_transcript:
+                                subtitle_filter, _ = create_subtitle_filter(
+                                    clip_transcript, work, f"ind_subs_{i}",
+                                    video_width=clip_video_width, video_height=clip_video_height
+                                )
+                                if subtitle_filter:
+                                    vf_filters.append(subtitle_filter)
+                                    print(f"[individual] Adding {len(clip_transcript)} subtitle segments")
                     
                     # Add color filter if specified
                     if color_filter_str:
@@ -3315,14 +4005,24 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                         highlight_filter = create_text_overlay_filter(
                             highlight_text, work, f"social_highlight_{i}",
                             video_width=social_width, video_height=social_height,
-                            fontcolor="yellow", bordercolor="black",
+                            fontcolor="white", bordercolor="black",
                             position="top", text_type="title"
                         )
                         if highlight_filter:
                             vf_filters.append(highlight_filter)
-                            print(f"[social] Adding highlight label: {highlight_text[:50]}...")
-                    
-                    # NOTE: Removed static caption text block - no longer adding joined transcript text
+                            print(f"[social] Adding highlight label: {highlight_text[:80]}...")
+                        
+                        # Step 3: Add timed subtitles that follow speaker timing
+                        if transcript_data:
+                            clip_transcript = get_transcript_for_timerange(orig_start, orig_end, transcript_data)
+                            if clip_transcript:
+                                subtitle_filter, _ = create_subtitle_filter(
+                                    clip_transcript, work, f"social_subs_{i}",
+                                    video_width=social_width, video_height=social_height
+                                )
+                                if subtitle_filter:
+                                    vf_filters.append(subtitle_filter)
+                                    print(f"[social] Adding {len(clip_transcript)} subtitle segments")
                     
                     # Add color filter if specified
                     if color_filter_str:
@@ -3409,7 +4109,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             continue
                     
                     if captions_enabled and highlight_text:
-                        # Need to re-encode to add highlight label text
+                        # Need to re-encode to add highlight label text and subtitles
                         clip_file = os.path.join(work, f"temp_{i}.mp4")
                         vf_filters = []
                         
@@ -3417,15 +4117,26 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                         highlight_filter = create_text_overlay_filter(
                             highlight_text, work, f"combined_highlight_{i}",
                             video_width=video_width, video_height=video_height,
-                            fontcolor="yellow", bordercolor="black",
+                            fontcolor="white", bordercolor="black",
                             position="top", text_type="title"
                         )
                         if highlight_filter:
                             vf_filters.append(highlight_filter)
-                            print(f"[combined] Adding highlight label: {highlight_text[:50]}...")
+                            print(f"[combined] Adding highlight label: {highlight_text[:80]}...")
                         
-                        # NOTE: Removed static caption text block that joined all transcript text
-                        # This was causing duplicate text to appear under the highlight label
+                        # Add timed subtitles that follow speaker timing
+                        orig_start = clip.get("start", 0)
+                        orig_end = clip.get("end", orig_start + 10)
+                        if transcript_data:
+                            clip_transcript = get_transcript_for_timerange(orig_start, orig_end, transcript_data)
+                            if clip_transcript:
+                                subtitle_filter, _ = create_subtitle_filter(
+                                    clip_transcript, work, f"combined_subs_{i}",
+                                    video_width=video_width, video_height=video_height
+                                )
+                                if subtitle_filter:
+                                    vf_filters.append(subtitle_filter)
+                                    print(f"[combined] Adding {len(clip_transcript)} subtitle segments")
                         
                         # Add color filter if specified
                         if color_filter_str:
@@ -3521,14 +4232,17 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
             final_output = output
             temp_count = 0
             
-            # Add background music if requested
-            if do_background_music and format_type in ['combined', 'social']:
+            # Add background music if requested (works for ALL formats)
+            if do_background_music:
                 job["message"] = "Adding background music..."
+                print(f"[postproc] Adding background music to {format_type} video...")
                 temp_output = os.path.join(work, f"with_music_{temp_count}.mp4")
-                if add_upbeat_background_music(final_output, temp_output, music_volume=0.12):
+                if add_upbeat_background_music(final_output, temp_output, music_volume=0.5):
                     final_output = temp_output
                     temp_count += 1
-                    print(f"[postproc] Background music added at 12% volume")
+                    print(f"[postproc] Background music added successfully!")
+                else:
+                    print(f"[postproc] Background music failed - continuing without it")
             
             # Add logo watermark if requested
             if do_logo_watermark and format_type in ['combined', 'social']:
@@ -3651,6 +4365,340 @@ async def render_clips(req: Request):
         daemon=True
     ).start()
     return {"jobId": job_id, "format": format_type, "clipCount": len(clips)}
+
+
+# ============================================================================
+# Multi-Video Export for Issue Tracker
+# ============================================================================
+
+def multi_video_job(job_id, clips_by_video, format_type, captions_enabled):
+    """
+    Process clips from multiple videos into a single export.
+    
+    clips_by_video: dict mapping videoId -> list of {start, end, highlight, meetingTitle}
+    format_type: 'zip' for individual clips, 'montage' for combined video
+    """
+    job = JOBS[job_id]
+    job["status"] = "processing"
+    job["percent"] = 0
+    
+    work = tempfile.mkdtemp(prefix="multi_export_")
+    all_clip_files = []
+    total_clips = sum(len(clips) for clips in clips_by_video.values())
+    processed = 0
+    
+    try:
+        for video_id, clips in clips_by_video.items():
+            job["message"] = f"Processing video {video_id}..."
+            print(f"[multi_export] Processing {len(clips)} clips from video {video_id}")
+            
+            # Download video or use cached
+            video_file = os.path.join(work, f"video_{video_id}.mp4")
+            cached_video = os.path.join(FILES_DIR, f"{video_id}.mp4")
+            
+            if os.path.exists(cached_video):
+                video_file = cached_video
+                print(f"[multi_export] Using cached video: {cached_video}")
+            else:
+                # Check video duration first
+                job["message"] = f"Downloading video {video_id}..."
+                
+                try:
+                    duration_cmd = ["yt-dlp", "--print", "duration", f"https://www.youtube.com/watch?v={video_id}"]
+                    duration_result = subprocess.run(duration_cmd, capture_output=True, text=True, timeout=30)
+                    video_duration = float(duration_result.stdout.strip()) if duration_result.returncode == 0 else 0
+                except:
+                    video_duration = 0
+                
+                # For long videos, download segments only
+                if video_duration > 1800:  # > 30 min
+                    print(f"[multi_export] Long video - will download segments")
+                    video_file = None  # Will download per-segment
+                else:
+                    # Download full video
+                    cmd = [
+                        "yt-dlp",
+                        "-f", "best[ext=mp4][height<=720]/best[ext=mp4]/best",
+                        "--no-playlist",
+                        "-o", video_file,
+                        f"https://www.youtube.com/watch?v={video_id}",
+                    ]
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+                    if result.returncode != 0:
+                        print(f"[multi_export] Failed to download {video_id}: {result.stderr[:200]}")
+                        continue
+            
+            # Get transcript for captions
+            transcript_data = None
+            if captions_enabled and video_id in STORED_TRANSCRIPTS:
+                transcript_data = STORED_TRANSCRIPTS[video_id]
+            
+            # Process each clip from this video
+            for i, clip in enumerate(clips):
+                processed += 1
+                job["percent"] = int((processed / total_clips) * 80)
+                job["message"] = f"Processing clip {processed}/{total_clips}..."
+                
+                start = clip.get("start", 0)
+                end = clip.get("end", start + 30)
+                duration = end - start
+                highlight = clip.get("highlight", "")
+                meeting_title = clip.get("meetingTitle", f"Meeting {video_id}")
+                
+                # Clean meeting title for filename
+                safe_title = re.sub(r'[^\w\s-]', '', meeting_title)[:30].strip()
+                clip_filename = f"{safe_title}_{i+1}_{int(start)}s.mp4"
+                clip_file = os.path.join(work, clip_filename)
+                
+                current_video = video_file
+                seek_start = start
+                
+                # If no full video file, download just this segment
+                if not video_file or not os.path.exists(video_file):
+                    segment_file = os.path.join(work, f"seg_{video_id}_{i}.mp4")
+                    section_start = max(0, start - 5)
+                    section_end = end + 5
+                    
+                    cmd = [
+                        "yt-dlp",
+                        "-f", "best[ext=mp4][height<=720]/best[ext=mp4]/best",
+                        "--download-sections", f"*{section_start}-{section_end}",
+                        "--force-keyframes-at-cuts",
+                        "--no-playlist",
+                        "-o", segment_file,
+                        f"https://www.youtube.com/watch?v={video_id}",
+                    ]
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                    if result.returncode == 0 and os.path.exists(segment_file):
+                        current_video = segment_file
+                        seek_start = 5  # Account for padding
+                    else:
+                        print(f"[multi_export] Failed to download segment: {result.stderr[:200]}")
+                        continue
+                
+                # Get video dimensions
+                try:
+                    probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", 
+                               "-show_entries", "stream=width,height", "-of", "json", current_video]
+                    probe_result = subprocess.run(probe_cmd, capture_output=True, text=True)
+                    probe_data = json.loads(probe_result.stdout)
+                    width = probe_data['streams'][0]['width']
+                    height = probe_data['streams'][0]['height']
+                except:
+                    width, height = 1920, 1080
+                
+                # Build FFmpeg command with highlight text overlay
+                vf_filters = []
+                
+                if highlight and captions_enabled:
+                    # Create highlight text file
+                    highlight_file = os.path.join(work, f"highlight_{video_id}_{i}.txt")
+                    
+                    # Word wrap the highlight text
+                    fontsize = max(24, min(48, int(height * 0.04)))
+                    char_width = fontsize * 0.5
+                    max_chars = max(20, int((width * 0.9) / char_width))
+                    
+                    words = highlight.split()
+                    lines = []
+                    current_line = ""
+                    for word in words:
+                        test = f"{current_line} {word}".strip() if current_line else word
+                        if len(test) <= max_chars:
+                            current_line = test
+                        else:
+                            if current_line:
+                                lines.append(current_line)
+                            current_line = word
+                    if current_line:
+                        lines.append(current_line)
+                    
+                    with open(highlight_file, 'w') as f:
+                        f.write('\n'.join(lines[:3]))
+                    
+                    highlight_escaped = highlight_file.replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
+                    
+                    vf_filters.append(
+                        f"drawtext=textfile='{highlight_escaped}'"
+                        f":fontsize={fontsize}"
+                        f":fontcolor=0x22C55E"  # Green
+                        f":borderw=3"
+                        f":bordercolor=white@0.95"
+                        f":shadowcolor=black@0.8"
+                        f":shadowx=2:shadowy=2"
+                        f":x=(w-tw)/2"
+                        f":y=30"
+                    )
+                
+                # Build FFmpeg command
+                if vf_filters:
+                    cmd = [
+                        "ffmpeg",
+                        "-ss", str(max(0, seek_start - 0.5)),
+                        "-i", current_video,
+                        "-ss", "0.5",
+                        "-t", str(duration),
+                        "-vf", ",".join(vf_filters),
+                        "-c:v", "libx264", "-preset", "fast",
+                        "-c:a", "aac", "-ar", "44100",
+                        clip_file, "-y"
+                    ]
+                else:
+                    cmd = [
+                        "ffmpeg",
+                        "-ss", str(seek_start),
+                        "-i", current_video,
+                        "-t", str(duration),
+                        "-c:v", "libx264", "-preset", "fast",
+                        "-c:a", "aac", "-ar", "44100",
+                        clip_file, "-y"
+                    ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                
+                if os.path.exists(clip_file):
+                    all_clip_files.append({
+                        "file": clip_file,
+                        "filename": clip_filename,
+                        "video_id": video_id,
+                        "start": start,
+                        "meeting_title": meeting_title
+                    })
+                    print(f"[multi_export] Created clip: {clip_filename}")
+                else:
+                    print(f"[multi_export] FFmpeg failed: {result.stderr[:200]}")
+        
+        if not all_clip_files:
+            job["status"] = "error"
+            job["message"] = "No clips could be processed"
+            return
+        
+        job["percent"] = 85
+        
+        # Create output based on format
+        if format_type == "zip":
+            job["message"] = "Creating ZIP archive..."
+            output_file = os.path.join(FILES_DIR, f"issue_tracker_clips_{job_id[:8]}.zip")
+            
+            with zipfile.ZipFile(output_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for clip_info in all_clip_files:
+                    zf.write(clip_info["file"], clip_info["filename"])
+            
+            print(f"[multi_export] Created ZIP with {len(all_clip_files)} clips")
+            
+        else:  # montage
+            job["message"] = "Creating montage video..."
+            output_file = os.path.join(FILES_DIR, f"issue_tracker_montage_{job_id[:8]}.mp4")
+            
+            # Create concat file
+            concat_file = os.path.join(work, "concat.txt")
+            with open(concat_file, 'w') as f:
+                for clip_info in all_clip_files:
+                    f.write(f"file '{clip_info['file']}'\n")
+            
+            # Concatenate with re-encoding for compatibility
+            cmd = [
+                "ffmpeg", "-f", "concat", "-safe", "0",
+                "-i", concat_file,
+                "-c:v", "libx264", "-preset", "fast",
+                "-c:a", "aac", "-ar", "44100",
+                output_file, "-y"
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            
+            if result.returncode != 0:
+                print(f"[multi_export] Concat failed: {result.stderr[:200]}")
+                job["status"] = "error"
+                job["message"] = "Failed to create montage"
+                return
+            
+            print(f"[multi_export] Created montage from {len(all_clip_files)} clips")
+        
+        # Cleanup
+        try:
+            shutil.rmtree(work)
+        except:
+            pass
+        
+        if os.path.exists(output_file):
+            file_size = os.path.getsize(output_file)
+            job["status"] = "done"
+            job["percent"] = 100
+            job["output"] = f"/api/download/{os.path.basename(output_file)}"
+            job["message"] = f"Export complete! {len(all_clip_files)} clips ({file_size / 1024 / 1024:.1f} MB)"
+            job["clipCount"] = len(all_clip_files)
+            print(f"[multi_export] SUCCESS: {output_file}")
+        else:
+            job["status"] = "error"
+            job["message"] = "Output file not created"
+            
+    except Exception as e:
+        print(f"[multi_export] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        job["status"] = "error"
+        job["message"] = str(e)
+        try:
+            shutil.rmtree(work)
+        except:
+            pass
+
+
+@app.post("/api/render_multi_video_clips")
+async def render_multi_video_clips(req: Request):
+    """
+    Render clips from MULTIPLE videos into a single export.
+    Used by Issue Tracker for cross-meeting clip collections.
+    
+    Request body:
+    {
+        "clipsByVideo": {
+            "videoId1": [{"start": 0, "end": 30, "highlight": "text", "meetingTitle": "title"}, ...],
+            "videoId2": [...]
+        },
+        "format": "zip" | "montage",
+        "captions": true | false
+    }
+    """
+    if CLOUD_MODE:
+        return {
+            "error": "Video export is not available in cloud mode",
+            "message": "YouTube blocks video downloads from cloud servers. Run the desktop app for this feature.",
+            "jobId": None
+        }
+    
+    data = await req.json()
+    clips_by_video = data.get("clipsByVideo", {})
+    format_type = data.get("format", "zip")
+    captions_enabled = data.get("captions", True)
+    
+    if not clips_by_video:
+        return {"error": "No clips provided", "jobId": None}
+    
+    total_clips = sum(len(clips) for clips in clips_by_video.values())
+    total_videos = len(clips_by_video)
+    
+    print(f"[render_multi_video_clips] Starting: {total_clips} clips from {total_videos} videos, format={format_type}")
+    
+    job_id = str(uuid.uuid4())
+    JOBS[job_id] = {
+        "status": "queued",
+        "percent": 0,
+        "message": f"Preparing to export {total_clips} clips from {total_videos} videos..."
+    }
+    
+    threading.Thread(
+        target=multi_video_job,
+        args=(job_id, clips_by_video, format_type, captions_enabled),
+        daemon=True
+    ).start()
+    
+    return {
+        "jobId": job_id,
+        "format": format_type,
+        "clipCount": total_clips,
+        "videoCount": total_videos
+    }
 
 
 @app.get("/api/job_status")
@@ -3982,6 +5030,29 @@ async def highlight_reel(req: Request):
         target=simple_job, args=(job_id, vid, clips, format_type, captions_enabled, transcript_data, video_options), daemon=True
     ).start()
     return {"jobId": job_id}
+
+
+@app.get("/api/download/{file_name}")
+async def api_download_file(file_name: str):
+    """Serve exported files via /api/download path"""
+    file_path = os.path.join(FILES_DIR, file_name)
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(404, f"File not found: {file_name}")
+    
+    # Determine media type
+    if file_name.endswith('.mp4'):
+        media_type = "video/mp4"
+    elif file_name.endswith('.zip'):
+        media_type = "application/zip"
+    else:
+        media_type = "application/octet-stream"
+    
+    return FileResponse(
+        path=file_path, 
+        filename=file_name, 
+        media_type=media_type
+    )
 
 
 @app.get("/files/{file_name}")
@@ -5411,21 +6482,32 @@ async def get_clip_preview(req: Request):
 TOPIC_SUBSCRIPTIONS = {}  # {user_id: {topic: {email, frequency, created_at}}}
 ISSUE_TIMELINES = {}  # {issue_id: {name, meetings: [{video_id, date, summary}]}}
 JARGON_DICTIONARY = {
-    "TIF": "Tax Increment Financing - A special zone where property tax increases fund local improvements",
-    "CIP": "Capital Improvement Plan - A multi-year plan for major infrastructure investments",
-    "RFP": "Request for Proposal - A formal document asking vendors to submit bids for a project",
-    "variance": "Permission to deviate from zoning rules for a specific property",
-    "setback": "Required distance between a building and property lines",
-    "FAR": "Floor Area Ratio - The ratio of building floor space to lot size",
-    "quorum": "The minimum number of members needed to conduct official business",
-    "motion": "A formal proposal for the group to take action on something",
-    "second": "Support from another member needed before a motion can be discussed",
-    "table": "To postpone discussion of an item to a later time",
-    "amend": "To change or modify a motion before voting on it",
-    "overlay district": "Additional zoning rules layered on top of base zoning",
-    "inclusionary zoning": "Rules requiring new developments to include affordable housing",
-    "PILOT": "Payment In Lieu Of Taxes - Negotiated payments from tax-exempt organizations",
-    "eminent domain": "Government power to take private property for public use with fair compensation",
+    "TIF": "Tax Increment Financing - A special zone where property tax increases fund local improvements. For example, when a city designates a blighted area as a TIF district, property tax growth in that area goes toward improving streets, utilities, and buildings rather than the general city budget.",
+    "CIP": "Capital Improvement Plan - A multi-year plan for major infrastructure investments like roads, buildings, and water systems. Your city council reviews and approves this plan annually to prioritize which big projects get funded over the next 5-10 years.",
+    "RFP": "Request for Proposal - A formal document asking vendors to submit bids for a project. When the city needs a new service (like snow plowing or building construction), they issue an RFP so companies can compete for the contract.",
+    "variance": "Permission to deviate from zoning rules for a specific property. For example, if zoning requires homes to be 15 feet from the property line but you want to build a garage only 10 feet away, you need to request a variance from the zoning board.",
+    "setback": "Required distance between a building and property lines. Zoning laws often require structures to be built a minimum distance (like 10 or 20 feet) from property boundaries to ensure space between neighbors.",
+    "FAR": "Floor Area Ratio - The ratio of a building's total floor area to the size of the lot it sits on. A FAR of 2.0 means you can build twice as much floor space as your lot size (like a 2-story building covering the whole lot, or a 4-story building covering half).",
+    "quorum": "The minimum number of members needed to conduct official business. If a board has 7 members and requires a quorum of 4, nothing can be voted on unless at least 4 members are present.",
+    "motion": "A formal proposal for the group to take action on something. A board member says 'I move to approve the budget' to start the process of voting on an item.",
+    "second": "Support from another member needed before a motion can be discussed. After someone makes a motion, another member must say 'I second that motion' before the group can debate and vote on it.",
+    "table": "To postpone discussion of an item to a later time. When a board 'tables' an item, they're setting it aside to discuss at a future meeting - it doesn't mean rejecting it.",
+    "amend": "To change or modify a motion before voting on it. If someone moves to approve a $50,000 budget, another member can amend it to $45,000 instead.",
+    "overlay district": "Additional zoning rules layered on top of base zoning. For example, a historic overlay district might require special architectural review for any changes to buildings, even if regular zoning would allow them.",
+    "inclusionary zoning": "Rules requiring new developments to include affordable housing. A town might require that 10-20% of units in any new apartment building be rented at below-market rates.",
+    "PILOT": "Payment In Lieu Of Taxes - Negotiated payments from tax-exempt organizations. Since hospitals, colleges, and nonprofits don't pay property taxes, cities often negotiate PILOT agreements so these large institutions still contribute to city services.",
+    "eminent domain": "Government power to take private property for public use with fair compensation. A city can acquire private land for a new road or school, but must pay the owner fair market value.",
+    "zoning": "The system of rules that divides a city into different areas (zones) and specifies what can be built in each area. Residential zones allow homes, commercial zones allow stores and offices, industrial zones allow factories. Zoning determines building height, density, parking requirements, and acceptable uses for each area.",
+    "site plan": "A detailed drawing showing exactly how a property will be developed - where buildings go, parking lot layout, landscaping, drainage, and utilities. Site plans must be approved by the planning board before construction can begin.",
+    "conditional use": "A use that's allowed in a zone only with special approval. For example, a daycare center might be a conditional use in a residential zone - it can be approved but only if it meets certain requirements like parking and noise limits.",
+    "subdivision": "Dividing a larger piece of land into smaller lots. If a farmer wants to sell off part of their land for housing development, they must go through a subdivision approval process.",
+    "abatement": "Reduction or elimination of taxes, fees, or penalties. Property tax abatements are often offered to attract businesses - a company might get reduced property taxes for 5 years if they build a new facility.",
+    "ordinance": "A local law passed by city council or town meeting. Ordinances cover everything from noise regulations to building codes to parking rules.",
+    "warrant article": "An item on the agenda at a town meeting that requires voter action. Town meeting members vote on warrant articles to approve budgets, zoning changes, and new bylaws.",
+    "public hearing": "A meeting where residents can speak for or against a proposed action. Before major decisions like zoning changes, governments must hold public hearings to gather community input.",
+    "special permit": "Approval required for certain uses that need extra review. Similar to conditional use - some activities are allowed in a zone but require special permit approval to ensure they won't cause problems.",
+    "easement": "Legal right to use someone else's property for a specific purpose. A utility company might have an easement across your property to maintain power lines, even though you own the land.",
+    "impact fee": "A one-time charge on new development to pay for public infrastructure. If a new subdivision will increase traffic, the developer might pay an impact fee to help fund road improvements.",
 }
 
 # Topic Subscriptions
@@ -5591,12 +6673,23 @@ async def explain_jargon(req: Request):
             return {"term": key, "explanation": explanation, "source": "dictionary"}
     
     # Use GPT for intelligent civic context explanation
+    if not OPENAI_API_KEY:
+        return {
+            "term": term,
+            "explanation": f"'{term}' is a civic or government term. No API key available for AI-powered definitions.",
+            "example": None,
+            "source": "fallback"
+        }
+    
     try:
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        
         prompt = f"""You are an expert in local government, civic processes, and municipal administration.
 
 A user wants to understand the term: "{term}"
 
-Provide a clear, plain-language explanation of this term specifically in the context of:
+Provide a comprehensive, detailed explanation of this term in the context of:
 - Local government meetings (city council, planning board, zoning board, school committee)
 - Municipal processes and procedures
 - Civic engagement and public participation
@@ -5606,21 +6699,20 @@ Provide a clear, plain-language explanation of this term specifically in the con
 Your explanation should be:
 1. Written for someone with no government experience (8th grade reading level)
 2. Focused on how this term is used in LOCAL government context
-3. 2-3 sentences maximum
-4. Include a brief real-world example if helpful
-
-If this term is not specifically a civic/government term, still try to explain how it might come up in a local government meeting context.
+3. 3-5 sentences that fully explain the concept
+4. Always include a concrete real-world example of how this comes up in meetings
+5. Explain WHY this matters to residents
 
 Respond in this JSON format:
 {{
-  "explanation": "Your plain-language explanation here",
-  "example": "A brief example of how this might come up in a meeting (optional, can be null)"
+  "explanation": "Your detailed plain-language explanation here (3-5 sentences)",
+  "example": "A concrete example like: In a recent town meeting, the planning board discussed a variance request from a homeowner who wanted to build a shed closer to their property line than normally allowed."
 }}"""
 
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-5.1",
             messages=[
-                {"role": "system", "content": "You are a helpful civic education assistant that explains government terms in plain language."},
+                {"role": "system", "content": "You are a helpful civic education assistant that explains government terms in plain, detailed language with real examples. Never give generic responses."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=300,
