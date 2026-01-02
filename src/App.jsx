@@ -7658,7 +7658,7 @@ export default function App() {
             )}
             <button
               className="btn btn-primary animate-hover"
-              onClick={loadAll}
+              onClick={() => loadAll()}
               disabled={loading.transcript}
             >
               {loading.transcript ? "Loading..." : t.loadVideo}
