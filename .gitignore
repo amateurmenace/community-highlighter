@@ -1,0 +1,75 @@
+# Environment files - NEVER COMMIT THESE
+.env
+.env.*
+backend/.env
+**/.env
+
+# Virtual environments
+.venv/
+venv/
+backend/.venv/
+backend/venv/
+ENV/
+env/
+**/venv/
+
+# Node modules
+node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Large binary files
+*.dylib
+*.so
+*.a
+
+# Build outputs
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Cache
+.cache/
+*.log
+*.zip
+CommunityHighlighter-*.zip
+*.zip
+
+# Build artifacts - DO NOT COMMIT
+*.dmg
+*.zip
+dist/
+build/
+*.app
+release/
+AppIcon.icns
+AppIcon.iconset/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.egg-info/
+
+# Node
+node_modules/
+
+# Environment
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db

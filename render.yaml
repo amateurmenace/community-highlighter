@@ -1,0 +1,25 @@
+# Render.com deployment configuration
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: community-highlighter
+    runtime: python
+    plan: free
+    buildCommand: |
+      pip install -r requirements.txt
+      python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords'); nltk.download('punkt_tab')"
+      npm install
+      npm run build
+    startCommand: python app.py
+    envVars:
+      - key: CLOUD_MODE
+        value: "true"
+      - key: OPENAI_API_KEY
+        sync: false  # Set this in Render dashboard
+      - key: YOUTUBE_API_KEY
+        sync: false  # Optional
+      - key: PYTHON_VERSION
+        value: "3.11"
+    healthCheckPath: /api/health
+    autoDeploy: true
