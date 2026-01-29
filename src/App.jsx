@@ -81,6 +81,24 @@ const padTimePrecise = (x) => {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
 };
 
+// ============================================================================
+// v7.0: ENHANCED UX HOOKS (minimal, non-breaking)
+// ============================================================================
+
+// Hook to detect scroll and add 'scrolled' class to header
+function useScrollDetection() {
+  useEffect(() => {
+    const handleScroll = () => {
+      const header = document.querySelector('header');
+      if (header) {
+        header.classList.toggle('scrolled', window.scrollY > 50);
+      }
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+}
+
 // Remove internal repetition in text (e.g., "hello world hello world" -> "hello world")
 function removeInternalRepetition(text) {
   if (!text || text.length < 10) return text;
@@ -466,12 +484,12 @@ function FeedbackModal({ onClose }) {
       }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h2 style={{ margin: 0, fontSize: '20px', color: '#1e7f63' }}>Share Your Feedback</h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#999' }}>âœ•</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#999' }}>✕</button>
         </div>
         
         {sent ? (
           <div style={{ textAlign: 'center', padding: '20px' }}>
-            <div style={{ fontSize: '48px', marginBottom: '12px' }}>âœ¦</div>
+            <div style={{ fontSize: '48px', marginBottom: '12px' }}>✦</div>
             <div style={{ fontSize: '16px', color: '#1e7f63' }}>Thank you for your feedback!</div>
           </div>
         ) : (
@@ -583,7 +601,7 @@ function OptimizationPanel({ stats, onClose, onClearCache }) {
             fontSize: '12px'
           }}>
             <span style={{ color: enabled ? '#22c55e' : '#94a3b8' }}>
-              {enabled ? 'âœ“' : 'âœ—'}
+              {enabled ? '✔' : '✗'}
             </span>
             <span style={{ textTransform: 'capitalize' }}>
               {key.replace(/_/g, ' ')}
@@ -602,8 +620,8 @@ function OptimizationPanel({ stats, onClose, onClearCache }) {
           Cache Statistics:
         </div>
         <div style={{ fontSize: '12px', color: '#64748b' }}>
-          <div>âœ¨ Cached analyses: {cache.total_entries || 0}</div>
-          <div>ðŸ’¬Ã‚Â¾ Cache size: {cache.total_size_mb || 0} MB</div>
+          <div>✨ Cached analyses: {cache.total_entries || 0}</div>
+          <div>💬Ã‚Â¾ Cache size: {cache.total_size_mb || 0} MB</div>
         </div>
       </div>
 
@@ -612,7 +630,7 @@ function OptimizationPanel({ stats, onClose, onClearCache }) {
         onClick={onClearCache}
         style={{ width: '100%', fontSize: '13px' }}
       >
-        ðŸ“š Clear Cache
+        📚 Clear Cache
       </button>
     </div>
   );
@@ -857,7 +875,7 @@ function MentionedEntitiesCard({ entities, isLoading }) {
                 className={`entity-tab ${viewMode === 'maps' ? 'active' : ''}`}
                 onClick={switchToMaps}
               >
-                âœ¨ Google Maps
+                ✨ Google Maps
               </button>
               <button
                 className={`entity-tab ${viewMode === 'wikipedia' ? 'active' : ''}`}
@@ -1155,7 +1173,7 @@ function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, pl
             {engagementData.publicCommentCount}
           </div>
           <div style={{ fontSize: '11px', color: selectedMetric === 'publicComments' ? 'white' : '#64748b' }}>
-            ðŸ’¬ Public Comments
+            💬 Public Comments
           </div>
         </div>
         <div 
@@ -1193,14 +1211,14 @@ function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, pl
             {engagementData.motionCount}
           </div>
           <div style={{ fontSize: '11px', color: selectedMetric === 'motions' ? 'white' : '#64748b' }}>
-            ðŸ—³ï¸ Motions/Votes
+            🗳️ï¸ Motions/Votes
           </div>
         </div>
         <div style={{ textAlign: 'center', padding: '12px', background: '#f5f3ff', borderRadius: '8px' }}>
           <div style={{ fontSize: '24px', fontWeight: 700, color: '#7c3aed' }}>
             {engagementData.meetingLength}m
           </div>
-          <div style={{ fontSize: '11px', color: '#64748b' }}>â±ï¸ Duration</div>
+          <div style={{ fontSize: '11px', color: '#64748b' }}>⏱ï¸ Duration</div>
         </div>
       </div>
 
@@ -1216,9 +1234,9 @@ function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, pl
           border: '1px solid #e2e8f0'
         }}>
           <div style={{ fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '8px' }}>
-            {selectedMetric === 'publicComments' && 'ðŸ’¬ Public Comments Found'}
+            {selectedMetric === 'publicComments' && '💬 Public Comments Found'}
             {selectedMetric === 'questions' && 'â“ Questions Asked'}
-            {selectedMetric === 'motions' && 'ðŸ—³ï¸ Motions & Votes'}
+            {selectedMetric === 'motions' && '🗳️ï¸ Motions & Votes'}
           </div>
           {matchingResults.slice(0, 10).map((result, idx) => (
             <div 
@@ -1253,7 +1271,7 @@ function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, pl
                     cursor: 'pointer'
                   }}
                 >
-                  ðŸŽ¬ Video [{formatTime(result.start)}]
+                  🎬 Video [{formatTime(result.start)}]
                 </button>
                 <button
                   onClick={() => openExpandedAt && openExpandedAt(result.start)}
@@ -1366,7 +1384,7 @@ function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, pl
             borderRadius: '12px', 
             fontSize: '11px' 
           }}>
-            ðŸ—³ï¸ Action Items: {engagementData.discussionTypes.action}
+            🗳️ï¸ Action Items: {engagementData.discussionTypes.action}
           </span>
           <span style={{ 
             padding: '4px 10px', 
@@ -1915,7 +1933,7 @@ function CrossReferenceNetwork({ fullText, entities }) {
         </div>
         {network.nodes.length > 0 && (
           <button className="btn btn-ghost btn-export" onClick={exportNetworkImage}>
-            ðŸ“š Export
+            📚 Export
           </button>
         )}
       </div>
@@ -2099,7 +2117,7 @@ function ConversationDynamics({ sents, playerRef, videoId }) {
           </p>
         </div>
         <button className="btn btn-ghost btn-export" onClick={exportDynamicsImage}>
-          ðŸ“š Export
+          📚 Export
         </button>
       </div>
 
@@ -2195,13 +2213,13 @@ function TopicSubscriptionsPanel({ transcript, videoId, videoTitle }) {
 
   return (
     <div className="viz-card subscriptions-card">
-      <h3>ðŸ”” Topic Subscriptions</h3>
+      <h3>🔔 Topic Subscriptions</h3>
       <p className="viz-desc">Get alerts when topics you care about are discussed in meetings.</p>
 
       {matches.length > 0 && (
         <div style={{ background: 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)', border: '2px solid #22c55e', borderRadius: '12px', padding: '16px', marginBottom: '16px' }}>
           <div style={{ fontWeight: '700', color: '#15803d', marginBottom: '8px' }}>
-            ðŸŽ¯ {matches.length} topic{matches.length > 1 ? 's' : ''} mentioned in this meeting!
+            🎯 {matches.length} topic{matches.length > 1 ? 's' : ''} mentioned in this meeting!
           </div>
           {matches.map((match, idx) => (
             <div key={idx} style={{ background: 'white', padding: '10px', borderRadius: '8px', marginTop: '8px', fontSize: '14px' }}>
@@ -2233,7 +2251,7 @@ function TopicSubscriptionsPanel({ transcript, videoId, videoTitle }) {
                 color: subscriptions.some(s => s.topic.toLowerCase() === topic.toLowerCase()) ? '#15803d' : '#64748b',
               }}
             >
-              {subscriptions.some(s => s.topic.toLowerCase() === topic.toLowerCase()) ? 'âœ“ ' : '+ '}{topic}
+              {subscriptions.some(s => s.topic.toLowerCase() === topic.toLowerCase()) ? '✔ ' : '+ '}{topic}
             </button>
           ))}
         </div>
@@ -2250,11 +2268,11 @@ function TopicSubscriptionsPanel({ transcript, videoId, videoTitle }) {
             {subscriptions.map((sub, idx) => (
               <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: '#f8fafc', borderRadius: '8px', marginBottom: '8px', border: '1px solid #e2e8f0' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '14px' }}>ðŸ””</span>
+                  <span style={{ fontSize: '14px' }}>🔔</span>
                   <div>
                     <span style={{ fontWeight: '600', fontSize: '13px' }}>{sub.topic}</span>
                     <div style={{ fontSize: '11px', color: '#64748b' }}>
-                      {sub.frequency === 'instant' ? 'âš¡ Instant' : sub.frequency === 'daily' ? 'ðŸ“… Daily' : 'ðŸ“† Weekly'}
+                      {sub.frequency === 'instant' ? 'âš¡ Instant' : sub.frequency === 'daily' ? '📅 Daily' : 'ðŸ“† Weekly'}
                     </div>
                   </div>
                 </div>
@@ -2274,11 +2292,11 @@ function TopicSubscriptionsPanel({ transcript, videoId, videoTitle }) {
             style={{ width: '100%', padding: '10px 12px', border: '2px solid #e2e8f0', borderRadius: '8px', marginBottom: '10px', fontSize: '14px' }} />
           <select value={frequency} onChange={(e) => setFrequency(e.target.value)} style={{ width: '100%', padding: '10px 12px', border: '2px solid #e2e8f0', borderRadius: '8px', marginBottom: '10px', fontSize: '14px' }}>
             <option value="instant">âš¡ Instant alerts</option>
-            <option value="daily">ðŸ“… Daily digest</option>
+            <option value="daily">📅 Daily digest</option>
             <option value="weekly">ðŸ“† Weekly summary</option>
           </select>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button className="btn btn-primary" onClick={handleSubscribe} disabled={loading || !newTopic.trim()}>{loading ? 'Subscribing...' : 'âœ“ Subscribe'}</button>
+            <button className="btn btn-primary" onClick={handleSubscribe} disabled={loading || !newTopic.trim()}>{loading ? 'Subscribing...' : '✔ Subscribe'}</button>
             <button className="btn btn-ghost" onClick={() => setShowAddForm(false)}>Cancel</button>
           </div>
         </div>
@@ -2300,14 +2318,14 @@ function RelevantDocumentsPanel({ videoTitle, transcript, entities }) {
   // Document type icons and colors
   const docTypeConfig = {
     agenda: { icon: 'ðŸ“‹', color: '#3b82f6', label: 'Agenda' },
-    minutes: { icon: 'ðŸ“', color: '#22c55e', label: 'Minutes' },
+    minutes: { icon: '📝', color: '#22c55e', label: 'Minutes' },
     proposal: { icon: 'ðŸ“„', color: '#f59e0b', label: 'Proposal' },
     contract: { icon: 'ðŸ“‘', color: '#8b5cf6', label: 'Contract' },
     presentation: { icon: 'ðŸ“Š', color: '#ec4899', label: 'Presentation' },
     report: { icon: 'ðŸ“ˆ', color: '#06b6d4', label: 'Report' },
     ordinance: { icon: 'âš–ï¸', color: '#6366f1', label: 'Ordinance' },
-    resolution: { icon: 'ðŸ›ï¸', color: '#14b8a6', label: 'Resolution' },
-    budget: { icon: 'ðŸ’°', color: '#10b981', label: 'Budget' },
+    resolution: { icon: '🏛️', color: '#14b8a6', label: 'Resolution' },
+    budget: { icon: '💰', color: '#10b981', label: 'Budget' },
     other: { icon: 'ðŸ“Ž', color: '#64748b', label: 'Document' }
   };
 
@@ -2376,7 +2394,7 @@ function RelevantDocumentsPanel({ videoTitle, transcript, entities }) {
         ) : hasSearched ? (
           <>ðŸ”„ Refresh Search</>
         ) : (
-          <>ðŸ” Find Related Documents</>
+          <>🔍 Find Related Documents</>
         )}
       </button>
 
@@ -2391,7 +2409,7 @@ function RelevantDocumentsPanel({ videoTitle, transcript, entities }) {
           fontSize: '13px',
           color: '#166534'
         }}>
-          <strong>ðŸ›ï¸ Organization:</strong> {organization}
+          <strong>🏛️ Organization:</strong> {organization}
         </div>
       )}
 
@@ -2406,7 +2424,7 @@ function RelevantDocumentsPanel({ videoTitle, transcript, entities }) {
           color: '#dc2626',
           fontSize: '13px'
         }}>
-          âš ï¸ {error}
+          ⚠️ï¸ {error}
         </div>
       )}
 
@@ -2556,7 +2574,7 @@ function RelevantDocumentsPanel({ videoTitle, transcript, entities }) {
           borderRadius: '12px',
           border: '2px dashed #e2e8f0' 
         }}>
-          <div style={{ fontSize: '32px', marginBottom: '8px' }}>ðŸ”</div>
+          <div style={{ fontSize: '32px', marginBottom: '8px' }}>🔍</div>
           <div style={{ color: '#64748b', fontSize: '13px' }}>
             Click "Find Related Documents" to search for agendas, minutes, and more.
           </div>
@@ -2705,14 +2723,15 @@ function IssueTimelinePanel({ transcript, videoId, videoTitle, entities }) {
   );
 }
 
-// Civic Meeting Finder - AI-powered search for local government meetings
-function CivicMeetingFinder() {
+// Civic Meeting Finder - Search for local government meetings on YouTube
+function CivicMeetingFinder({ onSelectVideo }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [recentSearches, setRecentSearches] = useState([]);
   const [apiStatus, setApiStatus] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
 
   // Check API status on mount
   useEffect(() => {
@@ -2729,11 +2748,11 @@ function CivicMeetingFinder() {
     setError(null);
     
     try {
-      // Build search query for civic/government meetings
-      const civicTerms = ['city council', 'town meeting', 'board meeting', 'selectboard', 'planning board', 'school committee'];
-      const searchTerm = `${searchQuery} ${civicTerms[Math.floor(Math.random() * civicTerms.length)]}`;
+      // Build search query - use direct search term + meeting
+      const searchTerm = `${searchQuery} meeting`;
       
-      const response = await fetch(`/api/youtube-search?q=${encodeURIComponent(searchTerm)}&type=video&maxResults=8&order=date`);
+      // Fetch 20 results sorted by date
+      const response = await fetch(`/api/youtube-search?q=${encodeURIComponent(searchTerm)}&type=video&maxResults=20&order=date`);
       const data = await response.json();
       
       // Check for API error in response
@@ -2743,7 +2762,30 @@ function CivicMeetingFinder() {
         return;
       }
       
-      setResults(data.items || []);
+      // Filter and sort results to prioritize civic/government content
+      const civicKeywords = ['council', 'board', 'committee', 'selectboard', 'town', 'city', 'municipal', 'government', 'public', 'hearing', 'session', 'meeting'];
+      let items = data.items || [];
+      
+      // Sort: civic-related first, then by date
+      items.sort((a, b) => {
+        const titleA = (a.snippet?.title || '').toLowerCase();
+        const titleB = (b.snippet?.title || '').toLowerCase();
+        const channelA = (a.snippet?.channelTitle || '').toLowerCase();
+        const channelB = (b.snippet?.channelTitle || '').toLowerCase();
+        
+        const isCivicA = civicKeywords.some(kw => titleA.includes(kw) || channelA.includes(kw));
+        const isCivicB = civicKeywords.some(kw => titleB.includes(kw) || channelB.includes(kw));
+        
+        if (isCivicA && !isCivicB) return -1;
+        if (!isCivicA && isCivicB) return 1;
+        
+        // Both civic or neither: sort by date
+        const dateA = new Date(a.snippet?.publishedAt || 0);
+        const dateB = new Date(b.snippet?.publishedAt || 0);
+        return dateB - dateA;
+      });
+      
+      setResults(items);
       
       // Save to recent searches
       if (!recentSearches.includes(searchQuery)) {
@@ -2758,9 +2800,15 @@ function CivicMeetingFinder() {
     }
   };
 
-  const copyUrl = (videoId) => {
+  const copyUrl = async (videoId) => {
     const url = `https://www.youtube.com/watch?v=${videoId}`;
-    navigator.clipboard.writeText(url);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedId(videoId);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch (err) {
+      console.error('Copy failed:', err);
+    }
   };
 
   const formatDate = (dateStr) => {
@@ -2769,9 +2817,9 @@ function CivicMeetingFinder() {
   };
 
   return (
-    <div className="viz-card">
-      <h3>ðŸ›ï¸ Civic Meeting Finder</h3>
-      <p className="viz-desc">Find government and civic meetings for your municipality on YouTube.</p>
+    <div className="viz-card" style={{ marginTop: '20px' }}>
+      <h3>🏛️ Find Civic Meetings</h3>
+      <p className="viz-desc">Search for government and civic meetings by city or town name. Click any result to analyze it.</p>
 
       {/* API Status Warning */}
       {apiStatus && !apiStatus.configured && (
@@ -2783,7 +2831,7 @@ function CivicMeetingFinder() {
           border: '1px solid #f59e0b',
         }}>
           <div style={{ fontWeight: 600, color: '#92400e', marginBottom: '6px' }}>
-            âš ï¸ YouTube API Not Configured
+            ⚠️ YouTube API Not Configured
           </div>
           <div style={{ fontSize: '12px', color: '#78350f', lineHeight: 1.5 }}>
             To use this feature, set your API key:
@@ -2799,7 +2847,7 @@ function CivicMeetingFinder() {
               export YOUTUBE_API_KEY="your-key-here"
             </code>
             <div style={{ marginTop: '8px' }}>
-              Get a key at <a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8' }}>console.cloud.google.com</a> â†’ Enable YouTube Data API v3 â†’ Create Credentials â†’ API Key
+              Get a key at <a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8' }}>console.cloud.google.com</a> → Enable YouTube Data API v3 → Create Credentials → API Key
             </div>
           </div>
         </div>
@@ -2812,47 +2860,51 @@ function CivicMeetingFinder() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && searchMeetings()}
-            placeholder="Enter city or town name..."
+            placeholder="Enter city or town name (e.g., Boston, Arlington MA)..."
             style={{
               flex: 1,
-              padding: '12px 14px',
-              border: '2px solid #e2e8f0',
-              borderRadius: '8px',
-              fontSize: '14px',
+              padding: '14px 16px',
+              border: '2px solid #22c55e',
+              borderRadius: '10px',
+              fontSize: '15px',
+              background: 'white',
             }}
           />
           <button
             className="btn btn-primary"
             onClick={searchMeetings}
             disabled={loading || !searchQuery.trim()}
-            style={{ minWidth: '100px' }}
+            style={{ minWidth: '120px', fontSize: '15px' }}
           >
-            {loading ? '...' : 'ðŸ” Search'}
+            {loading ? '🔄 Searching...' : '🔍 Search'}
           </button>
         </div>
-        <div style={{ fontSize: '11px', color: '#64748b', marginTop: '6px' }}>
-          Try: "Boston", "Arlington MA", "San Francisco"
+        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
+          Try: "Boston", "Arlington MA", "San Francisco", "Denver"
         </div>
       </div>
 
       {/* Recent Searches */}
       {recentSearches.length > 0 && (
-        <div style={{ marginBottom: '12px' }}>
-          <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '6px' }}>Recent:</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>Recent searches:</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
             {recentSearches.map((search, idx) => (
               <button
                 key={idx}
                 onClick={() => { setSearchQuery(search); }}
                 style={{
-                  padding: '4px 10px',
-                  fontSize: '11px',
-                  background: '#f1f5f9',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '12px',
+                  padding: '6px 14px',
+                  fontSize: '13px',
+                  background: '#f0fdf4',
+                  border: '1px solid #22c55e',
+                  borderRadius: '20px',
                   cursor: 'pointer',
-                  color: '#64748b',
+                  color: '#166534',
+                  transition: 'all 0.2s ease',
                 }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#dcfce7'}
+                onMouseLeave={(e) => e.currentTarget.style.background = '#f0fdf4'}
               >
                 {search}
               </button>
@@ -2868,87 +2920,113 @@ function CivicMeetingFinder() {
       )}
 
       {/* Results */}
-      <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+      <div style={{ maxHeight: '500px', overflow: 'auto' }}>
         {results.length > 0 ? (
-          results.map((video, idx) => (
-            <div
-              key={idx}
-              style={{
-                padding: '12px',
-                background: '#f8fafc',
-                borderRadius: '8px',
-                marginBottom: '8px',
-                border: '1px solid #e2e8f0',
-              }}
-            >
-              <div style={{ display: 'flex', gap: '12px' }}>
-                {video.snippet?.thumbnails?.default?.url && (
-                  <img
-                    src={video.snippet.thumbnails.default.url}
-                    alt=""
-                    style={{ width: '80px', height: '60px', borderRadius: '4px', objectFit: 'cover' }}
-                  />
-                )}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: '13px', lineHeight: 1.3, marginBottom: '4px', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                    {video.snippet?.title}
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#64748b' }}>
-                    {video.snippet?.channelTitle} â€¢ {formatDate(video.snippet?.publishedAt)}
-                  </div>
-                  <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
-                    <button
-                      onClick={() => copyUrl(video.id?.videoId)}
-                      style={{
-                        padding: '4px 10px',
-                        fontSize: '11px',
-                        background: '#dcfce7',
-                        border: '1px solid #22c55e',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        color: '#15803d',
-                      }}
-                    >
-                      ðŸ“‹ Copy URL
-                    </button>
-                    <a
-                      href={`https://www.youtube.com/watch?v=${video.id?.videoId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        padding: '4px 10px',
-                        fontSize: '11px',
-                        background: '#f1f5f9',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: '4px',
-                        textDecoration: 'none',
-                        color: '#64748b',
-                      }}
-                    >
-                      â†— Open
-                    </a>
+          <>
+            <div style={{ fontSize: '13px', color: '#166534', fontWeight: 600, marginBottom: '12px', padding: '8px 12px', background: '#f0fdf4', borderRadius: '8px' }}>
+              Found {results.length} meetings — click any to analyze:
+            </div>
+            {results.map((video, idx) => (
+              <div
+                key={idx}
+                onClick={() => onSelectVideo && onSelectVideo(`https://www.youtube.com/watch?v=${video.id?.videoId}`)}
+                style={{
+                  padding: '14px',
+                  background: '#f8fafc',
+                  borderRadius: '10px',
+                  marginBottom: '10px',
+                  border: '2px solid #e2e8f0',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = '#22c55e';
+                  e.currentTarget.style.background = '#f0fdf4';
+                  e.currentTarget.style.transform = 'translateX(4px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = '#e2e8f0';
+                  e.currentTarget.style.background = '#f8fafc';
+                  e.currentTarget.style.transform = 'translateX(0)';
+                }}
+              >
+                <div style={{ display: 'flex', gap: '14px' }}>
+                  {video.snippet?.thumbnails?.default?.url && (
+                    <img
+                      src={video.snippet.thumbnails.default.url}
+                      alt=""
+                      style={{ width: '100px', height: '75px', borderRadius: '6px', objectFit: 'cover' }}
+                    />
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: '14px', lineHeight: 1.4, marginBottom: '6px', color: '#1e293b' }}>
+                      {video.snippet?.title}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>
+                      {video.snippet?.channelTitle} • {formatDate(video.snippet?.publishedAt)}
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectVideo && onSelectVideo(`https://www.youtube.com/watch?v=${video.id?.videoId}`);
+                        }}
+                        style={{
+                          padding: '6px 14px',
+                          fontSize: '12px',
+                          background: '#22c55e',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          color: 'white',
+                          fontWeight: 600,
+                        }}
+                      >
+                        📊 Analyze This Meeting
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          copyUrl(video.id?.videoId);
+                        }}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: '12px',
+                          background: copiedId === video.id?.videoId ? '#22c55e' : '#e2e8f0',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          color: copiedId === video.id?.videoId ? 'white' : '#64748b',
+                          transition: 'all 0.2s ease',
+                        }}
+                      >
+                        {copiedId === video.id?.videoId ? '✓ Copied!' : '📋 Copy URL'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          ))
+            ))}
+          </>
         ) : !loading && searchQuery && (
-          <div style={{ textAlign: 'center', padding: '20px', color: '#64748b' }}>
-            <div style={{ fontSize: '24px', marginBottom: '8px' }}>ðŸ›ï¸</div>
-            <div>No results found. Try a different city or town name.</div>
+          <div style={{ textAlign: 'center', padding: '30px', color: '#64748b' }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🏛️</div>
+            <div>No meetings found. Try a different city or town name.</div>
           </div>
         )}
         
         {!searchQuery && results.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '20px', color: '#64748b', background: '#f8fafc', borderRadius: '8px' }}>
-            <div style={{ fontSize: '28px', marginBottom: '8px' }}>ðŸ”</div>
-            <div style={{ fontSize: '13px' }}>Enter your city or town name to find civic meetings</div>
+          <div style={{ textAlign: 'center', padding: '30px', color: '#64748b', background: '#f8fafc', borderRadius: '12px' }}>
+            <div style={{ fontSize: '40px', marginBottom: '12px' }}>🔍</div>
+            <div style={{ fontSize: '15px', fontWeight: 500 }}>Enter your city or town name above</div>
+            <div style={{ fontSize: '13px', marginTop: '6px' }}>We'll find recent government meetings for you to analyze</div>
           </div>
         )}
       </div>
     </div>
   );
 }
+
 
 // Jargon Translator Panel
 // Jargon Translator - Uses GPT for civic/government term explanations
@@ -3381,7 +3459,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
 
   return (
     <div className="viz-card" style={{ gridColumn: '1 / -1' }}>
-      <h3>ðŸ” Issue Tracker & Meeting Comparison</h3>
+      <h3>🔍 Issue Tracker & Meeting Comparison</h3>
       <p className="viz-desc">Find civic meetings, track issues across time, and create cross-meeting highlight reels.</p>
 
       {/* Tab Navigation */}
@@ -3395,11 +3473,11 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
         flexWrap: 'wrap'
       }}>
         {[
-          { id: 'finder', label: 'ðŸ”Ž Find Meetings', icon: 'ðŸ”Ž' },
-          { id: 'timeline', label: `ðŸ“… Collection (${meetings.length})`, icon: 'ðŸ“…' },
-          { id: 'issues', label: 'ðŸŽ¯ Track Issues', icon: 'ðŸŽ¯' },
-          { id: 'videos', label: 'ðŸŽ¬ Video Players', icon: 'ðŸŽ¬' },
-          { id: 'export', label: `ðŸ“¤ Export (${selectedClips.length})`, icon: 'ðŸ“¤' }
+          { id: 'finder', label: '🔎 Find Meetings', icon: '🔎' },
+          { id: 'timeline', label: `📅 Collection (${meetings.length})`, icon: '📅' },
+          { id: 'issues', label: '🎯 Track Issues', icon: '🎯' },
+          { id: 'videos', label: '🎬 Video Players', icon: '🎬' },
+          { id: 'export', label: `📤 Export (${selectedClips.length})`, icon: '📤' }
         ].map(tab => (
           <button
             key={tab.id}
@@ -3434,7 +3512,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
             border: '2px solid #22c55e'
           }}>
             <div style={{ fontSize: '16px', fontWeight: 700, color: '#166534', marginBottom: '12px' }}>
-              ðŸ›ï¸ Find Civic Meetings on YouTube
+              🏛️ Find Civic Meetings on YouTube
             </div>
             <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
               <input
@@ -3458,7 +3536,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                 disabled={finderLoading || !searchCity.trim()}
                 style={{ minWidth: '140px', fontSize: '15px' }}
               >
-                {finderLoading ? 'ðŸ”„ Searching...' : 'ðŸ” Search'}
+                {finderLoading ? 'ðŸ”„ Searching...' : '🔍 Search'}
               </button>
             </div>
             
@@ -3537,7 +3615,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                           {video.snippet?.title}
                         </div>
                         <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>
-                          {video.snippet?.channelTitle} â€¢ {new Date(video.snippet?.publishedAt).toLocaleDateString()}
+                          {video.snippet?.channelTitle} • {new Date(video.snippet?.publishedAt).toLocaleDateString()}
                         </div>
                         {isAdded ? (
                           <div style={{ 
@@ -3549,7 +3627,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                             fontWeight: 600,
                             display: 'inline-block'
                           }}>
-                            âœ“ In Collection
+                            ✔ In Collection
                           </div>
                         ) : (
                           <button
@@ -3566,7 +3644,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                               fontWeight: 600,
                             }}
                           >
-                            {loading ? 'â³ Adding...' : 'âž• Add to Collection'}
+                            {loading ? '⏳ Adding...' : '➕ Add to Collection'}
                           </button>
                         )}
                       </div>
@@ -3579,7 +3657,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
 
           {finderResults.length === 0 && !finderLoading && (
             <div style={{ textAlign: 'center', padding: '40px', background: '#f8fafc', borderRadius: '16px' }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>ðŸ›ï¸</div>
+              <div style={{ fontSize: '48px', marginBottom: '12px' }}>🏛️</div>
               <div style={{ color: '#64748b', fontSize: '15px' }}>
                 Search for a city to find their public meeting recordings
               </div>
@@ -3593,7 +3671,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
         <div>
           {meetings.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px', background: '#f8fafc', borderRadius: '16px' }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>ðŸ“…</div>
+              <div style={{ fontSize: '48px', marginBottom: '12px' }}>📅</div>
               <div style={{ color: '#64748b' }}>No meetings in your collection yet. Use the "Find Meetings" tab to add some!</div>
             </div>
           ) : (
@@ -3706,7 +3784,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                 {/* Legend */}
                 <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', fontSize: '11px', color: '#64748b' }}>
                   <span>ðŸŸ¢ Meeting</span>
-                  <span>â­ Current</span>
+                  <span>⭐ Current</span>
                   <span>ðŸŸ¡ Has tracked issue</span>
                 </div>
               </div>
@@ -3742,7 +3820,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                       </div>
                       <div style={{ fontSize: '12px', color: '#64748b' }}>
                         {new Date(meeting.date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
-                        {' â€¢ '}{meeting.entities?.length || 0} keywords detected
+                        {' • '}{meeting.entities?.length || 0} keywords detected
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
@@ -3758,7 +3836,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                           fontSize: '12px',
                         }}
                       >
-                        ðŸŽ¬ Watch
+                        🎬 Watch
                       </button>
                       {!meeting.isCurrent && (
                         <button
@@ -3773,7 +3851,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                             fontSize: '12px',
                           }}
                         >
-                          âœ•
+                          ✕
                         </button>
                       )}
                     </div>
@@ -3796,7 +3874,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
             border: '2px solid #f59e0b'
           }}>
             <div style={{ fontSize: '16px', fontWeight: 700, color: '#92400e', marginBottom: '12px' }}>
-              ðŸŽ¯ Track an Issue Across Meetings
+              🎯 Track an Issue Across Meetings
             </div>
             <div style={{ display: 'flex', gap: '10px' }}>
               <input
@@ -3827,7 +3905,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                   cursor: meetings.length === 0 ? 'not-allowed' : 'pointer'
                 }}
               >
-                ðŸ” Find Mentions
+                🔍 Find Mentions
               </button>
             </div>
             <div style={{ fontSize: '12px', color: '#92400e', marginTop: '8px' }}>
@@ -3854,7 +3932,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                       color: '#374151',
                     }}
                   >
-                    ðŸŽ¯ {issue}
+                    🎯 {issue}
                   </button>
                 ))}
               </div>
@@ -3887,7 +3965,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                         </div>
                         <div style={{ fontSize: '12px', color: '#64748b' }}>
                           {new Date(result.meetingDate).toLocaleDateString()}
-                          {result.start !== null && ` â€¢ ${formatTime(result.start)}`}
+                          {result.start !== null && ` • ${formatTime(result.start)}`}
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: '6px' }}>
@@ -3955,7 +4033,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
 
           {issueResults.length === 0 && issueSearch && (
             <div style={{ textAlign: 'center', padding: '40px', background: '#f8fafc', borderRadius: '16px' }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>ðŸ”</div>
+              <div style={{ fontSize: '48px', marginBottom: '12px' }}>🔍</div>
               <div style={{ color: '#64748b' }}>No mentions found for "{issueSearch}"</div>
             </div>
           )}
@@ -3967,7 +4045,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
         <div>
           {meetings.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px', background: '#f8fafc', borderRadius: '16px' }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>ðŸŽ¬</div>
+              <div style={{ fontSize: '48px', marginBottom: '12px' }}>🎬</div>
               <div style={{ color: '#64748b' }}>No meetings to display. Add some from the "Find Meetings" tab!</div>
             </div>
           ) : (
@@ -4001,7 +4079,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {meeting.isCurrent && 'â­ '}{meeting.title.substring(0, 25)}...
+                    {meeting.isCurrent && '⭐ '}{meeting.title.substring(0, 25)}...
                   </button>
                 ))}
               </div>
@@ -4096,7 +4174,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
             border: '2px solid #3b82f6'
           }}>
             <div style={{ fontSize: '16px', fontWeight: 700, color: '#1e40af', marginBottom: '12px' }}>
-              ðŸ“¤ Export Selected Clips
+              📤 Export Selected Clips
             </div>
             <div style={{ fontSize: '14px', color: '#1e40af', marginBottom: '16px' }}>
               You have {selectedClips.length} clip{selectedClips.length !== 1 ? 's' : ''} ready to export
@@ -4116,7 +4194,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                   fontSize: '14px',
                 }}
               >
-                ðŸ“ Download as ZIP
+                📁 Download as ZIP
               </button>
               <button
                 onClick={() => exportClips('montage')}
@@ -4132,7 +4210,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                   fontSize: '14px',
                 }}
               >
-                ðŸŽ¬ Create Montage
+                🎬 Create Montage
               </button>
               {selectedClips.length > 0 && (
                 <button
@@ -4233,7 +4311,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                     fontSize: '14px',
                   }}
                 >
-                  âœ“ Done - Clear Clips
+                  ✔ Done - Clear Clips
                 </button>
               </div>
             </div>
@@ -4318,7 +4396,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                         marginLeft: '12px',
                       }}
                     >
-                      âœ•
+                      ✕
                     </button>
                   </div>
                 ))}
@@ -4341,7 +4419,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
             </div>
           ) : (
             <div style={{ textAlign: 'center', padding: '40px', background: '#f8fafc', borderRadius: '16px' }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>ðŸ“¤</div>
+              <div style={{ fontSize: '48px', marginBottom: '12px' }}>📤</div>
               <div style={{ color: '#64748b', marginBottom: '8px' }}>No clips selected for export</div>
               <div style={{ fontSize: '13px', color: '#94a3b8' }}>
                 Use the "Track Issues" tab to find mentions and add them to your export list
@@ -4406,7 +4484,7 @@ function MeetingEfficiencyDashboard({ fullText, cues }) {
         </div>
         {efficiency && (
           <button className="btn btn-ghost btn-export" onClick={exportEfficiencyImage}>
-            ðŸ“š Export
+            📚 Export
           </button>
         )}
       </div>
@@ -4620,7 +4698,7 @@ function ProgressIndicator({ status, percent, message, estimatedTime, isVideoDow
             </div>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>ðŸ’¡</span>
+            <span>💡</span>
             <span>This could take a while - up to 10min for hours-long videos. Feel free to visit other sites while you wait, but keep this tab open. Your download will be available under the video.</span>
           </div>
         </div>
@@ -4841,7 +4919,7 @@ Sent via Community Highlighter
 }
 
 // ============================================================================
-// âœ¨ NEW v4.0 COMPONENTS: Enhanced Features
+// ✨ NEW v4.0 COMPONENTS: Enhanced Features
 // ============================================================================
 
 // New Component: Clip Preview Tooltip
@@ -5039,7 +5117,7 @@ function MeetingAssistant({ videoId, transcript, forceOpen = 0 }) {
               }}
               title="Close"
             >
-              âœ•
+              ✕
             </button>
           </div>
 
@@ -5186,7 +5264,7 @@ function KnowledgeBase({ currentVideoId, onSelectMeeting }) {
   return (
     <div className="knowledge-base">
       <div className="kb-header">
-        <h2>ðŸ“š Community Knowledge Base</h2>
+        <h2>📚 Community Knowledge Base</h2>
         {kbStats && (
           <div className="kb-stats">
             <span>{kbStats.total_meetings} meetings</span>
@@ -5296,19 +5374,19 @@ function MeetingScorecard({ transcript, highlights, entities, isLoading }) {
     switch(type) {
       case 'decisions':
         return {
-          title: 'ðŸ—³ï¸ Votes & Decisions',
+          title: '🗳️ï¸ Votes & Decisions',
           description: 'All voting actions and formal decisions made during this meeting.',
           items: highlights?.filter(h => h.category === 'vote' || h.highlight?.toLowerCase()?.includes('vote') || h.highlight?.toLowerCase()?.includes('approv')).map(h => h.highlight || h.text) || []
         };
       case 'comments':
         return {
-          title: 'ðŸ’¬ Public Comments',
+          title: '💬 Public Comments',
           description: 'Moments when residents and community members spoke.',
           items: highlights?.filter(h => h.category === 'public_comment' || h.highlight?.toLowerCase()?.includes('resident')).map(h => h.highlight || h.text) || []
         };
       case 'budget':
         return {
-          title: 'ðŸ’° Budget Items',
+          title: '💰 Budget Items',
           description: 'Financial discussions and budget-related decisions.',
           items: highlights?.filter(h => h.category === 'budget' || h.highlight?.toLowerCase()?.includes('budget') || h.highlight?.includes('$')).map(h => h.highlight || h.text) || []
         };
@@ -5344,11 +5422,11 @@ function MeetingScorecard({ transcript, highlights, entities, isLoading }) {
   const topicsCount = scorecard.hot_topics?.length || 0;
 
   const metrics = [
-    { key: 'decisions', value: scorecard.decisions_made, label: 'Votes/Decisions', icon: 'ðŸ—³ï¸', color: '#ef4444' },
-    { key: 'comments', value: scorecard.public_comments, label: 'Public Comments', icon: 'ðŸ’¬', color: '#2563eb' },
-    { key: 'budget', value: scorecard.budget_items, label: 'Budget Items', icon: 'ðŸ’°', color: '#16a34a' },
+    { key: 'decisions', value: scorecard.decisions_made, label: 'Votes/Decisions', icon: '🗳️ï¸', color: '#ef4444' },
+    { key: 'comments', value: scorecard.public_comments, label: 'Public Comments', icon: '💬', color: '#2563eb' },
+    { key: 'budget', value: scorecard.budget_items, label: 'Budget Items', icon: '💰', color: '#16a34a' },
     { key: 'topics', value: topicsCount, label: 'Key Topics', icon: 'ðŸ“‹', color: '#9333ea' },
-    { key: 'duration', value: scorecard.duration, label: 'Duration', icon: 'â±ï¸', color: '#64748b', noClick: true },
+    { key: 'duration', value: scorecard.duration, label: 'Duration', icon: '⏱ï¸', color: '#64748b', noClick: true },
     { key: 'engagement', value: `${scorecard.engagement_score}%`, label: 'Engagement', icon: 'ðŸ“ˆ', color: scorecard.engagement_score > 70 ? '#16a34a' : scorecard.engagement_score > 40 ? '#eab308' : '#ef4444' },
   ];
 
@@ -5459,7 +5537,7 @@ function MeetingScorecard({ transcript, highlights, entities, isLoading }) {
 
       {scorecard.hot_topics && scorecard.hot_topics.length > 0 && !expandedMetric && (
         <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: '10px' }}>ðŸ”¥ Hot Topics</div>
+          <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: '10px' }}>🔥 Hot Topics</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
             {scorecard.hot_topics.map((topic, idx) => (
               <span key={idx} style={{
@@ -5577,16 +5655,16 @@ function InteractiveTimeline({ sents, highlights, playerRef, videoId, addToBaske
 
   const getTypeLabel = (type) => {
     switch(type) {
-      case 'vote': case 'decision': return 'ðŸ—³ï¸ Vote/Decision';
-      case 'budget': return 'ðŸ’° Budget Item';
-      case 'public_comment': return 'ðŸ’¬ Public Comment';
-      default: return 'â­ Highlight';
+      case 'vote': case 'decision': return '🗳️ï¸ Vote/Decision';
+      case 'budget': return '💰 Budget Item';
+      case 'public_comment': return '💬 Public Comment';
+      default: return '⭐ Highlight';
     }
   };
 
   return (
     <div className="viz-card interactive-timeline" style={{ gridColumn: '1 / -1' }}>
-      <h3>ðŸŽ¯ Interactive Timeline</h3>
+      <h3>🎯 Interactive Timeline</h3>
       <p className="viz-desc">Click any marker to expand details and jump to that moment. Lines indicate key moments.</p>
       
       <div style={{ display: 'flex', gap: '16px', marginBottom: '12px', flexWrap: 'wrap' }}>
@@ -5787,7 +5865,7 @@ function InteractiveTimeline({ sents, highlights, playerRef, videoId, addToBaske
                 padding: '4px'
               }}
             >
-              âœ•
+              ✕
             </button>
           </div>
           
@@ -5849,7 +5927,7 @@ function InteractiveTimeline({ sents, highlights, playerRef, videoId, addToBaske
               className="btn btn-ghost"
               style={{ fontSize: '12px', padding: '8px 12px' }}
             >
-              ðŸŽ¬ Video Context
+              🎬 Video Context
             </button>
           </div>
         </div>
@@ -5912,7 +5990,7 @@ function ShareMoment({ videoId, sents, playerRef }) {
         className="btn btn-ghost"
         style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
       >
-        ðŸ”— Share a Moment
+        🔗 Share a Moment
       </button>
     );
   }
@@ -5940,7 +6018,7 @@ function ShareMoment({ videoId, sents, playerRef }) {
         onClick={(e) => e.stopPropagation()}
       >
         <h3 style={{ margin: '0 0 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          ðŸ”— Share a Moment
+          🔗 Share a Moment
         </h3>
 
         {!shareResult ? (
@@ -6118,7 +6196,7 @@ function AccessibilityPanel({ summary, onSimplified, onTranslated }) {
           padding: 0
         }}
       >
-        â™¿ Accessibility Options
+        ♿ Accessibility Options
         <span style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }}>â–¼</span>
       </button>
 
@@ -6164,7 +6242,7 @@ function AccessibilityPanel({ summary, onSimplified, onTranslated }) {
           {/* Translation */}
           <div>
             <label style={{ display: 'block', fontSize: '13px', marginBottom: '8px', color: '#475569', fontWeight: 500 }}>
-              ðŸŒÂ Translate Summary
+              🌐Â Translate Summary
             </label>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
               {languages.map(lang => (
@@ -6211,352 +6289,12 @@ function AccessibilityPanel({ summary, onSimplified, onTranslated }) {
   );
 }
 
-// ================================================================================
-// InitialMeetingFinder - Shows on page load to help users find civic meetings
-// ================================================================================
-function InitialMeetingFinder({ onSelectMeeting }) {
-  const [searchCity, setSearchCity] = useState('');
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [recentCities, setRecentCities] = useState([]);
-  const [apiStatus, setApiStatus] = useState(null);
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  // Check API status on mount
-  useEffect(() => {
-    fetch('/api/youtube-status')
-      .then(r => r.json())
-      .then(data => setApiStatus(data))
-      .catch(() => setApiStatus({ configured: false }));
-  }, []);
-
-  const searchMeetings = async () => {
-    if (!searchCity.trim()) return;
-    
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const civicTerms = ['city council', 'town meeting', 'board meeting', 'selectboard', 'planning board', 'school committee'];
-      const searchTerm = `${searchCity} ${civicTerms[Math.floor(Math.random() * civicTerms.length)]}`;
-      
-      const response = await fetch(`/api/youtube-search?q=${encodeURIComponent(searchTerm)}&type=video&maxResults=20&order=date`);
-      const data = await response.json();
-      
-      if (data.error) {
-        setError(data.error);
-        setResults([]);
-        return;
-      }
-      
-      setResults(data.items || []);
-      setIsExpanded(true);
-      
-      if (!recentCities.includes(searchCity)) {
-        setRecentCities(prev => [searchCity, ...prev.slice(0, 4)]);
-      }
-    } catch (err) {
-      console.error('Search error:', err);
-      setError('Search failed. Try a different query or check your connection.');
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSelectMeeting = (videoId) => {
-    const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    onSelectMeeting(youtubeUrl);
-  };
-
-  const formatDate = (dateStr) => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
-
-  return (
-    <div style={{ 
-      marginTop: '16px',
-      background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
-      borderRadius: '16px',
-      border: '2px solid #22c55e',
-      overflow: 'hidden',
-      transition: 'all 0.3s ease'
-    }}>
-      {/* Header - Always visible */}
-      <div 
-        style={{ 
-          padding: '16px 20px',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '12px'
-        }}
-        onClick={() => setIsExpanded(!isExpanded)}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '24px' }}>🏛️</span>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: '15px', color: '#166534' }}>
-              Find Civic Meetings on YouTube
-            </div>
-            <div style={{ fontSize: '12px', color: '#15803d', marginTop: '2px' }}>
-              Search your city or town to discover recent government meetings
-            </div>
-          </div>
-        </div>
-        <div style={{
-          width: '28px',
-          height: '28px',
-          borderRadius: '50%',
-          background: '#22c55e',
-          color: 'white',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '14px',
-          fontWeight: 'bold',
-          transition: 'transform 0.3s ease',
-          transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)'
-        }}>
-          ▼
-        </div>
-      </div>
-
-      {/* Expandable content */}
-      {isExpanded && (
-        <div style={{ padding: '0 20px 20px 20px' }}>
-          {/* API Status Warning */}
-          {apiStatus && !apiStatus.configured && (
-            <div style={{ 
-              padding: '12px 14px', 
-              background: '#fef3c7', 
-              borderRadius: '8px', 
-              marginBottom: '16px',
-              border: '1px solid #f59e0b',
-            }}>
-              <div style={{ fontWeight: 600, color: '#92400e', marginBottom: '6px' }}>
-                ⚠️ YouTube API Not Configured
-              </div>
-              <div style={{ fontSize: '12px', color: '#78350f', lineHeight: 1.5 }}>
-                To use this feature, set your API key:
-                <code style={{ 
-                  display: 'block', 
-                  background: '#fff', 
-                  padding: '8px', 
-                  borderRadius: '4px', 
-                  marginTop: '6px',
-                  fontFamily: 'monospace',
-                  fontSize: '11px',
-                }}>
-                  export YOUTUBE_API_KEY="your-key-here"
-                </code>
-                <div style={{ marginTop: '8px' }}>
-                  Get a key at <a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8' }}>console.cloud.google.com</a> → Enable YouTube Data API v3 → Create Credentials → API Key
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Search Input */}
-          <div style={{ marginBottom: '16px' }}>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <input
-                type="text"
-                value={searchCity}
-                onChange={(e) => setSearchCity(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && searchMeetings()}
-                placeholder="Enter city or town name (e.g., Boston, Arlington MA)..."
-                style={{
-                  flex: 1,
-                  padding: '14px 18px',
-                  border: '2px solid #22c55e',
-                  borderRadius: '10px',
-                  fontSize: '15px',
-                  background: 'white',
-                }}
-              />
-              <button
-                className="btn btn-primary"
-                onClick={searchMeetings}
-                disabled={loading || !searchCity.trim()}
-                style={{ minWidth: '120px', fontSize: '14px' }}
-              >
-                {loading ? '🔄 Searching...' : '🔍 Search'}
-              </button>
-            </div>
-            <div style={{ fontSize: '11px', color: '#15803d', marginTop: '8px' }}>
-              💡 Try: "Brookline MA", "Boston", "Cambridge", "San Francisco"
-            </div>
-          </div>
-
-          {/* Recent Searches */}
-          {recentCities.length > 0 && (
-            <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <span style={{ fontSize: '12px', color: '#15803d' }}>Recent:</span>
-              {recentCities.map((city, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setSearchCity(city)}
-                  style={{
-                    padding: '4px 12px',
-                    background: 'white',
-                    border: '1px solid #22c55e',
-                    borderRadius: '20px',
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                    color: '#166534',
-                  }}
-                >
-                  {city}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Error Display */}
-          {error && (
-            <div style={{ 
-              padding: '12px', 
-              background: '#fef2f2', 
-              borderRadius: '8px', 
-              color: '#dc2626', 
-              fontSize: '13px', 
-              marginBottom: '12px' 
-            }}>
-              {error}
-            </div>
-          )}
-
-          {/* Results */}
-          {results.length > 0 && (
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: '12px', color: '#166534', fontSize: '14px' }}>
-                📹 Found {results.length} meetings — click to load:
-              </div>
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', 
-                gap: '12px',
-                maxHeight: '400px',
-                overflow: 'auto',
-                padding: '4px'
-              }}>
-                {results.map((video, idx) => {
-                  const videoId = video.id?.videoId;
-                  return (
-                    <div
-                      key={idx}
-                      onClick={() => handleSelectMeeting(videoId)}
-                      style={{
-                        padding: '12px',
-                        background: 'white',
-                        borderRadius: '12px',
-                        border: '2px solid #e2e8f0',
-                        display: 'flex',
-                        gap: '12px',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s ease',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.borderColor = '#22c55e';
-                        e.currentTarget.style.transform = 'translateY(-2px)';
-                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(34, 197, 94, 0.2)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.borderColor = '#e2e8f0';
-                        e.currentTarget.style.transform = 'translateY(0)';
-                        e.currentTarget.style.boxShadow = 'none';
-                      }}
-                    >
-                      {video.snippet?.thumbnails?.default?.url && (
-                        <img
-                          src={video.snippet.thumbnails.default.url}
-                          alt=""
-                          style={{ 
-                            width: '80px', 
-                            height: '60px', 
-                            borderRadius: '6px', 
-                            objectFit: 'cover',
-                            flexShrink: 0
-                          }}
-                        />
-                      )}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ 
-                          fontWeight: 600, 
-                          fontSize: '13px', 
-                          lineHeight: 1.3, 
-                          marginBottom: '4px',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                          color: '#1e293b'
-                        }}>
-                          {video.snippet?.title}
-                        </div>
-                        <div style={{ fontSize: '11px', color: '#64748b' }}>
-                          {video.snippet?.channelTitle}
-                        </div>
-                        <div style={{ fontSize: '11px', color: '#22c55e', fontWeight: 600, marginTop: '4px' }}>
-                          📅 {formatDate(video.snippet?.publishedAt)}
-                        </div>
-                      </div>
-                      <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        color: '#22c55e',
-                        fontSize: '18px',
-                        flexShrink: 0
-                      }}>
-                        ▶
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Empty State */}
-          {!loading && searchCity && results.length === 0 && !error && (
-            <div style={{ textAlign: 'center', padding: '20px', color: '#64748b' }}>
-              <div style={{ fontSize: '24px', marginBottom: '8px' }}>🏛️</div>
-              <div>No results found. Try a different city or town name.</div>
-            </div>
-          )}
-
-          {/* Initial State */}
-          {!searchCity && results.length === 0 && (
-            <div style={{ 
-              textAlign: 'center', 
-              padding: '24px', 
-              color: '#166534', 
-              background: 'rgba(255,255,255,0.5)', 
-              borderRadius: '12px' 
-            }}>
-              <div style={{ fontSize: '32px', marginBottom: '12px' }}>🔍</div>
-              <div style={{ fontSize: '14px', fontWeight: 500 }}>
-                Enter your city or town name above to discover recent civic meetings
-              </div>
-              <div style={{ fontSize: '12px', marginTop: '8px', color: '#15803d' }}>
-                We'll search YouTube for city council, town meeting, planning board, and school committee recordings
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function App() {
   // v5.6: Cloud mode detection
   const { isCloudMode } = useCloudMode();
+  
+  // v7.0: Enhanced UX
+  useScrollDetection();
   
   // v5.6: Word Investigate modal state
   const [investigateWord, setInvestigateWord] = useState(null);
@@ -6583,7 +6321,7 @@ export default function App() {
   const [highlightsWithQuotes, setHighlightsWithQuotes] = useState([]);
   const [reelCaptionsEnabled, setReelCaptionsEnabled] = useState(true);
   
-  // ðŸŽ¬ Video editing options
+  // 🎬 Video editing options
   const [videoOptions, setVideoOptions] = useState({
     clipPadding: 4,
     backgroundMusic: false,
@@ -6617,7 +6355,7 @@ export default function App() {
   const [showOptimizationPanel, setShowOptimizationPanel] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
-  // âœ¨ NEW v4.0: State for new features
+  // ✨ NEW v4.0: State for new features
   const [showAssistant, setShowAssistant] = useState(false);
   const [forceAssistantOpen, setForceAssistantOpen] = useState(0); // Counter to force open
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
@@ -6685,9 +6423,8 @@ export default function App() {
   }, []);
 
 
-  const loadAll = async (urlOverride = null) => {
-    const urlToUse = urlOverride || url;
-    const vid = extractVideoId(urlToUse);
+  const loadAll = async () => {
+    const vid = extractVideoId(url);
     setVideoId(vid);
     if (!vid) {
       alert("Please enter a valid YouTube URL or video ID");
@@ -6831,7 +6568,7 @@ export default function App() {
       const ws = new WebSocket(getWebSocketUrl(`/ws/live`));
 
       ws.onopen = () => {
-        console.log("âœ¨ Live mode connected");
+        console.log("✨ Live mode connected");
       };
 
       ws.onmessage = (event) => {
@@ -6852,7 +6589,7 @@ export default function App() {
       };
 
       ws.onclose = () => {
-        console.log("âœ¨ Live mode disconnected");
+        console.log("✨ Live mode disconnected");
         setIsLiveMode(false);
       };
 
@@ -7089,7 +6826,7 @@ export default function App() {
           generatedHighlights = JSON.parse(text);
         } catch (e) {
           console.error("Failed to parse highlights JSON:", e);
-          const bullets = text.split(/\d+\.|â€¢|-/).filter(s => s.trim().length > 10);
+          const bullets = text.split(/\d+\.|•|-/).filter(s => s.trim().length > 10);
           for (let i = 0; i < Math.min(10, bullets.length); i++) {
             generatedHighlights.push({
               highlight: bullets[i].trim().split('\n')[0],
@@ -7199,7 +6936,7 @@ export default function App() {
         console.log(`[Highlights] Received ${highlights.length} highlights from API`);
       } catch (e) {
         console.error("Failed to parse highlights JSON:", e);
-        const bullets = text.split(/\d+\.|â€¢|-/).filter(s => s.trim().length > 10);
+        const bullets = text.split(/\d+\.|•|-/).filter(s => s.trim().length > 10);
         for (let i = 0; i < Math.min(10, bullets.length); i++) {
           highlights.push({
             highlight: bullets[i].trim().split('\n')[0],
@@ -7372,7 +7109,7 @@ export default function App() {
               background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
             }}>
               <h2 style={{ margin: 0, color: 'white', fontSize: '24px' }}>
-                ðŸ” Investigate: "{investigateWord.text}"
+                🔍 Investigate: "{investigateWord.text}"
               </h2>
               <button 
                 onClick={() => setInvestigateWord(null)}
@@ -7411,7 +7148,7 @@ export default function App() {
                   color: investigateViewMode === 'news' ? 'white' : '#64748b'
                 }}
               >
-                ðŸŒ Google News
+                🌐 Google News
               </button>
               <button
                 onClick={() => setInvestigateViewMode('maps')}
@@ -7595,7 +7332,7 @@ export default function App() {
                 border: '2px solid #ff4444'
               }}>
                 <h3 style={{ color: '#ff4444', marginBottom: '15px' }}>
-                  âœ¨ LIVE MODE - Real-time Updates
+                  ✨ LIVE MODE - Real-time Updates
                 </h3>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
@@ -7690,19 +7427,24 @@ export default function App() {
               </>
             )}
           </div>
+        </section>
 
-          {/* 🏛️ Initial Meeting Finder - Shows only when no video is loaded */}
-          {!videoId && (
-            <InitialMeetingFinder 
-              onSelectMeeting={(youtubeUrl) => {
-                // Set the URL in the input field for display
-                setUrl(youtubeUrl);
-                // Pass URL directly to loadAll for reliable loading
-                loadAll(youtubeUrl);
+        {/* Civic Meeting Finder - Show on landing page when no video loaded */}
+        {!videoId && (
+          <section className="card section animate-fadeIn" style={{ marginTop: 16 }}>
+            <CivicMeetingFinder 
+              onSelectVideo={(selectedUrl) => {
+                setUrl(selectedUrl);
+                // Auto-load the video after a brief delay
+                setTimeout(() => {
+                  const input = document.querySelector('.url-input');
+                  if (input) input.value = selectedUrl;
+                  loadAll();
+                }, 100);
               }}
             />
-          )}
-        </section>
+          </section>
+        )}
 
         {/* UPDATED: AI Summary now has PERMANENT green highlight */}
         {summary.para && (
@@ -7758,10 +7500,10 @@ export default function App() {
                                    item.category === 'budget' ? '#166534' :
                                    item.category === 'public_comment' ? '#1e40af' : '#92400e'
                           }}>
-                            {item.category === 'vote' ? 'ðŸ—³ï¸ Vote' :
-                             item.category === 'budget' ? 'ðŸ’° Budget' :
-                             item.category === 'public_comment' ? 'ðŸ’¬ Public' :
-                             item.category === 'announcement' ? 'ðŸ“¢ Announcement' : ''}
+                            {item.category === 'vote' ? '🗳️ï¸ Vote' :
+                             item.category === 'budget' ? '💰 Budget' :
+                             item.category === 'public_comment' ? '💬 Public' :
+                             item.category === 'announcement' ? '📢 Announcement' : ''}
                           </span>
                         )}
                       </div>
@@ -7937,7 +7679,7 @@ export default function App() {
                         gap: '6px'
                       }}
                     >
-                      ðŸ” Investigate
+                      🔍 Investigate
                     </button>
                   </div>
                 )}
@@ -8212,7 +7954,7 @@ export default function App() {
                   />
                 )}
 
-                {/* ðŸŽ¬ Advanced Video Options */}
+                {/* 🎬 Advanced Video Options */}
                 <div style={{
                   background: '#f1f5f9',
                   borderRadius: '8px',
@@ -8236,7 +7978,7 @@ export default function App() {
                       color: '#475569'
                     }}
                   >
-                    <span>ðŸŽ¬ Advanced Video Options</span>
+                    <span>🎬 Advanced Video Options</span>
                     <span style={{ transform: showAdvancedOptions ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }}>â–¼</span>
                   </button>
                   
@@ -8245,7 +7987,7 @@ export default function App() {
                       {/* Clip Padding - Always available */}
                       <div style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #e2e8f0' }}>
                         <label style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b', display: 'block', marginBottom: '6px' }}>
-                          â±ï¸ Clip Padding
+                          ⏱ï¸ Clip Padding
                         </label>
                         <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>
                           Extra seconds before/after each highlight
@@ -8267,13 +8009,13 @@ export default function App() {
                         </select>
                       </div>
 
-                      {/* ðŸŽµ BACKGROUND MUSIC - New prominent option */}
+                      {/* 🎵 BACKGROUND MUSIC - New prominent option */}
                       <div style={{ 
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center', 
                         marginBottom: '16px', padding: '12px', background: '#fef3c7', borderRadius: '8px'
                       }}>
                         <div>
-                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#92400e' }}>ðŸŽµ Background Music</span>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#92400e' }}>🎵 Background Music</span>
                           <div style={{ fontSize: '11px', color: '#b45309' }}>Light upbeat music at 12% volume</div>
                         </div>
                         <button
@@ -8294,7 +8036,7 @@ export default function App() {
                       {/* Fade Transitions */}
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                         <div>
-                          <span style={{ fontSize: '13px', color: '#475569' }}>âœ¨ Fade Transitions</span>
+                          <span style={{ fontSize: '13px', color: '#475569' }}>✨ Fade Transitions</span>
                           <div style={{ fontSize: '11px', color: '#94a3b8' }}>Smooth fades between clips</div>
                         </div>
                         <button
@@ -8396,18 +8138,22 @@ export default function App() {
 
                 <button
                   className="btn-full-width btn-muted-primary"
-                  onClick={() => buildReel('combined')}
+                  onClick={() => isCloudMode ? window.open('https://github.com/amateurmenace/community-highlighter/releases/latest', '_blank') : buildReel('combined')}
                   disabled={loading.reel}
+                  style={isCloudMode ? { opacity: 0.6, cursor: 'pointer' } : {}}
+                  title={isCloudMode ? 'Download desktop app for video export' : ''}
                 >
-                  {t.buildReel}
+                  {isCloudMode ? '🔒 ' : ''}{t.buildReel}
                 </button>
 
                 <button
                   className="btn-full-width btn-muted-social"
-                  onClick={() => buildReel('social')}
+                  onClick={() => isCloudMode ? window.open('https://github.com/amateurmenace/community-highlighter/releases/latest', '_blank') : buildReel('social')}
                   disabled={loading.reel}
+                  style={isCloudMode ? { opacity: 0.6, cursor: 'pointer' } : {}}
+                  title={isCloudMode ? 'Download desktop app for video export' : ''}
                 >
-                  Social Media Reel (Vertical)
+                  {isCloudMode ? '🔒 ' : ''}Social Media Reel (Vertical)
                 </button>
 
                 <button
@@ -8440,6 +8186,10 @@ export default function App() {
                   onClick={async (e) => {
                     e.preventDefault();
                     e.stopPropagation();
+                    if (isCloudMode) {
+                      window.open('https://github.com/amateurmenace/community-highlighter/releases/latest', '_blank');
+                      return;
+                    }
                     if (!videoId) {
                       alert("Please load a video first");
                       return;
@@ -8466,8 +8216,10 @@ export default function App() {
                       setTimeout(() => setProcessStatus({ active: false, message: "", percent: 0 }), 3000);
                     }
                   }}
+                  style={isCloudMode ? { opacity: 0.6, cursor: 'pointer' } : {}}
+                  title={isCloudMode ? 'Download desktop app for video export' : ''}
                 >
-                  {t.downloadVideo}
+                  {isCloudMode ? '🔒 ' : ''}{t.downloadVideo}
                 </button>
 
                 <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -8530,13 +8282,13 @@ export default function App() {
                     setForceAssistantOpen(prev => prev + 1);
                   }}
                 >
-                  ðŸ’¬ AI Assistant
+                  💬 AI Assistant
                 </button>
                 <button
                   className="btn btn-secondary"
                   onClick={() => setShowKnowledgeBase(!showKnowledgeBase)}
                 >
-                  ðŸ“š Knowledge Base
+                  📚 Knowledge Base
                 </button>
               </div>
             )}
@@ -8652,7 +8404,7 @@ export default function App() {
           </section>
         )}
 
-        {/* ðŸ’¬ AI Meeting Assistant - Always visible when video loaded */}
+        {/* 💬 AI Meeting Assistant - Always visible when video loaded */}
         {videoId && (
           <MeetingAssistant
             videoId={videoId}
@@ -8663,7 +8415,7 @@ export default function App() {
 
       </main>
 
-      {/* ðŸ“š Knowledge Base */}
+      {/* 📚 Knowledge Base */}
       {showKnowledgeBase && (
         <section className="card section" style={{ marginTop: '20px' }}>
           <KnowledgeBase
@@ -8736,7 +8488,7 @@ export default function App() {
           onClearCache={async () => {
             try {
               await apiClearCache();
-              alert("âœ¦ Cache cleared!");
+              alert("✦ Cache cleared!");
               const newStats = await apiOptimizationStats();
               setOptimizationStats(newStats);
             } catch (e) {

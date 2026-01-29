@@ -241,7 +241,7 @@ MEETING_CACHE = {}  # v5.0: Meeting summaries cache  # Cache for transcripts
 
 
 # ============================================================================
-# Ã‚Â  NEW: VECTOR DATABASE SETUP (ChromaDB for Knowledge Base)
+# Ãƒâ€šÃ‚  NEW: VECTOR DATABASE SETUP (ChromaDB for Knowledge Base)
 # ============================================================================
 
 # Initialize ChromaDB only if available
@@ -1276,11 +1276,11 @@ async def get_transcript(req: Request):
                             f" STORED {len(transcript_data)} segments (Method: YouTube Data API)"
                         )
                 except Exception as parse_error:
-                    print(f"Ã‚Â   Could not parse YouTube Data API VTT: {parse_error}")
+                    print(f"Ãƒâ€šÃ‚   Could not parse YouTube Data API VTT: {parse_error}")
 
                 return Response(content=vtt, media_type="text/vtt")
         except Exception as e:
-            print(f"Ã‚Â   YouTube Data API failed: {e}")
+            print(f"Ãƒâ€šÃ‚   YouTube Data API failed: {e}")
 
     # Last resort: yt-dlp
     try:
@@ -1338,10 +1338,10 @@ async def get_transcript(req: Request):
                                             f" STORED {len(transcript_data)} segments (Method: yt-dlp)"
                                         )
                                     else:
-                                        print(f"Ã‚Â   VTT parsing returned no data")
+                                        print(f"Ãƒâ€šÃ‚   VTT parsing returned no data")
                                 except Exception as parse_error:
                                     print(
-                                        f"Ã‚Â   Could not parse yt-dlp VTT: {parse_error}"
+                                        f"Ãƒâ€šÃ‚   Could not parse yt-dlp VTT: {parse_error}"
                                     )
 
                                 return Response(
@@ -1349,7 +1349,7 @@ async def get_transcript(req: Request):
                                 )
 
     except Exception as e:
-        print(f"Ã‚Â   yt-dlp failed: {e}")
+        print(f"Ãƒâ€šÃ‚   yt-dlp failed: {e}")
 
     raise HTTPException(
         status_code=404,
@@ -1464,7 +1464,7 @@ async def summary_ai(req: Request):
                 all_key_points.append(key_points)
 
         if not all_key_points:
-            print("Ã‚Â  Key point extraction failed, using fallback")
+            print("Ãƒâ€šÃ‚  Key point extraction failed, using fallback")
             if strategy == "highlights_with_quotes":
                 return {
                     "summarySentences": json.dumps(
@@ -1493,7 +1493,7 @@ async def summary_ai(req: Request):
                             "strategy": strategy,
                         }
                 except json.JSONDecodeError:
-                    print("Ã‚Â  JSON parsing failed")
+                    print("Ãƒâ€šÃ‚  JSON parsing failed")
             else:
                 print(f"[summary_ai] Generated summary ({len(ai_result)} chars)")
                 return {"summarySentences": ai_result, "strategy": strategy}
@@ -3543,7 +3543,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
             return None
         
         # HIGHLIGHT TEXT = BIG (6% of height)
-        # 1080p → 65px, 720p → 43px, 1920 vertical → 115px
+        # 1080p â†’ 65px, 720p â†’ 43px, 1920 vertical â†’ 115px
         fontsize = max(36, min(100, int(video_height * 0.06)))
         
         # Calculate safe margins (4% from edges)
@@ -3640,7 +3640,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
         srt_file = os.path.join(work_dir, f"{prefix}_captions.srt")
         
         # CAPTIONS = SMALL (2.2% of height, about 1/3 of highlight size)
-        # 1080p → 24px, 720p → 16px, 1920 vertical → 42px
+        # 1080p â†’ 24px, 720p â†’ 16px, 1920 vertical â†’ 42px
         fontsize = max(16, min(42, int(video_height * 0.022)))
         
         # Large bottom margin to stay away from bottom edge
@@ -5149,7 +5149,7 @@ async def analyze_chat_sentiment(req: Request):
     url = f"https://www.youtube.com/watch?v={video_id}"
 
     try:
-        print(f"Ã‚Â  Analyzing chat sentiment for: {video_id}")
+        print(f"Ãƒâ€šÃ‚  Analyzing chat sentiment for: {video_id}")
         chat = ChatDownloader().get_chat(url, max_messages=max_messages)
 
         sentiments = []
@@ -5304,7 +5304,7 @@ async def chat_statistics(req: Request):
     url = f"https://www.youtube.com/watch?v={video_id}"
 
     try:
-        print(f"Ã‚Â  Gathering chat statistics for: {video_id}")
+        print(f"Ãƒâ€šÃ‚  Gathering chat statistics for: {video_id}")
         chat = ChatDownloader().get_chat(url, max_messages=max_messages)
 
         total_messages = 0
@@ -5375,7 +5375,7 @@ async def get_optimization_stats():
             "estimated_savings": {
                 "percentage": 92,
                 "per_video": "$6.00",
-                "description": "Original $6.50/video Ã‚Â  $0.50/video",
+                "description": "Original $6.50/video Ãƒâ€šÃ‚  $0.50/video",
             },
         }
     except Exception as e:
@@ -5496,7 +5496,7 @@ async def start_live_monitoring(req: Request):
 
 
 # ============================================================================
-# [*]Ãƒâ€¦Ã‚Â¡ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ NEW: AI MEETING ASSISTANT (RAG-based Chat) (v4.0)
+# [*]ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ NEW: AI MEETING ASSISTANT (RAG-based Chat) (v4.0)
 # ============================================================================
 
 
@@ -5535,12 +5535,12 @@ async def chat_with_meeting(req: Request):
             # Get transcript from cache or fetch it
             if meeting_id in STORED_TRANSCRIPTS:
                 transcript_data = STORED_TRANSCRIPTS[meeting_id]
-                print(f"Ã¢Å“â€¦ Using cached transcript: {len(transcript_data)} segments")
+                print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Using cached transcript: {len(transcript_data)} segments")
             else:
                 try:
                     transcript_data = ytt_api.fetch(meeting_id).to_raw_data()
                     STORED_TRANSCRIPTS[meeting_id] = transcript_data
-                    print(f"Ã¢Å“â€¦ Fetched and cached {len(transcript_data)} segments")
+                    print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Fetched and cached {len(transcript_data)} segments")
                 except Exception as e:
                     return {
                         "answer": "I can't access the transcript for this video. Please make sure the video has captions enabled.",
@@ -5588,7 +5588,7 @@ async def chat_with_meeting(req: Request):
                 "we_vs_i": "multiple speakers likely" if we_count > i_count * 2 else "possibly single speaker or interview",
             }
             
-            print(f"Ã°Å¸â€œÅ  Transcript stats: {transcript_stats}")
+            print(f"ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã…  Transcript stats: {transcript_stats}")
         
         else:
             return {
@@ -5610,10 +5610,10 @@ async def chat_with_meeting(req: Request):
                 "\n\n[... end of meeting ...]\n\n" +
                 full_transcript[-third:]
             )
-            print(f"Ã°Å¸â€œÂ Using condensed transcript: {len(context_transcript)} chars (from {len(full_transcript)})")
+            print(f"ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â Using condensed transcript: {len(context_transcript)} chars (from {len(full_transcript)})")
         else:
             context_transcript = full_transcript
-            print(f"Ã°Å¸â€œÂ Using full transcript: {len(context_transcript)} chars")
+            print(f"ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â Using full transcript: {len(context_transcript)} chars")
 
         # BUILD CONVERSATION CONTEXT
         conv_context = ""
@@ -5670,7 +5670,7 @@ User's question: {query}"""
         )
 
         answer = completion.choices[0].message.content
-        print(f"Ã¢Å“â€¦ Generated response: {len(answer)} chars")
+        print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Generated response: {len(answer)} chars")
 
         # Generate contextual follow-up suggestions
         follow_ups = []
@@ -5693,7 +5693,7 @@ User's question: {query}"""
         }
 
     except Exception as e:
-        print(f"Ã¢ÂÅ’ Chat error: {e}")
+        print(f"ÃƒÂ¢Ã‚ÂÃ…â€™ Chat error: {e}")
         import traceback
         print(traceback.format_exc())
         return {
@@ -5818,7 +5818,7 @@ Rules:
                     # Fallback if AI didn't generate enough questions
                     if len(suggestions) < 3:
                         print(
-                            f"Ã‚Â   AI generated only {len(suggestions)} questions, adding fallbacks"
+                            f"Ãƒâ€šÃ‚   AI generated only {len(suggestions)} questions, adding fallbacks"
                         )
                         suggestions.extend(
                             [
@@ -5834,7 +5834,7 @@ Rules:
 
                 except Exception as e:
                     print(
-                        f"Ã‚Â   AI suggestion generation failed: {e}, using keyword-based fallback"
+                        f"Ãƒâ€šÃ‚   AI suggestion generation failed: {e}, using keyword-based fallback"
                     )
                     # Fall through to keyword-based method below
 
@@ -5920,7 +5920,7 @@ Rules:
 
         else:
             print(
-                f"Ã‚Â   No cached transcript for {meeting_id}, returning generic suggestions"
+                f"Ãƒâ€šÃ‚   No cached transcript for {meeting_id}, returning generic suggestions"
             )
             print(f"   Available cache keys: {list(STORED_TRANSCRIPTS.keys())}")
 
@@ -5954,7 +5954,7 @@ Rules:
 
 
 # ============================================================================
-# [*]Ãƒâ€¦Ã‚Â¡ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ NEW: COMMUNITY KNOWLEDGE BASE (v4.0)
+# [*]ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ NEW: COMMUNITY KNOWLEDGE BASE (v4.0)
 # ============================================================================
 
 

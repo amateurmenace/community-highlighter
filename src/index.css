@@ -2295,7 +2295,7 @@ header .right {
 }
 
 .cache-indicator::before {
-  content: 'âš¡';
+  content: 'Ã¢Å¡Â¡';
 }
 
 /* Optimization Panel Animations */
@@ -4121,5 +4121,911 @@ footer button:hover {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+
+/* ============================================================================
+   ENHANCED BLUEPRINT THEME & INTERACTIVE ANIMATIONS v2.0
+   ============================================================================ */
+
+/* Blueprint Color System */
+:root {
+  --blueprint-blue: #0047AB;
+  --blueprint-light: rgba(0, 71, 171, 0.08);
+  --blueprint-line: rgba(0, 71, 171, 0.15);
+  --blueprint-glow: rgba(0, 171, 255, 0.4);
+  --scan-line-color: rgba(30, 127, 99, 0.3);
+  --tech-corner-color: var(--green);
+}
+
+/* ============================================================================
+   ANIMATED BLUEPRINT BACKGROUND
+   ============================================================================ */
+
+/* Main page blueprint grid with animated scan line */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: 
+    linear-gradient(var(--blueprint-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--blueprint-line) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.5;
+}
+
+/* ============================================================================
+   TECHNICAL CORNER DECORATIONS
+   ============================================================================ */
+
+/* Corner bracket decorator for cards */
+.viz-card::after,
+.card::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  border-top: 2px solid var(--tech-corner-color);
+  border-right: 2px solid var(--tech-corner-color);
+  opacity: 0.6;
+  transition: all 0.3s ease;
+  z-index: 2;
+}
+
+.viz-card:hover::after,
+.card:hover::after {
+  width: 30px;
+  height: 30px;
+  opacity: 1;
+  border-color: var(--green);
+}
+
+/* Bottom-left corner */
+.viz-card .corner-bl,
+.card .corner-bl {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  width: 20px;
+  height: 20px;
+  border-bottom: 2px solid var(--tech-corner-color);
+  border-left: 2px solid var(--tech-corner-color);
+  opacity: 0.6;
+  transition: all 0.3s ease;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* ============================================================================
+   ENHANCED VIZ-CARD WITH BLUEPRINT STYLING
+   ============================================================================ */
+
+.viz-card {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+/* Blueprint grid pattern - enhanced */
+.viz-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: 
+    linear-gradient(var(--blueprint-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--blueprint-line) 1px, transparent 1px),
+    radial-gradient(circle at 0% 0%, var(--blueprint-light) 0%, transparent 50%);
+  background-size: 20px 20px, 20px 20px, 100% 100%;
+  opacity: 0.6;
+  z-index: 0;
+  border-radius: 10px;
+  transition: opacity 0.3s ease;
+}
+
+.viz-card:hover::before {
+  opacity: 0.9;
+}
+
+/* Glowing border on hover */
+.viz-card:hover {
+  box-shadow: 
+    4px 4px 0px rgba(0, 0, 0, 0.1),
+    0 0 20px rgba(30, 127, 99, 0.15),
+    inset 0 0 30px rgba(30, 127, 99, 0.05);
+  transform: translateY(-3px);
+}
+
+/* ============================================================================
+   STAGGERED CARD ENTRANCE ANIMATIONS
+   ============================================================================ */
+
+.data-viz-container > * {
+  opacity: 0;
+  animation: cardEntrance 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+.data-viz-container > *:nth-child(1) { animation-delay: 0.1s; }
+.data-viz-container > *:nth-child(2) { animation-delay: 0.2s; }
+.data-viz-container > *:nth-child(3) { animation-delay: 0.3s; }
+.data-viz-container > *:nth-child(4) { animation-delay: 0.4s; }
+.data-viz-container > *:nth-child(5) { animation-delay: 0.5s; }
+.data-viz-container > *:nth-child(6) { animation-delay: 0.6s; }
+.data-viz-container > *:nth-child(7) { animation-delay: 0.7s; }
+.data-viz-container > *:nth-child(8) { animation-delay: 0.8s; }
+.data-viz-container > *:nth-child(9) { animation-delay: 0.9s; }
+.data-viz-container > *:nth-child(10) { animation-delay: 1.0s; }
+
+@keyframes cardEntrance {
+  0% {
+    opacity: 0;
+    transform: translateY(30px) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ============================================================================
+   ENHANCED BUTTON INTERACTIONS
+   ============================================================================ */
+
+.btn {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+/* Ripple effect on click */
+.btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  transform: translate(-50%, -50%);
+  transition: width 0.6s ease, height 0.6s ease;
+}
+
+.btn:active::before {
+  width: 300px;
+  height: 300px;
+}
+
+/* Glow effect for primary buttons */
+.btn-primary {
+  box-shadow: 
+    2px 2px 0px rgba(0, 0, 0, 0.2),
+    0 0 0 0 rgba(30, 127, 99, 0.4);
+  transition: all 0.3s ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+  box-shadow: 
+    3px 3px 0px rgba(0, 0, 0, 0.3),
+    0 0 15px rgba(30, 127, 99, 0.4);
+}
+
+/* Animated border for action buttons */
+.btn-action-animated {
+  background: linear-gradient(135deg, var(--green) 0%, #2d9f7f 100%);
+  position: relative;
+}
+
+.btn-action-animated::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  background: linear-gradient(45deg, var(--green), var(--mint), var(--green));
+  background-size: 200% 200%;
+  border-radius: 14px;
+  z-index: -1;
+  animation: borderGlow 3s ease infinite;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.btn-action-animated:hover::after {
+  opacity: 1;
+}
+
+@keyframes borderGlow {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+/* ============================================================================
+   INTERACTIVE INPUT FIELDS
+   ============================================================================ */
+
+.input, .select-input, input[type="text"], input[type="search"] {
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  position: relative;
+}
+
+.input:focus, input[type="text"]:focus, input[type="search"]:focus {
+  transform: scale(1.02);
+  box-shadow: 
+    0 0 0 3px rgba(30, 127, 99, 0.2),
+    inset 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-color: var(--green);
+}
+
+/* Typing indicator animation */
+.input-typing {
+  border-color: var(--green) !important;
+  animation: inputPulse 1s ease infinite;
+}
+
+@keyframes inputPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(30, 127, 99, 0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(30, 127, 99, 0.1); }
+}
+
+/* ============================================================================
+   ENHANCED LOADING STATES
+   ============================================================================ */
+
+/* Shimmer loading effect */
+.loading-shimmer {
+  background: linear-gradient(
+    90deg,
+    #f0f0f0 25%,
+    #e0e0e0 50%,
+    #f0f0f0 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmerEffect 1.5s ease infinite;
+}
+
+@keyframes shimmerEffect {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Blueprint loading spinner */
+.blueprint-loader {
+  width: 60px;
+  height: 60px;
+  position: relative;
+}
+
+.blueprint-loader::before,
+.blueprint-loader::after {
+  content: '';
+  position: absolute;
+  border: 3px solid transparent;
+  border-radius: 50%;
+}
+
+.blueprint-loader::before {
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-top-color: var(--green);
+  border-right-color: var(--green);
+  animation: spinLoader 1s linear infinite;
+}
+
+.blueprint-loader::after {
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  border-bottom-color: var(--mint);
+  border-left-color: var(--mint);
+  animation: spinLoader 0.8s linear infinite reverse;
+}
+
+@keyframes spinLoader {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Progress bar with glow */
+.progress-fill {
+  background: linear-gradient(90deg, var(--green) 0%, var(--mint) 100%);
+  box-shadow: 0 0 10px rgba(30, 127, 99, 0.5);
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.4) 50%,
+    transparent 100%
+  );
+  animation: progressShine 2s ease infinite;
+}
+
+@keyframes progressShine {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* ============================================================================
+   MEASUREMENT MARKERS (BLUEPRINT STYLE)
+   ============================================================================ */
+
+.measurement-marker {
+  position: relative;
+}
+
+.measurement-marker::before {
+  content: attr(data-measure);
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-family: 'Courier New', monospace;
+  color: var(--blueprint-blue);
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+/* ============================================================================
+   TIMELINE ENHANCEMENTS
+   ============================================================================ */
+
+.timeline-track {
+  background: linear-gradient(90deg, 
+    var(--blueprint-light) 0%,
+    rgba(30, 127, 99, 0.1) 50%,
+    var(--blueprint-light) 100%
+  );
+  position: relative;
+  overflow: visible;
+}
+
+/* Tick marks on timeline */
+.timeline-track::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--blueprint-line) 0px,
+    var(--blueprint-line) 1px,
+    transparent 1px,
+    transparent 10%
+  );
+  opacity: 0.5;
+}
+
+/* Animated timeline markers */
+.disagreement-marker,
+.highlight-marker {
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  cursor: pointer;
+}
+
+.disagreement-marker:hover,
+.highlight-marker:hover {
+  transform: scale(1.5);
+  z-index: 10;
+}
+
+.marker-pulse {
+  animation: markerPulse 2s ease-in-out infinite;
+}
+
+@keyframes markerPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 0.4;
+  }
+}
+
+/* ============================================================================
+   HEATMAP ENHANCEMENTS
+   ============================================================================ */
+
+.heatmap-row {
+  transition: all 0.3s ease;
+  cursor: pointer;
+  position: relative;
+}
+
+.heatmap-row:hover {
+  transform: translateX(5px);
+  background: rgba(30, 127, 99, 0.05);
+}
+
+.heatmap-row:hover::before {
+  content: '→';
+  position: absolute;
+  left: -20px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--green);
+  font-weight: bold;
+  animation: arrowBounce 0.5s ease infinite;
+}
+
+@keyframes arrowBounce {
+  0%, 100% { transform: translateY(-50%) translateX(0); }
+  50% { transform: translateY(-50%) translateX(3px); }
+}
+
+.heat-cell {
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.heat-cell:hover {
+  transform: scaleY(1.3);
+  z-index: 5;
+  box-shadow: 0 0 8px rgba(30, 127, 99, 0.5);
+}
+
+/* ============================================================================
+   WORD CLOUD ENHANCEMENTS
+   ============================================================================ */
+
+.word-cloud-item {
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  cursor: pointer;
+  position: relative;
+}
+
+.word-cloud-item:hover {
+  transform: scale(1.3) rotate(-3deg);
+  color: var(--green) !important;
+  text-shadow: 0 0 10px rgba(30, 127, 99, 0.5);
+  z-index: 10;
+}
+
+.word-cloud-item::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: var(--green);
+  transition: width 0.3s ease;
+}
+
+.word-cloud-item:hover::after {
+  width: 100%;
+}
+
+/* ============================================================================
+   ENTITY CARD INTERACTIONS
+   ============================================================================ */
+
+.entity-item,
+.entity-chip {
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  position: relative;
+  overflow: hidden;
+}
+
+.entity-item:hover,
+.entity-chip:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+}
+
+.entity-item::before,
+.entity-chip::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    transparent 100%
+  );
+  transition: left 0.5s ease;
+}
+
+.entity-item:hover::before,
+.entity-chip:hover::before {
+  left: 100%;
+}
+
+/* ============================================================================
+   RESULT CARD ENHANCEMENTS
+   ============================================================================ */
+
+.result-card {
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  position: relative;
+}
+
+.result-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--green);
+  transform: scaleY(0);
+  transition: transform 0.3s ease;
+  border-radius: 2px 0 0 2px;
+}
+
+.result-card:hover::before {
+  transform: scaleY(1);
+}
+
+.result-card:hover {
+  transform: translateX(8px);
+  box-shadow: 
+    -4px 0 0 var(--green),
+    4px 4px 0px rgba(0, 0, 0, 0.2);
+}
+
+/* ============================================================================
+   MODAL ENHANCEMENTS
+   ============================================================================ */
+
+.export-modal,
+.entity-popup,
+.decision-popup {
+  animation: modalEntrance 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes modalEntrance {
+  0% {
+    opacity: 0;
+    transform: scale(0.8) translateY(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Modal backdrop blur */
+.export-modal-overlay,
+.entity-popup-overlay {
+  backdrop-filter: blur(4px);
+}
+
+/* ============================================================================
+   FLOATING ACTION INDICATORS
+   ============================================================================ */
+
+.floating-indicator {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: var(--green);
+  color: white;
+  padding: 12px 20px;
+  border-radius: 30px;
+  font-weight: 600;
+  box-shadow: 0 4px 20px rgba(30, 127, 99, 0.4);
+  animation: floatBounce 2s ease-in-out infinite;
+  z-index: 1000;
+}
+
+@keyframes floatBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+/* ============================================================================
+   TOOLTIP ENHANCEMENTS
+   ============================================================================ */
+
+[title] {
+  position: relative;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-5px);
+  background: var(--ink);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.3s ease;
+  z-index: 1000;
+}
+
+[data-tooltip]:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-10px);
+}
+
+/* ============================================================================
+   SECTION DIVIDERS (BLUEPRINT STYLE)
+   ============================================================================ */
+
+.blueprint-divider {
+  position: relative;
+  height: 40px;
+  margin: 30px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.blueprint-divider::before,
+.blueprint-divider::after {
+  content: '';
+  flex: 1;
+  height: 2px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--blueprint-line) 0px,
+    var(--blueprint-line) 10px,
+    transparent 10px,
+    transparent 15px
+  );
+}
+
+.blueprint-divider span {
+  padding: 0 20px;
+  font-size: 11px;
+  font-family: 'Courier New', monospace;
+  color: var(--blueprint-blue);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+/* ============================================================================
+   RESPONSIVE TOUCH INTERACTIONS
+   ============================================================================ */
+
+@media (hover: none) {
+  .btn:active {
+    transform: scale(0.95);
+  }
+  
+  .viz-card:active {
+    transform: scale(0.98);
+  }
+  
+  .result-card:active {
+    background: rgba(30, 127, 99, 0.1);
+  }
+}
+
+/* ============================================================================
+   ACCESSIBILITY - REDUCED MOTION
+   ============================================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  
+  body::after {
+    display: none;
+  }
+}
+
+/* ============================================================================
+   SCROLL REVEAL ANIMATIONS
+   ============================================================================ */
+
+.scroll-reveal {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.scroll-reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ============================================================================
+   HEADER ENHANCEMENT
+   ============================================================================ */
+
+header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  transition: all 0.3s ease;
+}
+
+header.scrolled {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+/* ============================================================================
+   NOTIFICATION BADGES
+   ============================================================================ */
+
+.notification-badge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background: #ef4444;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
+  animation: badgePop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes badgePop {
+  0% { transform: scale(0); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+/* ============================================================================
+   SKELETON LOADING STATES
+   ============================================================================ */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    #f0f0f0 25%,
+    #e8e8e8 50%,
+    #f0f0f0 75%
+  );
+  background-size: 200% 100%;
+  animation: skeletonWave 1.5s ease infinite;
+  border-radius: 4px;
+}
+
+.skeleton-text {
+  height: 16px;
+  margin-bottom: 8px;
+}
+
+.skeleton-title {
+  height: 24px;
+  width: 60%;
+  margin-bottom: 12px;
+}
+
+.skeleton-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+@keyframes skeletonWave {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ============================================================================
+   FOCUS VISIBLE STYLES (ACCESSIBILITY)
+   ============================================================================ */
+
+:focus-visible {
+  outline: 3px solid var(--green);
+  outline-offset: 2px;
+}
+
+.btn:focus-visible {
+  box-shadow: 
+    0 0 0 3px var(--bg),
+    0 0 0 6px var(--green);
+}
+
+/* ============================================================================
+   COPY TO CLIPBOARD FEEDBACK
+   ============================================================================ */
+
+.copy-success {
+  position: relative;
+}
+
+.copy-success::after {
+  content: '✓ Copied!';
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--green);
+  color: white;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  animation: copyFeedback 1.5s ease forwards;
+}
+
+@keyframes copyFeedback {
+  0% { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  20% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ============================================================================
+   ENHANCED SCROLLBAR (WEBKIT)
+   ============================================================================ */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--blueprint-light);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--green) 0%, #166251 100%);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--green);
+  background-clip: content-box;
+}
+
+/* ============================================================================
+   PRINT STYLES
+   ============================================================================ */
+
+@media print {
+  body::before,
+  body::after,
+  .viz-card::before,
+  .viz-card::after {
+    display: none !important;
+  }
+  
+  * {
+    animation: none !important;
+    transition: none !important;
   }
 }

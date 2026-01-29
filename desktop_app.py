@@ -29,13 +29,62 @@ DEFAULT_PORT = 8000
 WINDOW_WIDTH = 1400
 WINDOW_HEIGHT = 900
 
+def update_ytdlp():
+    """Update yt-dlp to the latest nightly version from GitHub.
+    YouTube frequently blocks older versions, so this is critical for video downloads."""
+    import subprocess
+    import shutil
+    
+    print("[*] Checking yt-dlp version...")
+    
+    # Check if yt-dlp exists
+    if not shutil.which('yt-dlp'):
+        print("[!] yt-dlp not found - installing nightly version...")
+    else:
+        # Show current version
+        try:
+            result = subprocess.run(['yt-dlp', '--version'], capture_output=True, text=True, timeout=10)
+            current_version = result.stdout.strip()
+            print(f"[*] Current yt-dlp version: {current_version}")
+        except:
+            pass
+    
+    # Install/update to latest nightly from GitHub
+    print("[*] Updating yt-dlp to latest nightly (YouTube blocks old versions)...")
+    try:
+        result = subprocess.run(
+            [sys.executable, '-m', 'pip', 'install', '-U', 
+             'https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz'],
+            capture_output=True, text=True, timeout=120
+        )
+        if result.returncode == 0:
+            print("[OK] yt-dlp updated successfully!")
+            # Show new version
+            try:
+                result = subprocess.run(['yt-dlp', '--version'], capture_output=True, text=True, timeout=10)
+                print(f"[OK] New version: {result.stdout.strip()}")
+            except:
+                pass
+            return True
+        else:
+            print(f"[!] yt-dlp update failed: {result.stderr[:200]}")
+            return False
+    except subprocess.TimeoutExpired:
+        print("[!] yt-dlp update timed out")
+        return False
+    except Exception as e:
+        print(f"[!] yt-dlp update error: {e}")
+        return False
+
 def setup_environment():
     """Configure environment for desktop mode"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
     
-    # Ensure desktop mode (enables all features)
+    # CRITICAL: Ensure desktop mode (enables video download features)
+    # This must be set BEFORE importing the FastAPI app
     os.environ["CLOUD_MODE"] = "false"
+    print("[*] CLOUD_MODE=false (video downloads enabled)")
     
     # Add directories to Python path
     if script_dir not in sys.path:
@@ -66,14 +115,14 @@ def find_app_module(script_dir):
     print("\n[ERROR] Could not find the FastAPI app!")
     print("\nExpected structure:")
     print("  community-highlighter/")
-    print("  ├── desktop_app.py")
-    print("  ├── backend/")
-    print("  │   └── app.py")
-    print("  └── dist/")
+    print("  +-- desktop_app.py")
+    print("  +-- backend/")
+    print("  |   +-- app.py")
+    print("  +-- dist/")
     sys.exit(1)
 
 def check_prerequisites(script_dir):
-    """Check for required files"""
+    """Check for required files and tools"""
     issues = []
     
     env_found = os.path.exists(os.path.join(script_dir, ".env")) or \
@@ -85,6 +134,26 @@ def check_prerequisites(script_dir):
                  os.path.exists(os.path.join(script_dir, "backend", "dist"))
     if not dist_found:
         issues.append("No 'dist' folder - run 'npm run build'")
+    
+    # Check for yt-dlp (required for video downloads)
+    # IMPORTANT: Must use nightly version - YouTube blocks stable releases quickly!
+    import shutil
+    import subprocess
+    
+    if not shutil.which('yt-dlp'):
+        issues.append("yt-dlp not found - VIDEO DOWNLOADS WILL NOT WORK!")
+        issues.append("  Install NIGHTLY version (stable gets blocked by YouTube):")
+        issues.append("  pip install --upgrade https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz")
+    else:
+        # Check if yt-dlp needs updating (it usually does!)
+        issues.append("TIP: Update yt-dlp regularly - YouTube blocks old versions quickly!")
+        issues.append("  Update: pip install -U https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz")
+    
+    # Check for ffmpeg (required for video processing)
+    if not shutil.which('ffmpeg'):
+        issues.append("ffmpeg not found - VIDEO PROCESSING WILL NOT WORK!")
+        issues.append("  Install with: brew install ffmpeg (macOS)")
+        issues.append("  Or download from: https://ffmpeg.org/download.html")
     
     return issues
 
@@ -149,8 +218,29 @@ def main():
     script_dir = setup_environment()
     print(f"[*] Directory: {script_dir}")
     
-    for issue in check_prerequisites(script_dir):
-        print(f"[!] {issue}")
+    # Auto-update yt-dlp (critical - YouTube blocks old versions!)
+    print("\n" + "-" * 50)
+    update_ytdlp()
+    print("-" * 50 + "\n")
+    
+    # Check prerequisites and show any issues
+    issues = check_prerequisites(script_dir)
+    has_critical = False
+    for issue in issues:
+        if "VIDEO" in issue and "WILL NOT WORK" in issue:
+            print(f"[!] {issue}")
+            has_critical = True
+        elif "TIP:" in issue or "Update:" in issue:
+            # Skip update tips since we just auto-updated
+            pass
+        else:
+            print(f"[!] {issue}")
+    
+    if has_critical:
+        print("\n" + "-" * 50)
+        print("  WARNING: Video download tools are missing!")
+        print("  Install yt-dlp and ffmpeg to enable video exports.")
+        print("-" * 50 + "\n")
     
     try:
         import uvicorn
@@ -171,6 +261,7 @@ def main():
     
     url = f"http://127.0.0.1:{DEFAULT_PORT}"
     print(f"[OK] Server ready: {url}")
+    print(f"[OK] Video downloads: {'ENABLED' if not has_critical else 'DISABLED (missing tools)'}")
     
     if not open_native_window(url):
         print("[!] pywebview not available - using browser")
