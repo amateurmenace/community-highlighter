@@ -2743,50 +2743,60 @@ function CivicMeetingFinder({ onSelectVideo }) {
 
   const searchMeetings = async () => {
     if (!searchQuery.trim()) return;
-    
+
     setLoading(true);
     setError(null);
-    
+
     try {
-      // Build search query - use direct search term + meeting
-      const searchTerm = `${searchQuery} meeting`;
-      
-      // Fetch 20 results sorted by date
-      const response = await fetch(`/api/youtube-search?q=${encodeURIComponent(searchTerm)}&type=video&maxResults=20&order=date`);
+      // Send the raw municipality name — backend handles multi-query strategy
+      const response = await fetch(`/api/youtube-search?q=${encodeURIComponent(searchQuery.trim())}&type=video&maxResults=50&order=date`);
       const data = await response.json();
-      
+
       // Check for API error in response
       if (data.error) {
         setError(data.error);
         setResults([]);
         return;
       }
-      
-      // Filter and sort results to prioritize civic/government content
-      const civicKeywords = ['council', 'board', 'committee', 'selectboard', 'town', 'city', 'municipal', 'government', 'public', 'hearing', 'session', 'meeting'];
+
+      // Score and sort results to prioritize civic/government content
+      const civicKeywords = ['council', 'board', 'committee', 'selectboard', 'select board', 'town', 'city', 'municipal', 'government', 'public', 'hearing', 'session', 'meeting', 'planning', 'zoning', 'school committee', 'finance', 'budget', 'warrant'];
       let items = data.items || [];
-      
-      // Sort: civic-related first, then by date
+
+      // Score each result: civic relevance + recency
+      items = items.map(item => {
+        const title = (item.snippet?.title || '').toLowerCase();
+        const channel = (item.snippet?.channelTitle || '').toLowerCase();
+        const desc = (item.snippet?.description || '').toLowerCase();
+        const combined = `${title} ${channel} ${desc}`;
+
+        // Count how many civic keywords match
+        let civicScore = civicKeywords.filter(kw => combined.includes(kw)).length;
+
+        // Bonus for having the municipality name in channel (official channels)
+        const queryLower = searchQuery.trim().toLowerCase();
+        if (channel.includes(queryLower)) civicScore += 5;
+        if (title.includes(queryLower)) civicScore += 2;
+
+        return { ...item, _civicScore: civicScore };
+      });
+
+      // Sort: high civic score first, then by date within similar scores
       items.sort((a, b) => {
-        const titleA = (a.snippet?.title || '').toLowerCase();
-        const titleB = (b.snippet?.title || '').toLowerCase();
-        const channelA = (a.snippet?.channelTitle || '').toLowerCase();
-        const channelB = (b.snippet?.channelTitle || '').toLowerCase();
-        
-        const isCivicA = civicKeywords.some(kw => titleA.includes(kw) || channelA.includes(kw));
-        const isCivicB = civicKeywords.some(kw => titleB.includes(kw) || channelB.includes(kw));
-        
-        if (isCivicA && !isCivicB) return -1;
-        if (!isCivicA && isCivicB) return 1;
-        
-        // Both civic or neither: sort by date
+        // Group into tiers: high civic relevance (3+), medium (1-2), low (0)
+        const tierA = a._civicScore >= 3 ? 2 : a._civicScore >= 1 ? 1 : 0;
+        const tierB = b._civicScore >= 3 ? 2 : b._civicScore >= 1 ? 1 : 0;
+
+        if (tierA !== tierB) return tierB - tierA;
+
+        // Within same tier, sort by date (newest first)
         const dateA = new Date(a.snippet?.publishedAt || 0);
         const dateB = new Date(b.snippet?.publishedAt || 0);
         return dateB - dateA;
       });
-      
+
       setResults(items);
-      
+
       // Save to recent searches
       if (!recentSearches.includes(searchQuery)) {
         setRecentSearches(prev => [searchQuery, ...prev.slice(0, 4)]);

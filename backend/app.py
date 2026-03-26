@@ -78,8 +78,20 @@ except ImportError:
 
 try:
     from dotenv import load_dotenv
-
-    load_dotenv()
+    # Check multiple .env locations
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    _env_paths = [
+        os.path.join(_script_dir, '.env'),                          # backend/.env
+        os.path.join(os.path.dirname(_script_dir), '.env'),         # project root .env
+        os.path.join(os.path.dirname(_script_dir), 'env'),          # project root env (no dot)
+        os.path.join(os.path.expanduser('~'), '.community-highlighter', '.env'),
+    ]
+    for _env_path in _env_paths:
+        if os.path.exists(_env_path):
+            load_dotenv(_env_path)
+            break
+    else:
+        load_dotenv()  # default: CWD
 except:
     pass
 
@@ -1940,75 +1952,170 @@ else:
 
 @app.get("/api/youtube-status")
 async def youtube_status():
-    """Check if YouTube API is configured"""
+    """Check if YouTube API is configured — always re-read from env in case it was set after import"""
+    key = os.environ.get("YOUTUBE_API_KEY", "") or YOUTUBE_API_KEY
     return {
-        "configured": bool(YOUTUBE_API_KEY),
-        "key_preview": f"{YOUTUBE_API_KEY[:8]}..." if YOUTUBE_API_KEY else None
+        "configured": bool(key),
+        "key_preview": f"{key[:8]}..." if key else None
     }
+
+
+async def _ytdlp_search(q: str, maxResults: int = 20):
+    """Fallback search using yt-dlp when no YouTube API key is available."""
+    import asyncio
+    from datetime import datetime
+
+    search_queries = [
+        f'{q} city council meeting',
+        f'{q} town meeting selectboard',
+        f'{q} board meeting committee',
+    ]
+
+    all_items = []
+    seen_ids = set()
+
+    def _run_single_search(query, limit):
+        try:
+            result = subprocess.run(
+                [YT_DLP_PATH or 'yt-dlp', f'ytsearch{limit}:{query}',
+                 '--dump-json', '--flat-playlist', '--no-warnings', '--quiet'],
+                capture_output=True, text=True, timeout=30
+            )
+            items = []
+            for line in result.stdout.strip().split('\n'):
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    items.append({
+                        "id": {"videoId": entry.get("id", "")},
+                        "snippet": {
+                            "title": entry.get("title", ""),
+                            "description": entry.get("description", "")[:200] if entry.get("description") else "",
+                            "channelTitle": entry.get("channel", entry.get("uploader", "")),
+                            "publishedAt": entry.get("upload_date", ""),
+                            "thumbnails": {
+                                "medium": {"url": entry.get("thumbnail", "")}
+                            }
+                        }
+                    })
+                except json.JSONDecodeError:
+                    continue
+            return items
+        except Exception as e:
+            print(f"[yt-dlp search] Error: {e}")
+            return []
+
+    loop = asyncio.get_event_loop()
+    for query in search_queries:
+        items = await loop.run_in_executor(None, _run_single_search, query, 8)
+        for item in items:
+            vid = item["id"]["videoId"]
+            if vid and vid not in seen_ids:
+                seen_ids.add(vid)
+                all_items.append(item)
+
+    # Convert yt-dlp date format (YYYYMMDD) to ISO
+    for item in all_items:
+        raw_date = item["snippet"].get("publishedAt", "")
+        if raw_date and len(raw_date) == 8 and raw_date.isdigit():
+            try:
+                item["snippet"]["publishedAt"] = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}T00:00:00Z"
+            except:
+                pass
+
+    all_items.sort(key=lambda x: x.get("snippet", {}).get("publishedAt", ""), reverse=True)
+    all_items = all_items[:maxResults]
+
+    print(f"[yt-dlp search] Found {len(all_items)} results for: {q}")
+    return {"items": all_items}
 
 
 @app.get("/api/youtube-search")
 async def youtube_search(q: str, type: str = "video", maxResults: int = 10, order: str = "date"):
-    """Search YouTube for videos (used by Civic Meeting Finder)"""
-    if not YOUTUBE_API_KEY:
-        print("[YouTube] No API key configured - returning error")
-        return {
-            "items": [],
-            "error": "YouTube API key not configured. Set YOUTUBE_API_KEY environment variable.",
-            "setup_help": "Go to console.cloud.google.com, enable YouTube Data API v3, and create an API key."
-        }
-    
+    """Search YouTube for videos (used by Civic Meeting Finder).
+    Runs multiple parallel queries across different meeting types for comprehensive results.
+    Falls back to yt-dlp search if no YouTube API key is configured."""
+    api_key = os.environ.get("YOUTUBE_API_KEY", "") or YOUTUBE_API_KEY
+    if not api_key:
+        # Fallback: use yt-dlp search (no API key required)
+        print(f"[YouTube] No API key — using yt-dlp search for: {q}")
+        return await _ytdlp_search(q, maxResults)
+
     try:
-        # Add civic meeting keywords to improve search results
-        civic_keywords = "city council OR town meeting OR board meeting OR selectboard"
-        enhanced_query = f"{q} {civic_keywords}"
-        
-        params = {
-            "part": "snippet",
-            "q": enhanced_query,
-            "type": type,
-            "maxResults": min(maxResults, 25),
-            "order": order,
-            "key": YOUTUBE_API_KEY,
-            "relevanceLanguage": "en",
-            "regionCode": "US"
-        }
-        
-        print(f"[YouTube] Searching for: {q}")
-        
-        response = httpx.get(
-            "https://www.googleapis.com/youtube/v3/search",
-            params=params,
-            timeout=15.0
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"[YouTube] Found {len(data.get('items', []))} results")
-            return data
-        elif response.status_code == 403:
-            error_data = response.json()
-            error_msg = error_data.get("error", {}).get("message", "API access denied")
-            print(f"[YouTube] API Error 403: {error_msg}")
-            return {
-                "items": [],
-                "error": f"YouTube API access denied: {error_msg}",
-                "help": "Check that YouTube Data API v3 is enabled in your Google Cloud project."
+        # Calculate publishedAfter: last 90 days for recency
+        from datetime import datetime, timedelta
+        published_after = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%dT00:00:00Z")
+
+        # Multiple targeted queries to cast a wide net across meeting types
+        search_queries = [
+            f'"{q}" city council meeting',
+            f'"{q}" town meeting OR selectboard OR select board',
+            f'"{q}" board meeting OR committee meeting',
+            f'"{q}" planning board OR zoning board OR school committee',
+            f'"{q}" public hearing OR town hall OR municipal',
+        ]
+
+        print(f"[YouTube] Comprehensive search for: {q} ({len(search_queries)} queries, after {published_after[:10]})")
+
+        all_items = []
+        seen_ids = set()
+
+        # Run all queries (use asyncio for parallel execution)
+        import asyncio
+
+        async def run_query(query, max_per_query):
+            params = {
+                "part": "snippet",
+                "q": query,
+                "type": type,
+                "maxResults": max_per_query,
+                "order": order,
+                "key": api_key,
+                "relevanceLanguage": "en",
+                "regionCode": "US",
+                "publishedAfter": published_after,
             }
-        elif response.status_code == 400:
-            error_data = response.json()
-            error_msg = error_data.get("error", {}).get("message", "Bad request")
-            print(f"[YouTube] API Error 400: {error_msg}")
-            return {"items": [], "error": f"Invalid request: {error_msg}"}
-        else:
-            print(f"[YouTube] Search error: {response.status_code} - {response.text[:200]}")
-            return {"items": [], "error": f"Search failed with status {response.status_code}"}
-            
-    except httpx.TimeoutException:
-        print("[YouTube] Request timed out")
-        return {"items": [], "error": "Request timed out. Try again."}
+            try:
+                # Use httpx async client
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(
+                        "https://www.googleapis.com/youtube/v3/search",
+                        params=params,
+                        timeout=15.0
+                    )
+                if resp.status_code == 200:
+                    return resp.json().get("items", [])
+                else:
+                    print(f"[YouTube] Query failed ({resp.status_code}): {query[:60]}")
+                    return []
+            except Exception as e:
+                print(f"[YouTube] Query error: {e}")
+                return []
+
+        # Run queries in parallel, 10 results each
+        results = await asyncio.gather(*[run_query(q_str, 10) for q_str in search_queries])
+
+        for batch in results:
+            for item in batch:
+                video_id = item.get("id", {}).get("videoId", "")
+                if video_id and video_id not in seen_ids:
+                    seen_ids.add(video_id)
+                    all_items.append(item)
+
+        # Sort by publish date (newest first)
+        all_items.sort(key=lambda x: x.get("snippet", {}).get("publishedAt", ""), reverse=True)
+
+        # Cap at maxResults
+        all_items = all_items[:min(maxResults, 50)]
+
+        print(f"[YouTube] Found {len(all_items)} unique results across {len(search_queries)} queries")
+        return {"items": all_items}
+
     except Exception as e:
         print(f"[YouTube] Search exception: {e}")
+        import traceback
+        traceback.print_exc()
         return {"items": [], "error": str(e)}
 
 
