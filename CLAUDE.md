@@ -6,15 +6,16 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 
 - **Frontend**: React 19 + Vite, built to `dist/`. Monolithic `src/App.jsx` (~362KB, ~9000 lines) with 20+ inline sub-components
 - **Backend**: FastAPI (`backend/app.py`, ~300KB monolith), served by Uvicorn on port 8000. 69 API endpoints
-- **Desktop packaging**: PyInstaller bundles everything into a macOS `.app`
+- **Desktop packaging**: PyInstaller bundles into macOS `.app` (signed+notarized) and Windows `.exe`
 - **Cloud deployment**: Render (https://community-highlighter.onrender.com/) — video download disabled in cloud mode
 - **GitHub**: https://github.com/amateurmenace/community-highlighter
+- **Latest release**: https://github.com/amateurmenace/community-highlighter/releases/latest
 
 ## Key Entry Points
 
 | File | Purpose |
 |------|---------|
-| `app_launcher.py` | PyInstaller bundle entry point (what runs inside `.app`) |
+| `app_launcher.py` | PyInstaller bundle entry point — cross-platform (macOS + Windows) |
 | `launcher.py` | Tkinter GUI launcher for development (API key input + server control) |
 | `desktop_app.py` | Server process launcher (starts Uvicorn, opens browser/pywebview) |
 | `backend/app.py` | FastAPI application (all API endpoints) |
@@ -136,19 +137,36 @@ npm run dev          # Vite dev server on :5173, proxies API to :8000
 python desktop_app.py  # Start backend in desktop mode
 ```
 
-### Production Build
+### Production Build — macOS
 ```bash
 npm run build                        # Build React to dist/
-./build_mac_app_signed.sh           # Full signed+notarized .app build
+./build_mac_app_signed.sh           # Full signed+notarized .app + .dmg
+```
+
+### Production Build — Windows
+```bash
+# Option 1: Build locally on a Windows machine
+build_windows.bat
+
+# Option 2: Build via GitHub Actions (from any machine)
+gh workflow run build-windows.yml -f version=v7.1.0
 ```
 
 ### Build Scripts
-- `build_mac_app.sh` — Unsigned build (for testing)
-- `build_mac_app_signed.sh` — Signed + notarized build (for distribution)
-- `CommunityHighlighter.spec` — PyInstaller spec file
+- `build_mac_app_signed.sh` — Signed + notarized macOS build (`.app` + `.dmg`)
+- `build_windows.bat` — Windows build (`.exe` in portable ZIP)
+- `CommunityHighlighter.spec` — PyInstaller spec for macOS
+- `CommunityHighlighter-Windows.spec` — PyInstaller spec for Windows
 - `entitlements.plist` — macOS entitlements for code signing
+- `.github/workflows/build-windows.yml` — GitHub Actions workflow for Windows builds
 
-### Code Signing Setup (one-time)
+### PyInstaller Bundling Notes
+- Both specs **exclude** `backend/venv/`, `.venv/`, `dist/`, `build/`, `cache/` to avoid bundling virtualenvs and old build artifacts
+- macOS build script removes nested `__dot__app` bundles before signing
+- All nested binaries (`.dylib`, `.so`) are signed with `--timestamp --options runtime` for notarization
+- The `favicon.ico` is auto-generated from `logo.png` via Pillow
+
+### Code Signing Setup (one-time, macOS only)
 1. Install "Developer ID Application" certificate from Apple Developer portal
 2. Store notarization credentials:
    ```
@@ -166,7 +184,7 @@ npm run build                        # Build React to dist/
 | `YOUTUBE_API_KEY` | No | Improves transcript fetching (optional, app works without it) |
 | `CLOUD_MODE` | Auto | `true` on Render, `false` for desktop |
 | `DESKTOP_MODE` | Auto | Set by app_launcher.py |
-| `FFMPEG_PATH` | Auto | Auto-detected from Homebrew |
+| `FFMPEG_PATH` | Auto | Auto-detected from Homebrew (macOS) or PATH (Windows) |
 
 `.env` file locations (checked in order):
 1. `backend/.env`
@@ -175,21 +193,25 @@ npm run build                        # Build React to dist/
 
 ## External Dependencies
 
-- **ffmpeg**: Required for video processing (`brew install ffmpeg`)
+- **ffmpeg**: Required for video processing
+  - macOS: `brew install ffmpeg`
+  - Windows: `winget install ffmpeg`
 - **yt-dlp**: Required for YouTube downloads. Auto-updated to nightly on each launch because YouTube aggressively blocks old versions
 
 ## Known Issues & Gotchas
 
 - `argv_emulation` in PyInstaller spec MUST be `False` — `True` causes infinite app relaunch on macOS
 - All nested binaries (.dylib, .so) must be signed with entitlements AND `--timestamp` for notarization
+- PyInstaller specs must EXCLUDE `backend/venv/`, `.venv/`, `dist/`, `build/`, `cache/` — bundling these causes notarization failure (unsigned nested binaries) and massive app size
 - `backend/app.py` is a ~300KB monolith — changes require care
 - `src/App.jsx` is ~362KB, ~9000 lines — also monolithic, 20+ inline components
-- PyInstaller bundles torch/scipy/sklearn (huge) — could exclude unused ML deps to shrink app from ~2GB
+- PyInstaller bundles torch/scipy/sklearn (huge) — could exclude unused ML deps to shrink app further
 - yt-dlp download timeout (10 min) can fail on long videos
 - YouTube API key is optional — transcript fetching falls back to YouTubeTranscriptApi → yt-dlp without it
+- Windows builds use `msvcrt` for instance locking (macOS uses `fcntl`)
 
 ## Version
 
-Current: 7.0.0
+Current: 7.1.0
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)
