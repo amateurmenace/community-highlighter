@@ -117,11 +117,12 @@ export async function apiJobStatus(jobId) {
   return res.json();
 }
 
-export async function apiDownloadMp4(videoId) {
+export async function apiDownloadMp4(data) {
+  const payload = typeof data === 'string' ? { videoId: data } : data;
   const res = await fetch(`${BACKEND_URL}/api/download_mp4`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ videoId })
+    body: JSON.stringify(payload)
   });
    if (!res.ok) {
     const err = await res.text();

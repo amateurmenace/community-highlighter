@@ -6419,7 +6419,7 @@ export default function App() {
   const [actions, setActions] = useState({ reel: "", sum: "", dl: "", tr: "" });
   const [summary, setSummary] = useState({ para: "", bullets: [] });
   const [highlightsWithQuotes, setHighlightsWithQuotes] = useState([]);
-  const [reelCaptionsEnabled, setReelCaptionsEnabled] = useState(true);
+  const [reelCaptionsEnabled, setReelCaptionsEnabled] = useState(false);
   
   // 🎬 Video editing options
   const [videoOptions, setVideoOptions] = useState({
@@ -8186,10 +8186,12 @@ export default function App() {
               </div>
 
               {/* Track */}
-              <div className="timeline-track" onDragOver={(e) => e.preventDefault()}>
+              <div className={`timeline-track ${job.status === 'running' ? 'timeline-rendering' : ''}`} onDragOver={(e) => e.preventDefault()}>
                 {clipBasket.length === 0 ? (
                   <div className="timeline-empty">
-                    Search the transcript and add clips to build your timeline, or click "AI Reel" to auto-generate highlights
+                    {job.status === 'running'
+                      ? `Rendering... ${job.percent}%`
+                      : 'Search the transcript and add clips to build your timeline, or click "AI Reel" to auto-generate highlights'}
                   </div>
                 ) : (
                   clipBasket.map((clip, idx) => {
@@ -8200,7 +8202,7 @@ export default function App() {
                     return (
                       <div
                         key={idx}
-                        className={`timeline-clip ${draggingClipIndex === idx ? 'timeline-clip-dragging' : ''}`}
+                        className={`timeline-clip ${draggingClipIndex === idx ? 'timeline-clip-dragging' : ''} ${job.status === 'running' ? 'timeline-clip-rendering' : ''}`}
                         style={{ width: `${widthPx}px` }}
                         draggable
                         onDragStart={() => setDraggingClipIndex(idx)}

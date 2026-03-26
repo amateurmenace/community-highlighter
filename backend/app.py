@@ -3881,18 +3881,17 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
     def create_text_overlay_filter(text, work_dir, prefix, video_width=1920, video_height=1080,
                                    fontcolor="white", bordercolor="black", position="top",
                                    text_type="title"):
-        """Create drawtext filter for LARGE highlight text at TOP of video.
-        
-        Highlight text is BIG and PROMINENT - uses 6% of video height.
-        This gives ~65px on 1080p which is very readable.
-        Uses green color (#1E7F63) to match site branding with friendly rounded font.
+        """Create drawtext filter for highlight text at TOP of video.
+
+        Highlight text uses 3.5% of video height for clean, readable labels.
+        Uses green color (#22C55E) to match site branding.
         """
         if not text:
             return None
-        
-        # HIGHLIGHT TEXT = BIG (6% of height)
-        # 1080p â†’ 65px, 720p â†’ 43px, 1920 vertical â†’ 115px
-        fontsize = max(36, min(100, int(video_height * 0.06)))
+
+        # Highlight text: 3.5% of height
+        # 1080p -> 38px, 720p -> 25px, 1920 vertical -> 67px
+        fontsize = max(20, min(60, int(video_height * 0.035)))
         
         # Calculate safe margins (4% from edges)
         margin_x = int(video_width * 0.04)
@@ -3945,9 +3944,9 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
         # Position at TOP with safe margin
         y_pos = margin_y
         
-        # Strong shadow/border for readability
-        shadow = max(3, fontsize // 12)
-        border = max(3, fontsize // 10)
+        # Subtle shadow/border for readability without overwhelming
+        shadow = max(1, fontsize // 20)
+        border = max(1, fontsize // 18)
         
         # GREEN color (#1E7F63) to match site branding
         # FFmpeg uses BGR format, so #1E7F63 becomes 0x637F1E
@@ -3967,10 +3966,10 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
             f"{font_param}"
             f":fontsize={fontsize}"
             f":fontcolor={green_color}"
-            f":shadowcolor=black@0.9"
+            f":shadowcolor=black@0.6"
             f":shadowx={shadow}:shadowy={shadow}"
             f":borderw={border}"
-            f":bordercolor=white@0.95"
+            f":bordercolor=black@0.5"
             f":x=(w-tw)/2"
             f":y={y_pos}"
             f":line_spacing={int(fontsize * 0.2)}"
@@ -5326,30 +5325,38 @@ async def download_mp4(req: Request):
     
     data = await req.json()
     vid = data.get("videoId", "")
-    
+    resolution = data.get("resolution", "best")
+
     if not vid:
         return {"error": "No video ID provided"}
-    
-    print(f"[download_mp4] Starting download for video: {vid}")
-    
+
+    print(f"[download_mp4] Starting download for video: {vid} at resolution: {resolution}")
+
     output = os.path.join(FILES_DIR, f"{vid}.mp4")
-    
+
     # Check if already downloaded (including alternative extensions from previous runs)
     if os.path.exists(output):
         print(f"[download_mp4] Video already exists: {output}")
         return {"file": f"/files/{os.path.basename(output)}", "cached": True}
-    
+
     # Also check for previously downloaded files with different extensions
     existing = find_ytdlp_output(output)
     if existing:
         print(f"[download_mp4] Found existing video at: {existing}")
         return {"file": f"/files/{os.path.basename(existing)}", "cached": True}
-    
+
+    # Build format string based on resolution
+    if not resolution or resolution == 'best':
+        fmt = "best[ext=mp4]/best"
+    else:
+        h = re.sub(r'[^0-9]', '', str(resolution))
+        fmt = f"best[ext=mp4][height<={h}]/best[ext=mp4]/best" if h else "best[ext=mp4]/best"
+
     # Download with yt-dlp
     try:
         cmd = [
             YTDLP_BIN,
-            "-f", "best[ext=mp4]/best",
+            "-f", fmt,
             "--merge-output-format", "mp4",
             "--no-playlist",
             "-o", output,

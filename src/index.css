@@ -5873,6 +5873,36 @@ header.scrolled {
   align-items: center;
 }
 
+/* ===================== Timeline Rendering Animation ===================== */
+.timeline-rendering {
+  position: relative;
+}
+.timeline-rendering::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--green), var(--accent), var(--green));
+  background-size: 200% 100%;
+  animation: timeline-progress-sweep 1.5s ease-in-out infinite;
+  border-radius: 2px;
+  width: 100%;
+  z-index: 10;
+}
+@keyframes timeline-progress-sweep {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.timeline-clip-rendering {
+  animation: clip-pulse 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes clip-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 /* ===================== Hero Button ===================== */
 .hero-reel-section {
   margin-top: 16px;
