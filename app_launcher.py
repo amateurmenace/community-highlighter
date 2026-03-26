@@ -7,15 +7,62 @@ Always updates yt-dlp to the latest version on startup.
 
 import os
 import sys
+import multiprocessing
 import subprocess
 import webbrowser
 import time
 import threading
 import signal
 import socket
+import tempfile
+import atexit
+
+# Prevent fork-bomb on macOS when frozen
+multiprocessing.freeze_support()
 
 # Flag to track if browser was opened
 _browser_opened = False
+
+# Single-instance lock file
+_lock_file_path = os.path.join(tempfile.gettempdir(), 'community-highlighter.lock')
+_lock_file_handle = None
+
+
+def acquire_instance_lock():
+    """Prevent multiple instances from launching simultaneously."""
+    global _lock_file_handle
+    try:
+        _lock_file_handle = open(_lock_file_path, 'w')
+        if sys.platform == 'win32':
+            import msvcrt
+            msvcrt.locking(_lock_file_handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(_lock_file_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_file_handle.write(str(os.getpid()))
+        _lock_file_handle.flush()
+        atexit.register(release_instance_lock)
+        return True
+    except (IOError, OSError):
+        return False
+
+
+def release_instance_lock():
+    """Release the single-instance lock."""
+    global _lock_file_handle
+    if _lock_file_handle:
+        try:
+            if sys.platform == 'win32':
+                import msvcrt
+                msvcrt.locking(_lock_file_handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(_lock_file_handle, fcntl.LOCK_UN)
+            _lock_file_handle.close()
+            os.unlink(_lock_file_path)
+        except (IOError, OSError):
+            pass
+        _lock_file_handle = None
 
 def get_app_path():
     """Get the path to the app bundle or development directory."""
@@ -140,12 +187,20 @@ def open_browser_once(url, delay=2):
 
 def main():
     global _browser_opened
-    
+
+    # Prevent multiple instances from spawning (fixes infinite relaunch)
+    if not acquire_instance_lock():
+        print("⚠️ Another instance is already starting. Exiting.")
+        # If port is already up, just open browser
+        if is_port_in_use(8000):
+            webbrowser.open('http://127.0.0.1:8000')
+        sys.exit(0)
+
     print("=" * 60)
     print("🏛️  Community Highlighter - Desktop App")
     print("    Full-featured version with video download")
     print("=" * 60)
-    
+
     # Check if already running
     if is_port_in_use(8000):
         print("⚠️ App already running on port 8000")

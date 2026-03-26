@@ -1,4 +1,4 @@
-import os, json, uuid, tempfile, shutil, subprocess, threading, re, html, asyncio
+import os, sys, json, uuid, tempfile, shutil, subprocess, threading, re, html, asyncio
 from collections import Counter, defaultdict
 from datetime import datetime
 from urllib.parse import quote, unquote
@@ -127,6 +127,36 @@ else:
     ytt_api = YouTubeTranscriptApi()
     PROXY_ENABLED = False
 
+# Resolve yt-dlp binary path (may not be in PATH when running as desktop app)
+YTDLP_BIN = shutil.which("yt-dlp")
+if not YTDLP_BIN:
+    # Check common locations
+    for candidate in [
+        os.path.join(os.path.dirname(sys.executable), "yt-dlp"),
+        "/Library/Frameworks/Python.framework/Versions/3.11/bin/yt-dlp",
+        "/opt/homebrew/bin/yt-dlp",
+        "/usr/local/bin/yt-dlp",
+    ]:
+        if os.path.exists(candidate):
+            YTDLP_BIN = candidate
+            break
+if YTDLP_BIN:
+    print(f"[OK] yt-dlp found: {YTDLP_BIN}")
+else:
+    YTDLP_BIN = "yt-dlp"  # fallback to bare name
+    print("[!] yt-dlp not found in PATH - video downloads may fail")
+
+# Bundled font for reliable cross-platform text rendering
+FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+FONT_DEJAVU_BOLD = os.path.join(FONTS_DIR, "DejaVuSans-Bold.ttf")
+FONT_DEJAVU = os.path.join(FONTS_DIR, "DejaVuSans.ttf")
+if os.path.exists(FONT_DEJAVU_BOLD):
+    print(f"[OK] Bundled font: {FONT_DEJAVU_BOLD}")
+else:
+    FONT_DEJAVU_BOLD = None
+    FONT_DEJAVU = None
+    print("[!] Bundled font not found at backend/fonts/ - using system fonts")
+
 # Cloud deployment mode - disables video download features (yt-dlp blocked by YouTube)
 # Set CLOUD_MODE=true in Render to enable this
 CLOUD_MODE = os.getenv("CLOUD_MODE", "false").lower() == "true"
@@ -241,7 +271,7 @@ MEETING_CACHE = {}  # v5.0: Meeting summaries cache  # Cache for transcripts
 
 
 # ============================================================================
-# Ãƒâ€šÃ‚  NEW: VECTOR DATABASE SETUP (ChromaDB for Knowledge Base)
+# Ãƒâ€šÃ‚Â  NEW: VECTOR DATABASE SETUP (ChromaDB for Knowledge Base)
 # ============================================================================
 
 # Initialize ChromaDB only if available
@@ -495,13 +525,13 @@ CRITICAL REQUIREMENTS:
 KEY INFORMATION FROM MEETING:
 
 DECISIONS & VOTES MADE:
-{chr(10).join(f" • {d}" for d in combined_decisions[:20])}
+{chr(10).join(f" â€¢ {d}" for d in combined_decisions[:20])}
 
 MAJOR DISCUSSIONS:
-{chr(10).join(f" • {d}" for d in combined_discussions[:20])}
+{chr(10).join(f" â€¢ {d}" for d in combined_discussions[:20])}
 
 ACTION ITEMS:
-{chr(10).join(f" • {a}" for a in combined_actions[:15])}
+{chr(10).join(f" â€¢ {a}" for a in combined_actions[:15])}
 
 NOTABLE QUOTES (use ONLY complete quotes):
 {chr(10).join(f' "{q}"' for q in combined_quotes[:20])}
@@ -1276,11 +1306,11 @@ async def get_transcript(req: Request):
                             f" STORED {len(transcript_data)} segments (Method: YouTube Data API)"
                         )
                 except Exception as parse_error:
-                    print(f"Ãƒâ€šÃ‚   Could not parse YouTube Data API VTT: {parse_error}")
+                    print(f"Ãƒâ€šÃ‚Â   Could not parse YouTube Data API VTT: {parse_error}")
 
                 return Response(content=vtt, media_type="text/vtt")
         except Exception as e:
-            print(f"Ãƒâ€šÃ‚   YouTube Data API failed: {e}")
+            print(f"Ãƒâ€šÃ‚Â   YouTube Data API failed: {e}")
 
     # Last resort: yt-dlp
     try:
@@ -1338,10 +1368,10 @@ async def get_transcript(req: Request):
                                             f" STORED {len(transcript_data)} segments (Method: yt-dlp)"
                                         )
                                     else:
-                                        print(f"Ãƒâ€šÃ‚   VTT parsing returned no data")
+                                        print(f"Ãƒâ€šÃ‚Â   VTT parsing returned no data")
                                 except Exception as parse_error:
                                     print(
-                                        f"Ãƒâ€šÃ‚   Could not parse yt-dlp VTT: {parse_error}"
+                                        f"Ãƒâ€šÃ‚Â   Could not parse yt-dlp VTT: {parse_error}"
                                     )
 
                                 return Response(
@@ -1349,7 +1379,7 @@ async def get_transcript(req: Request):
                                 )
 
     except Exception as e:
-        print(f"Ãƒâ€šÃ‚   yt-dlp failed: {e}")
+        print(f"Ãƒâ€šÃ‚Â   yt-dlp failed: {e}")
 
     raise HTTPException(
         status_code=404,
@@ -1464,7 +1494,7 @@ async def summary_ai(req: Request):
                 all_key_points.append(key_points)
 
         if not all_key_points:
-            print("Ãƒâ€šÃ‚  Key point extraction failed, using fallback")
+            print("Ãƒâ€šÃ‚Â  Key point extraction failed, using fallback")
             if strategy == "highlights_with_quotes":
                 return {
                     "summarySentences": json.dumps(
@@ -1493,7 +1523,7 @@ async def summary_ai(req: Request):
                             "strategy": strategy,
                         }
                 except json.JSONDecodeError:
-                    print("Ãƒâ€šÃ‚  JSON parsing failed")
+                    print("Ãƒâ€šÃ‚Â  JSON parsing failed")
             else:
                 print(f"[summary_ai] Generated summary ({len(ai_result)} chars)")
                 return {"summarySentences": ai_result, "strategy": strategy}
@@ -2941,40 +2971,45 @@ def create_lower_third_filter(name, title, video_width, video_height, duration=5
     return filters
 
 
-def create_intro_slide(work_dir, title, subtitle, duration=3, width=1920, height=1080, bg_color='0x1e7f63'):
-    """Create an intro title slide"""
+def create_intro_slide(work_dir, title, subtitle="", duration=3, width=1920, height=1080, bg_color='0x1e7f63'):
+    """Create an intro title slide with animated text"""
     output = os.path.join(work_dir, "intro_slide.mp4")
-    
-    # Escape text
-    title_escaped = title.replace("'", "\\'").replace(":", "\\:")
-    subtitle_escaped = subtitle.replace("'", "\\'").replace(":", "\\:") if subtitle else ""
-    
-    # Calculate font sizes based on resolution
-    title_size = int(height / 15)
-    subtitle_size = int(height / 25)
-    
-    filter_complex = f"color=c={bg_color}:s={width}x{height}:d={duration}"
-    filter_complex += f",drawtext=text='{title_escaped}':fontsize={title_size}:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2-{title_size}"
+
+    title_escaped = title.replace("'", "\\'").replace(":", "\\:").replace('"', '\\"')
+    subtitle_escaped = subtitle.replace("'", "\\'").replace(":", "\\:").replace('"', '\\"') if subtitle else ""
+
+    title_size = int(height / 12)
+    subtitle_size = int(height / 22)
+
+    font_param = f":fontfile='{FONT_DEJAVU_BOLD}'" if FONT_DEJAVU_BOLD and os.path.exists(FONT_DEJAVU_BOLD) else ""
+
+    # Build filter: color background + title + subtitle + fade
+    vf = f"color=c={bg_color}:s={width}x{height}:d={duration}"
+    vf += f",drawtext=text='{title_escaped}'{font_param}:fontsize={title_size}:fontcolor=white:x=(w-text_w)/2:y=(h/2)-{title_size}"
     if subtitle:
-        filter_complex += f",drawtext=text='{subtitle_escaped}':fontsize={subtitle_size}:fontcolor=white@0.8:x=(w-text_w)/2:y=(h-text_h)/2+{subtitle_size}"
-    # Add fade in/out
-    filter_complex += f",fade=t=in:st=0:d=0.5,fade=t=out:st={duration-0.5}:d=0.5"
-    
+        vf += f",drawtext=text='{subtitle_escaped}'{font_param}:fontsize={subtitle_size}:fontcolor=white@0.7:x=(w-text_w)/2:y=(h/2)+{int(subtitle_size * 0.5)}"
+    vf += f",fade=t=in:st=0:d=0.5,fade=t=out:st={max(0, duration - 0.5)}:d=0.5"
+
     cmd = [
         "ffmpeg",
-        "-f", "lavfi",
-        "-i", f"anullsrc=r=44100:cl=stereo:d={duration}",
-        "-f", "lavfi", 
-        "-i", filter_complex,
+        "-f", "lavfi", "-i", f"color=c={bg_color}:s={width}x{height}:d={duration}:r=30",
+        "-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo",
+        "-t", str(duration),
+        "-filter_complex",
+        f"[0:v]drawtext=text='{title_escaped}'{font_param}:fontsize={title_size}:fontcolor=white:x=(w-text_w)/2:y=(h/2)-{title_size}"
+        + (f",drawtext=text='{subtitle_escaped}'{font_param}:fontsize={subtitle_size}:fontcolor=white@0.7:x=(w-text_w)/2:y=(h/2)+{int(subtitle_size * 0.5)}" if subtitle else "")
+        + f",fade=t=in:st=0:d=0.5,fade=t=out:st={max(0, duration - 0.5)}:d=0.5[v]",
+        "-map", "[v]", "-map", "1:a",
         "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
+        "-c:a", "aac", "-ar", "44100",
         "-shortest",
         output, "-y"
     ]
-    
+
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if result.returncode == 0 and os.path.exists(output):
+            print(f"[intro] Created intro slide: {title}")
             return output
         print(f"[intro] Error: {result.stderr[:300]}")
     except Exception as e:
@@ -2982,38 +3017,40 @@ def create_intro_slide(work_dir, title, subtitle, duration=3, width=1920, height
     return None
 
 
-def create_outro_slide(work_dir, title, cta_text, duration=4, width=1920, height=1080, bg_color='0x1e7f63'):
-    """Create an outro/call-to-action slide"""
+def create_outro_slide(work_dir, title, cta_text="", duration=4, width=1920, height=1080, bg_color='0x1e7f63'):
+    """Create an outro/call-to-action slide with animated text"""
     output = os.path.join(work_dir, "outro_slide.mp4")
-    
-    title_escaped = title.replace("'", "\\'").replace(":", "\\:")
-    cta_escaped = cta_text.replace("'", "\\'").replace(":", "\\:") if cta_text else ""
-    
-    title_size = int(height / 18)
+
+    title_escaped = title.replace("'", "\\'").replace(":", "\\:").replace('"', '\\"')
+    cta_escaped = cta_text.replace("'", "\\'").replace(":", "\\:").replace('"', '\\"') if cta_text else ""
+
+    title_size = int(height / 15)
     cta_size = int(height / 22)
-    
-    filter_complex = f"color=c={bg_color}:s={width}x{height}:d={duration}"
-    filter_complex += f",drawtext=text='{title_escaped}':fontsize={title_size}:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2-{title_size}"
-    if cta_text:
-        filter_complex += f",drawtext=text='{cta_escaped}':fontsize={cta_size}:fontcolor=yellow:x=(w-text_w)/2:y=(h-text_h)/2+{cta_size}"
-    filter_complex += f",fade=t=in:st=0:d=0.5,fade=t=out:st={duration-0.5}:d=0.5"
-    
+
+    font_param = f":fontfile='{FONT_DEJAVU_BOLD}'" if FONT_DEJAVU_BOLD and os.path.exists(FONT_DEJAVU_BOLD) else ""
+
     cmd = [
         "ffmpeg",
-        "-f", "lavfi",
-        "-i", f"anullsrc=r=44100:cl=stereo:d={duration}",
-        "-f", "lavfi",
-        "-i", filter_complex,
+        "-f", "lavfi", "-i", f"color=c={bg_color}:s={width}x{height}:d={duration}:r=30",
+        "-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo",
+        "-t", str(duration),
+        "-filter_complex",
+        f"[0:v]drawtext=text='{title_escaped}'{font_param}:fontsize={title_size}:fontcolor=white:x=(w-text_w)/2:y=(h/2)-{title_size}"
+        + (f",drawtext=text='{cta_escaped}'{font_param}:fontsize={cta_size}:fontcolor=yellow:x=(w-text_w)/2:y=(h/2)+{int(cta_size * 0.5)}" if cta_text else "")
+        + f",fade=t=in:st=0:d=0.5,fade=t=out:st={max(0, duration - 0.5)}:d=0.5[v]",
+        "-map", "[v]", "-map", "1:a",
         "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
+        "-c:a", "aac", "-ar", "44100",
         "-shortest",
         output, "-y"
     ]
-    
+
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if result.returncode == 0 and os.path.exists(output):
+            print(f"[outro] Created outro slide: {title}")
             return output
+        print(f"[outro] Error: {result.stderr[:300]}")
     except Exception as e:
         print(f"[outro] Failed to create outro: {e}")
     return None
@@ -3140,6 +3177,47 @@ def create_chapter_markers(clips, output_path):
         return False
 
 
+def run_ffmpeg_with_progress(cmd, job, clip_index, total_clips, expected_duration,
+                              base_percent=30, percent_range=50):
+    """Run ffmpeg with real-time progress tracking via -progress pipe:1.
+    Updates job dict with smooth progress instead of coarse jumps."""
+    # Insert -progress pipe:1 before the output file (last 2 args: output, -y)
+    # Find the output file position (last arg before -y, or last arg)
+    cmd_with_progress = list(cmd)
+    if cmd_with_progress[-1] == '-y':
+        cmd_with_progress = cmd_with_progress[:-2] + ['-progress', 'pipe:1'] + cmd_with_progress[-2:]
+    else:
+        cmd_with_progress = cmd_with_progress[:-1] + ['-progress', 'pipe:1'] + cmd_with_progress[-1:]
+
+    try:
+        proc = subprocess.Popen(cmd_with_progress, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        for line in proc.stdout:
+            line = line.strip()
+            if line.startswith('out_time_us='):
+                try:
+                    microseconds = int(line.split('=')[1])
+                    seconds = microseconds / 1_000_000
+                    clip_progress = min(1.0, seconds / expected_duration) if expected_duration > 0 else 0
+
+                    clip_fraction = clip_index / total_clips
+                    overall = base_percent + percent_range * (clip_fraction + clip_progress / total_clips)
+
+                    job["percent"] = int(min(overall, base_percent + percent_range))
+                    job["message"] = f"Rendering clip {clip_index + 1}/{total_clips} ({int(clip_progress * 100)}%)"
+                except (ValueError, ZeroDivisionError):
+                    pass
+
+        proc.wait(timeout=600)
+        stderr_out = proc.stderr.read()
+        return proc.returncode, stderr_out
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return -1, "FFmpeg timed out"
+    except Exception as e:
+        return -1, str(e)
+
+
 def generate_upbeat_background_music(output_path, duration_seconds):
     """Generate background music using a simple, proven FFmpeg approach.
     Creates a pleasant sine wave chord that definitely works.
@@ -3218,74 +3296,67 @@ def add_upbeat_background_music(video_path, output_path, music_volume=0.5):
             print("[bg_music] Music file doesn't exist")
             return False
         
-        # Simpler FFmpeg command to mix audio
-        # Using amerge instead of amix for more reliable results
+        # Mix music with speech ducking using sidechaincompress
+        # Music volume drops automatically when speech is detected
+        ducking_filter = (
+            f"[1:a]volume={music_volume}[music];"
+            f"[0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[speech];"
+            f"[music][speech]sidechaincompress=threshold=0.015:ratio=8:attack=200:release=1000:level_sc=1[ducked];"
+            f"[speech][ducked]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+        )
+
         cmd = [
             "ffmpeg", "-y",
             "-i", video_path,
             "-i", music_path,
-            "-filter_complex",
-            f"[1:a]volume={music_volume}[m];[0:a][m]amerge=inputs=2,pan=stereo|c0<c0+c2|c1<c1+c3[a]",
+            "-filter_complex", ducking_filter,
             "-map", "0:v",
-            "-map", "[a]",
+            "-map", "[aout]",
             "-c:v", "copy",
             "-c:a", "aac",
             "-b:a", "192k",
             "-shortest",
             output_path
         ]
-        
-        print(f"[bg_music] Mixing music into video...")
+
+        print(f"[bg_music] Mixing music with speech ducking...")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        
+
         # Cleanup
         if os.path.exists(music_path):
             os.remove(music_path)
-        
+
         if result.returncode == 0 and os.path.exists(output_path):
             size = os.path.getsize(output_path)
-            print(f"[bg_music] SUCCESS! Output: {size} bytes")
+            print(f"[bg_music] SUCCESS with ducking! Output: {size} bytes")
             return True
         else:
-            print(f"[bg_music] Mix failed: {result.stderr[:300] if result.stderr else 'unknown'}")
-            
-            # Try simpler fallback - just use amix
-            print("[bg_music] Trying fallback method...")
+            print(f"[bg_music] Ducking failed, trying simple mix: {result.stderr[:300] if result.stderr else 'unknown'}")
+
+            # Fallback: simple amix without ducking
             if not generate_upbeat_background_music(music_path, duration + 2):
                 return False
-                
+
             cmd2 = [
                 "ffmpeg", "-y",
                 "-i", video_path,
                 "-i", music_path,
                 "-filter_complex",
-                f"[0:a]volume=1.0[v];[1:a]volume={music_volume}[m];[v][m]amix=inputs=2:duration=first[a]",
-                "-map", "0:v",
-                "-map", "[a]",
-                "-c:v", "copy",
-                "-c:a", "aac",
-                "-shortest",
-                output_path
+                f"[0:a]volume=1.0[s];[1:a]volume={music_volume}[m];[s][m]amix=inputs=2:duration=first[a]",
+                "-map", "0:v", "-map", "[a]",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                "-shortest", output_path
             ]
-            
+
             result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=300)
-            
             if os.path.exists(music_path):
                 os.remove(music_path)
-                
             if result2.returncode == 0 and os.path.exists(output_path):
                 print(f"[bg_music] Fallback SUCCESS!")
                 return True
-            else:
-                print(f"[bg_music] Fallback also failed: {result2.stderr[:200] if result2.stderr else 'unknown'}")
-                return False
-                
-    except Exception as e:
-        print(f"[bg_music] Exception: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-            
+            print(f"[bg_music] Fallback also failed: {result2.stderr[:200] if result2.stderr else ''}")
+            return False
+
     except Exception as e:
         print(f"[bg_music] Exception: {type(e).__name__}: {e}")
         import traceback
@@ -3390,6 +3461,63 @@ def get_hw_encoder():
     return _HW_ACCEL_CACHE['encoder']
 
 
+def find_ytdlp_output(expected_path):
+    """Find the actual file yt-dlp created, even if the extension differs.
+    
+    yt-dlp may save as .mkv, .webm, or .mp4.webm when merging audio+video streams.
+    This function checks the expected path first, then globs for alternatives.
+    Returns the actual file path if found, or None.
+    """
+    import glob
+    
+    # Check exact path first
+    if os.path.exists(expected_path):
+        return expected_path
+    
+    # Try common alternative extensions yt-dlp might use
+    base = os.path.splitext(expected_path)[0]
+    for ext in ['.mp4', '.mkv', '.webm', '.mp4.webm', '.mp4.mkv', '.mp4.part']:
+        alt = base + ext
+        if os.path.exists(alt):
+            print(f"[find_ytdlp_output] Expected {expected_path}, found {alt}")
+            # Remux to mp4 if not already mp4
+            if not alt.endswith('.mp4'):
+                remuxed = base + '.mp4'
+                try:
+                    cmd = ["ffmpeg", "-i", alt, "-c", "copy", "-movflags", "+faststart", remuxed, "-y"]
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                    if result.returncode == 0 and os.path.exists(remuxed):
+                        os.remove(alt)  # Clean up original
+                        print(f"[find_ytdlp_output] Remuxed {alt} -> {remuxed}")
+                        return remuxed
+                except Exception as e:
+                    print(f"[find_ytdlp_output] Remux failed: {e}")
+            return alt
+    
+    # Glob for anything with the same base name
+    matches = glob.glob(base + '.*')
+    video_matches = [m for m in matches if m.endswith(('.mp4', '.mkv', '.webm'))]
+    if video_matches:
+        found = video_matches[0]
+        print(f"[find_ytdlp_output] Found via glob: {found}")
+        # Remux if needed
+        if not found.endswith('.mp4'):
+            remuxed = base + '.mp4'
+            try:
+                cmd = ["ffmpeg", "-i", found, "-c", "copy", "-movflags", "+faststart", remuxed, "-y"]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                if result.returncode == 0 and os.path.exists(remuxed):
+                    os.remove(found)
+                    print(f"[find_ytdlp_output] Remuxed {found} -> {remuxed}")
+                    return remuxed
+            except Exception as e:
+                print(f"[find_ytdlp_output] Remux failed: {e}")
+        return found
+    
+    print(f"[find_ytdlp_output] No file found for {expected_path}")
+    return None
+
+
 def download_video_segment(vid, start, end, output_path, padding=5):
     """Download a specific segment of a video using yt-dlp's download-sections"""
     start_padded = max(0, start - padding)
@@ -3397,17 +3525,25 @@ def download_video_segment(vid, start, end, output_path, padding=5):
     section = f"*{start_padded}-{end_padded}"
     
     cmd = [
-        "yt-dlp",
-        "-f", "best[ext=mp4][height<=720]/best[ext=mp4]/best",
+        YTDLP_BIN,
+        "-f", get_ytdlp_format(resolution),
+        "--merge-output-format", "mp4",
         "--download-sections", section,
         "--force-keyframes-at-cuts",
+        "--no-playlist",
         "-o", output_path,
         f"https://www.youtube.com/watch?v={vid}"
     ]
     
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        return result.returncode == 0 and os.path.exists(output_path)
+        if result.returncode != 0:
+            print(f"[segment_download] yt-dlp error: {result.stderr[:300]}")
+        # Use find_ytdlp_output to handle extension mismatches
+        actual_path = find_ytdlp_output(output_path)
+        if actual_path:
+            return True
+        return False
     except Exception as e:
         print(f"[segment_download] Failed: {e}")
         return False
@@ -3437,6 +3573,16 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
             - logo_watermark: bool - Add logo watermark to clips
             - use_hw_accel: bool - Use hardware acceleration if available
     """
+    # Build yt-dlp format string based on resolution option
+    def get_ytdlp_format(res):
+        if not res or res == 'best':
+            return "best[ext=mp4]/best"
+        # Extract height number from strings like '720p', '1080p'
+        h = re.sub(r'[^0-9]', '', str(res))
+        if h:
+            return f"best[ext=mp4][height<={h}]/best[ext=mp4]/best"
+        return "best[ext=mp4][height<=720]/best[ext=mp4]/best"
+
     job = JOBS[job_id]
     job["status"] = "running"
     job["percent"] = 5
@@ -3451,9 +3597,15 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
     color_filter = opts.get('colorFilter', opts.get('color_filter', 'none'))
     do_background_music = opts.get('backgroundMusic', False)
     do_logo_watermark = opts.get('logoWatermark', opts.get('logo_watermark', False))
+    do_normalize_audio = opts.get('normalizeAudio', True)  # Default ON
     playback_speed = opts.get('playbackSpeed', '1.0')
     show_highlight_labels = opts.get('showHighlightLabels', True)
     use_hw_accel = opts.get('use_hw_accel', True)
+    intro_title = opts.get('introTitle', '')
+    intro_subtitle = opts.get('introSubtitle', '')
+    outro_title = opts.get('outroTitle', '')
+    outro_cta = opts.get('outroCta', '')
+    resolution = opts.get('resolution', '720p')
     
     # Get hardware encoder - use libx264 for reliability
     hw_encoder = 'libx264'  # Always use software encoder for reliability
@@ -3606,12 +3758,17 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
         # Using a lighter green (#22C55E) for better video visibility -> 0x5EC522
         green_color = "0x22C55E"  # Bright green, very readable on video
         
-        # Try friendly fonts in order of preference (macOS/Linux compatible)
-        # These are rounded, friendly fonts that look good on video
-        font_options = "Arial Rounded MT Bold:Avenir Next Rounded:SF Pro Rounded:Helvetica Neue:Arial"
-        
+        # Use bundled font if available, otherwise fall back to system fonts
+        font_param = ""
+        if FONT_DEJAVU_BOLD and os.path.exists(FONT_DEJAVU_BOLD):
+            font_path = FONT_DEJAVU_BOLD.replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
+            font_param = f":fontfile='{font_path}'"
+        else:
+            font_param = ":font='Arial Rounded MT Bold\\:Avenir Next Rounded\\:Helvetica Neue\\:Arial'"
+
         filter_str = (
             f"drawtext=textfile='{text_escaped}'"
+            f"{font_param}"
             f":fontsize={fontsize}"
             f":fontcolor={green_color}"
             f":shadowcolor=black@0.9"
@@ -3639,9 +3796,10 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
         # Create SRT file
         srt_file = os.path.join(work_dir, f"{prefix}_captions.srt")
         
-        # CAPTIONS = SMALL (2.2% of height, about 1/3 of highlight size)
-        # 1080p â†’ 24px, 720p â†’ 16px, 1920 vertical â†’ 42px
-        fontsize = max(16, min(42, int(video_height * 0.022)))
+        # CAPTIONS: larger for vertical, standard for horizontal
+        is_vertical = video_width < video_height if video_width else False
+        cap_ratio = 0.028 if is_vertical else 0.022
+        fontsize = max(16, min(52, int(video_height * cap_ratio)))
         
         # Large bottom margin to stay away from bottom edge
         # Horizontal: 10% from bottom, Vertical: 18% from bottom
@@ -3718,16 +3876,26 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
         # Escape for FFmpeg
         srt_escaped = srt_file.replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
         
-        # Style: small white text with outline, at bottom
+        # Style: white text with semi-transparent pill background (BorderStyle=4)
+        font_style = ""
+        if FONT_DEJAVU_BOLD and os.path.exists(FONT_DEJAVU_BOLD):
+            font_style = f"Fontname=DejaVu Sans Bold,"
+        else:
+            font_style = f"Fontname=Helvetica Neue,"
+
+        margin_h = max(20, int(video_width * 0.05)) if video_width else 40
         style = (
             f"FontSize={fontsize},"
-            f"FontName=DejaVu Sans,"
+            f"{font_style}"
             f"PrimaryColour=&H00FFFFFF,"
-            f"OutlineColour=&H00000000,"
-            f"BackColour=&H80000000,"
-            f"Outline=2,"
-            f"Shadow=1,"
+            f"OutlineColour=&H40000000,"
+            f"BackColour=&HCC000000,"
+            f"BorderStyle=4,"
+            f"Outline=1,"
+            f"Shadow=0,"
             f"MarginV={margin_v},"
+            f"MarginL={margin_h},"
+            f"MarginR={margin_h},"
             f"Alignment=2"
         )
         
@@ -3761,7 +3929,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
             job["message"] = "Checking video duration..."
             video_duration = 0
             try:
-                duration_cmd = ["yt-dlp", "--print", "duration", f"https://www.youtube.com/watch?v={vid}"]
+                duration_cmd = [YTDLP_BIN, "--print", "duration", f"https://www.youtube.com/watch?v={vid}"]
                 duration_result = subprocess.run(duration_cmd, capture_output=True, text=True, timeout=30)
                 video_duration = float(duration_result.stdout.strip()) if duration_result.returncode == 0 else 0
                 print(f"[simple_job] Video duration: {video_duration}s ({video_duration/60:.1f} min)")
@@ -3784,8 +3952,9 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                 job["percent"] = 5
                 
                 cmd = [
-                    "yt-dlp",
-                    "-f", "best[ext=mp4][height<=720]/best[ext=mp4]/best",
+                    YTDLP_BIN,
+                    "-f", get_ytdlp_format(resolution),
+                    "--merge-output-format", "mp4",
                     "--no-playlist",
                     "-o", video_file,
                     f"https://www.youtube.com/watch?v={vid}",
@@ -3799,6 +3968,12 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     print(f"[simple_job] yt-dlp error: {result.stderr}")
                     raise Exception(f"Failed to download video: {result.stderr[:200]}")
                 
+                # Handle yt-dlp potentially saving with different extension
+                actual_file = find_ytdlp_output(video_file)
+                if actual_file:
+                    video_file = actual_file
+                    print(f"[simple_job] Actual downloaded file: {video_file}")
+                
                 # Get video dimensions after download
                 if os.path.exists(video_file):
                     video_info = get_video_info(video_file)
@@ -3808,7 +3983,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     print(f"[simple_job] Video info: {video_width}x{video_height} @ {video_fps}fps")
 
             if not use_segment_download and not os.path.exists(video_file):
-                raise Exception("Video file not found after download")
+                raise Exception(f"Video file not found after download. Expected: {video_file}")
         
         # Prepare color filter if specified
         color_filter_str = create_color_filter(color_filter) if color_filter and color_filter != 'none' else None
@@ -3826,8 +4001,9 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
             section_spec = f"*{section_start}-{section_end}"
             
             cmd = [
-                "yt-dlp",
-                "-f", "best[ext=mp4][height<=720]/best[ext=mp4]/best",
+                YTDLP_BIN,
+                "-f", get_ytdlp_format(resolution),
+                "--merge-output-format", "mp4",
                 "--download-sections", section_spec,
                 "--force-keyframes-at-cuts",
                 "--no-playlist",
@@ -3839,11 +4015,16 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
             try:
                 # Each segment should download quickly (typically 10-30 seconds of video)
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-                if result.returncode == 0 and os.path.exists(output_path):
-                    print(f"[segment_download] Success: {output_path}")
-                    return output_path, padding  # Return path and the actual padding used
+                if result.returncode != 0:
+                    print(f"[segment_download] yt-dlp error: {result.stderr[:300]}")
+                
+                # Use find_ytdlp_output to handle extension mismatches
+                actual_path = find_ytdlp_output(output_path)
+                if actual_path:
+                    print(f"[segment_download] Success: {actual_path}")
+                    return actual_path, padding  # Return path and the actual padding used
                 else:
-                    print(f"[segment_download] yt-dlp error: {result.stderr[:200]}")
+                    print(f"[segment_download] No output file found after download")
                     return None, 0
             except subprocess.TimeoutExpired:
                 print(f"[segment_download] Timeout downloading segment")
@@ -3936,9 +4117,8 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             "-ss", str(trim_start),
                             "-t", str(duration),
                             "-vf", ",".join(vf_filters),
-                            "-c:v", "libx264", "-preset", "fast",
-                            "-c:a", "aac", "-ar", "44100",
-                            "-async", "1",
+                            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                            "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                             clip_file, "-y"
                         ]
                     else:
@@ -3948,9 +4128,8 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             "-i", current_video,
                             "-ss", str(trim_start),
                             "-t", str(duration),
-                            "-c:v", "libx264", "-preset", "fast",
-                            "-c:a", "aac", "-ar", "44100",
-                            "-async", "1",
+                            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                            "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                             clip_file, "-y"
                         ]
                     subprocess.run(cmd, capture_output=True)
@@ -3993,14 +4172,23 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             print(f"[social] Failed to download segment {i+1}, skipping")
                             continue
                     
-                    # Build filter chain for vertical video
-                    # Step 1: Scale to vertical 9:16 aspect ratio
-                    vf_filters = ["scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black"]
-                    
                     # For social reels, output is always 1080x1920 (9:16 vertical)
                     social_width, social_height = 1080, 1920
-                    
-                    # Step 2: Add highlight text at top (the AI-generated summary label)
+
+                    # Build blur-fill vertical filter: blurred background + sharp foreground
+                    # This gives the Instagram Reels / TikTok look instead of black bars
+                    blur_fill_filter = (
+                        f"[0:v]split=2[bg][fg];"
+                        f"[bg]scale={social_width}:{social_height}:force_original_aspect_ratio=increase,"
+                        f"crop={social_width}:{social_height},boxblur=25:25[blurred];"
+                        f"[fg]scale={social_width}:{social_height}:force_original_aspect_ratio=decrease[sharp];"
+                        f"[blurred][sharp]overlay=(W-w)/2:(H-h)/2"
+                    )
+
+                    # Additional filters chained after the overlay
+                    extra_filters = []
+
+                    # Add highlight text at top
                     if captions_enabled and highlight_text:
                         highlight_filter = create_text_overlay_filter(
                             highlight_text, work, f"social_highlight_{i}",
@@ -4009,10 +4197,10 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             position="top", text_type="title"
                         )
                         if highlight_filter:
-                            vf_filters.append(highlight_filter)
+                            extra_filters.append(highlight_filter)
                             print(f"[social] Adding highlight label: {highlight_text[:80]}...")
-                        
-                        # Step 3: Add timed subtitles that follow speaker timing
+
+                        # Add timed subtitles
                         if transcript_data:
                             clip_transcript = get_transcript_for_timerange(orig_start, orig_end, transcript_data)
                             if clip_transcript:
@@ -4021,37 +4209,42 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                                     video_width=social_width, video_height=social_height
                                 )
                                 if subtitle_filter:
-                                    vf_filters.append(subtitle_filter)
+                                    extra_filters.append(subtitle_filter)
                                     print(f"[social] Adding {len(clip_transcript)} subtitle segments")
-                    
-                    # Add color filter if specified
+
+                    # Color filter
                     if color_filter_str:
-                        vf_filters.append(color_filter_str)
-                    
-                    # Add fade in for first clip, fade out for last
+                        extra_filters.append(color_filter_str)
+
+                    # Fade transitions
                     if use_transitions:
                         if i == 0:
-                            vf_filters.append(f"fade=t=in:st=0:d={transition_duration}")
+                            extra_filters.append(f"fade=t=in:st=0:d={transition_duration}")
                         if i == len(selected_clips) - 1:
-                            vf_filters.append(f"fade=t=out:st={duration - transition_duration}:d={transition_duration}")
-                    
-                    vf_string = ",".join(vf_filters)
-                    print(f"[social] Filter string: {vf_string[:200]}...")
-                    
+                            extra_filters.append(f"fade=t=out:st={max(0, duration - transition_duration)}:d={transition_duration}")
+
+                    # Build the full filter: blur-fill base + extra filters chained with comma
+                    if extra_filters:
+                        filter_complex = blur_fill_filter + "," + ",".join(extra_filters)
+                    else:
+                        filter_complex = blur_fill_filter
+
+                    print(f"[social] Filter: {filter_complex[:200]}...")
+
                     # Use input seeking for proper audio sync
                     seek_time = max(0, start - 1)
                     trim_start = start - seek_time
-                    
+
                     cmd = [
                         "ffmpeg",
                         "-ss", str(seek_time),
                         "-i", current_video,
                         "-ss", str(trim_start),
                         "-t", str(duration),
-                        "-vf", vf_string,
+                        "-filter_complex", filter_complex,
                         "-c:v", "libx264", "-preset", "fast",
-                        "-c:a", "aac", "-ar", "44100",
-                        "-async", "1",
+                        "-crf", "20",
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                         clip_file, "-y"
                     ]
                     print(f"[social] Processing clip {i+1}: {orig_start:.1f}s - {orig_end:.1f}s")
@@ -4073,8 +4266,8 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     cmd = [
                         "ffmpeg", "-f", "concat", "-safe", "0",
                         "-i", concat_file,
-                        "-c:v", "libx264", "-preset", "fast",
-                        "-c:a", "aac", "-ar", "44100",
+                        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                         output, "-y"
                     ]
                     result = subprocess.run(cmd, capture_output=True)
@@ -4164,8 +4357,8 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                                 "-ss", str(trim_start),  # Output seeking (accurate)
                                 "-t", str(duration),
                                 "-vf", vf_string,
-                                "-c:v", "libx264", "-preset", "fast",
-                                "-c:a", "aac", "-ar", "44100",  # Consistent audio sample rate
+                                "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                                "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                                 "-async", "1",  # Audio sync
                                 clip_file, "-y"
                             ]
@@ -4177,8 +4370,8 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                                 "-i", current_video,
                                 "-ss", str(trim_start),
                                 "-t", str(duration),
-                                "-c:v", "libx264", "-preset", "fast",
-                                "-c:a", "aac", "-ar", "44100",
+                                "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                                "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                                 "-async", "1",
                                 clip_file, "-y"
                             ]
@@ -4196,15 +4389,33 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             "-i", current_video,
                             "-ss", str(trim_start),
                             "-t", str(duration),
-                            "-c:v", "libx264", "-preset", "fast",
-                            "-c:a", "aac", "-ar", "44100",
-                            "-async", "1",
+                            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                            "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                             clip_file, "-y"
                         ]
                         subprocess.run(cmd, capture_output=True)
 
                     if os.path.exists(clip_file):
                         clip_files_for_concat.append(clip_file)
+
+                # Add intro/outro slides if provided
+                if intro_title and clip_files_for_concat:
+                    video_w = video_width or 1920
+                    video_h = video_height or 1080
+                    intro_file = create_intro_slide(work, intro_title, intro_subtitle,
+                                                     width=video_w, height=video_h)
+                    if intro_file:
+                        clip_files_for_concat.insert(0, intro_file)
+                        print(f"[simple_job] Added intro slide: {intro_title}")
+
+                if outro_title and clip_files_for_concat:
+                    video_w = video_width or 1920
+                    video_h = video_height or 1080
+                    outro_file = create_outro_slide(work, outro_title, outro_cta,
+                                                     width=video_w, height=video_h)
+                    if outro_file:
+                        clip_files_for_concat.append(outro_file)
+                        print(f"[simple_job] Added outro slide: {outro_title}")
 
                 # Write concat file
                 with open(concat_file, "w") as f:
@@ -4215,8 +4426,8 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                 cmd = [
                     "ffmpeg", "-f", "concat", "-safe", "0",
                     "-i", concat_file,
-                    "-c:v", "libx264", "-preset", "fast",
-                    "-c:a", "aac", "-ar", "44100",
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                    "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                     output, "-y"
                 ]
                 subprocess.run(cmd, capture_output=True)
@@ -4232,6 +4443,18 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
             final_output = output
             temp_count = 0
             
+            # Audio normalization (default ON) - must run before music mixing
+            if do_normalize_audio:
+                job["message"] = "Normalizing audio levels..."
+                print(f"[postproc] Normalizing audio (EBU R128, -16 LUFS)...")
+                temp_output = os.path.join(work, f"normalized_{temp_count}.mp4")
+                if normalize_audio(final_output, temp_output):
+                    final_output = temp_output
+                    temp_count += 1
+                    print(f"[postproc] Audio normalized successfully")
+                else:
+                    print(f"[postproc] Audio normalization failed - continuing")
+
             # Add background music if requested (works for ALL formats)
             if do_background_music:
                 job["message"] = "Adding background music..."
@@ -4404,7 +4627,7 @@ def multi_video_job(job_id, clips_by_video, format_type, captions_enabled):
                 job["message"] = f"Downloading video {video_id}..."
                 
                 try:
-                    duration_cmd = ["yt-dlp", "--print", "duration", f"https://www.youtube.com/watch?v={video_id}"]
+                    duration_cmd = [YTDLP_BIN, "--print", "duration", f"https://www.youtube.com/watch?v={video_id}"]
                     duration_result = subprocess.run(duration_cmd, capture_output=True, text=True, timeout=30)
                     video_duration = float(duration_result.stdout.strip()) if duration_result.returncode == 0 else 0
                 except:
@@ -4417,8 +4640,9 @@ def multi_video_job(job_id, clips_by_video, format_type, captions_enabled):
                 else:
                     # Download full video
                     cmd = [
-                        "yt-dlp",
-                        "-f", "best[ext=mp4][height<=720]/best[ext=mp4]/best",
+                        YTDLP_BIN,
+                        "-f", get_ytdlp_format(resolution),
+                        "--merge-output-format", "mp4",
                         "--no-playlist",
                         "-o", video_file,
                         f"https://www.youtube.com/watch?v={video_id}",
@@ -4426,6 +4650,11 @@ def multi_video_job(job_id, clips_by_video, format_type, captions_enabled):
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
                     if result.returncode != 0:
                         print(f"[multi_export] Failed to download {video_id}: {result.stderr[:200]}")
+                    # Handle yt-dlp file extension mismatch
+                    actual_file = find_ytdlp_output(video_file)
+                    if actual_file:
+                        video_file = actual_file
+                    elif result.returncode != 0:
                         continue
             
             # Get transcript for captions
@@ -4460,8 +4689,9 @@ def multi_video_job(job_id, clips_by_video, format_type, captions_enabled):
                     section_end = end + 5
                     
                     cmd = [
-                        "yt-dlp",
-                        "-f", "best[ext=mp4][height<=720]/best[ext=mp4]/best",
+                        YTDLP_BIN,
+                        "-f", get_ytdlp_format(resolution),
+                        "--merge-output-format", "mp4",
                         "--download-sections", f"*{section_start}-{section_end}",
                         "--force-keyframes-at-cuts",
                         "--no-playlist",
@@ -4469,8 +4699,10 @@ def multi_video_job(job_id, clips_by_video, format_type, captions_enabled):
                         f"https://www.youtube.com/watch?v={video_id}",
                     ]
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-                    if result.returncode == 0 and os.path.exists(segment_file):
-                        current_video = segment_file
+                    # Handle yt-dlp file extension mismatch
+                    actual_segment = find_ytdlp_output(segment_file)
+                    if actual_segment:
+                        current_video = actual_segment
                         seek_start = 5  # Account for padding
                     else:
                         print(f"[multi_export] Failed to download segment: {result.stderr[:200]}")
@@ -4539,8 +4771,8 @@ def multi_video_job(job_id, clips_by_video, format_type, captions_enabled):
                         "-ss", "0.5",
                         "-t", str(duration),
                         "-vf", ",".join(vf_filters),
-                        "-c:v", "libx264", "-preset", "fast",
-                        "-c:a", "aac", "-ar", "44100",
+                        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                         clip_file, "-y"
                     ]
                 else:
@@ -4549,8 +4781,8 @@ def multi_video_job(job_id, clips_by_video, format_type, captions_enabled):
                         "-ss", str(seek_start),
                         "-i", current_video,
                         "-t", str(duration),
-                        "-c:v", "libx264", "-preset", "fast",
-                        "-c:a", "aac", "-ar", "44100",
+                        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                         clip_file, "-y"
                     ]
                 
@@ -4769,6 +5001,90 @@ async def video_capabilities():
     }
 
 
+@app.get("/api/video_formats/{video_id}")
+async def get_video_formats(video_id: str):
+    """List available video resolutions/formats for a YouTube video"""
+    try:
+        cmd = [YTDLP_BIN, "-F", "--no-playlist", f"https://www.youtube.com/watch?v={video_id}"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+        formats = []
+        seen_res = set()
+        for line in result.stdout.split('\n'):
+            # Parse yt-dlp format listing lines
+            parts = line.split()
+            if len(parts) >= 3 and parts[0].isdigit():
+                for part in parts:
+                    # Match resolution patterns like "1920x1080" or "1280x720"
+                    m = re.match(r'(\d{3,4})x(\d{3,4})', part)
+                    if m:
+                        w, h = int(m.group(1)), int(m.group(2))
+                        label = f"{h}p"
+                        if label not in seen_res and h >= 360:
+                            seen_res.add(label)
+                            formats.append({
+                                'label': label,
+                                'height': h,
+                                'width': w,
+                            })
+                        break
+
+        # Sort by resolution descending, add 'best' option
+        formats.sort(key=lambda x: x['height'], reverse=True)
+        formats.insert(0, {'label': 'best', 'height': 0, 'width': 0})
+
+        return {"formats": formats, "videoId": video_id}
+    except Exception as e:
+        print(f"[formats] Error listing formats: {e}")
+        return {"formats": [
+            {'label': 'best', 'height': 0, 'width': 0},
+            {'label': '1080p', 'height': 1080, 'width': 1920},
+            {'label': '720p', 'height': 720, 'width': 1280},
+            {'label': '480p', 'height': 480, 'width': 854},
+        ], "videoId": video_id}
+
+
+@app.post("/api/clip_thumbnails")
+async def clip_thumbnails(req: Request):
+    """Generate thumbnails for clip timeline preview"""
+    data = await req.json()
+    vid = data.get("videoId", "")
+    clips = data.get("clips", [])
+
+    video_file = os.path.join(FILES_DIR, f"{vid}.mp4")
+    thumbnails = []
+
+    if not os.path.exists(video_file):
+        return {"thumbnails": [], "message": "Video not downloaded yet"}
+
+    for i, clip in enumerate(clips):
+        start = clip.get('start', 0)
+        end = clip.get('end', start + 15)
+        midpoint = (start + end) / 2
+        thumb_name = f"thumb_{vid}_{i}_{int(start)}.jpg"
+        thumb_path = os.path.join(FILES_DIR, thumb_name)
+
+        if not os.path.exists(thumb_path):
+            try:
+                cmd = ["ffmpeg", "-ss", str(midpoint), "-i", video_file,
+                       "-vframes", "1", "-s", "320x180", "-q:v", "5", thumb_path, "-y"]
+                subprocess.run(cmd, capture_output=True, timeout=10)
+            except Exception:
+                pass
+
+        if os.path.exists(thumb_path):
+            thumbnails.append({
+                'index': i,
+                'url': f'/files/{thumb_name}',
+                'start': start,
+                'end': end,
+                'duration': round(end - start, 1),
+                'highlight': clip.get('highlight', clip.get('label', f'Clip {i+1}'))
+            })
+
+    return {"thumbnails": thumbnails}
+
+
 @app.post("/api/download_mp4")
 async def download_mp4(req: Request):
     """Download full video from YouTube"""
@@ -4788,16 +5104,23 @@ async def download_mp4(req: Request):
     
     output = os.path.join(FILES_DIR, f"{vid}.mp4")
     
-    # Check if already downloaded
+    # Check if already downloaded (including alternative extensions from previous runs)
     if os.path.exists(output):
         print(f"[download_mp4] Video already exists: {output}")
         return {"file": f"/files/{os.path.basename(output)}", "cached": True}
     
+    # Also check for previously downloaded files with different extensions
+    existing = find_ytdlp_output(output)
+    if existing:
+        print(f"[download_mp4] Found existing video at: {existing}")
+        return {"file": f"/files/{os.path.basename(existing)}", "cached": True}
+    
     # Download with yt-dlp
     try:
         cmd = [
-            "yt-dlp",
+            YTDLP_BIN,
             "-f", "best[ext=mp4]/best",
+            "--merge-output-format", "mp4",
             "--no-playlist",
             "-o", output,
             f"https://www.youtube.com/watch?v={vid}",
@@ -4809,6 +5132,11 @@ async def download_mp4(req: Request):
         if result.returncode != 0:
             print(f"[download_mp4] yt-dlp error: {result.stderr}")
             return {"error": f"Download failed: {result.stderr[:200]}"}
+        
+        # Handle yt-dlp potentially saving with different extension
+        actual_file = find_ytdlp_output(output)
+        if actual_file:
+            output = actual_file
         
         if os.path.exists(output):
             file_size = os.path.getsize(output)
@@ -5149,7 +5477,7 @@ async def analyze_chat_sentiment(req: Request):
     url = f"https://www.youtube.com/watch?v={video_id}"
 
     try:
-        print(f"Ãƒâ€šÃ‚  Analyzing chat sentiment for: {video_id}")
+        print(f"Ãƒâ€šÃ‚Â  Analyzing chat sentiment for: {video_id}")
         chat = ChatDownloader().get_chat(url, max_messages=max_messages)
 
         sentiments = []
@@ -5304,7 +5632,7 @@ async def chat_statistics(req: Request):
     url = f"https://www.youtube.com/watch?v={video_id}"
 
     try:
-        print(f"Ãƒâ€šÃ‚  Gathering chat statistics for: {video_id}")
+        print(f"Ãƒâ€šÃ‚Â  Gathering chat statistics for: {video_id}")
         chat = ChatDownloader().get_chat(url, max_messages=max_messages)
 
         total_messages = 0
@@ -5375,7 +5703,7 @@ async def get_optimization_stats():
             "estimated_savings": {
                 "percentage": 92,
                 "per_video": "$6.00",
-                "description": "Original $6.50/video Ãƒâ€šÃ‚  $0.50/video",
+                "description": "Original $6.50/video Ãƒâ€šÃ‚Â  $0.50/video",
             },
         }
     except Exception as e:
@@ -5588,7 +5916,7 @@ async def chat_with_meeting(req: Request):
                 "we_vs_i": "multiple speakers likely" if we_count > i_count * 2 else "possibly single speaker or interview",
             }
             
-            print(f"ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã…  Transcript stats: {transcript_stats}")
+            print(f"ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã…Â  Transcript stats: {transcript_stats}")
         
         else:
             return {
@@ -5818,7 +6146,7 @@ Rules:
                     # Fallback if AI didn't generate enough questions
                     if len(suggestions) < 3:
                         print(
-                            f"Ãƒâ€šÃ‚   AI generated only {len(suggestions)} questions, adding fallbacks"
+                            f"Ãƒâ€šÃ‚Â   AI generated only {len(suggestions)} questions, adding fallbacks"
                         )
                         suggestions.extend(
                             [
@@ -5834,7 +6162,7 @@ Rules:
 
                 except Exception as e:
                     print(
-                        f"Ãƒâ€šÃ‚   AI suggestion generation failed: {e}, using keyword-based fallback"
+                        f"Ãƒâ€šÃ‚Â   AI suggestion generation failed: {e}, using keyword-based fallback"
                     )
                     # Fall through to keyword-based method below
 
@@ -5920,7 +6248,7 @@ Rules:
 
         else:
             print(
-                f"Ãƒâ€šÃ‚   No cached transcript for {meeting_id}, returning generic suggestions"
+                f"Ãƒâ€šÃ‚Â   No cached transcript for {meeting_id}, returning generic suggestions"
             )
             print(f"   Available cache keys: {list(STORED_TRANSCRIPTS.keys())}")
 

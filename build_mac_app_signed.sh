@@ -39,6 +39,28 @@ fi
 
 echo "✅ Found signing identity"
 
+# Check notarization profile exists
+if ! xcrun notarytool history --keychain-profile "${NOTARIZE_PROFILE}" > /dev/null 2>&1; then
+    echo ""
+    echo "⚠️  Notarization keychain profile '${NOTARIZE_PROFILE}' not found."
+    echo ""
+    echo "Set it up once with:"
+    echo "  xcrun notarytool store-credentials ${NOTARIZE_PROFILE} \\"
+    echo "    --apple-id YOUR_APPLE_ID@example.com \\"
+    echo "    --team-id 6M536MV7GT \\"
+    echo "    --password YOUR_APP_SPECIFIC_PASSWORD"
+    echo ""
+    echo "Generate an app-specific password at: https://appleid.apple.com/account/manage"
+    echo ""
+    read -p "Continue without notarization? (y/N) " SKIP_NOTARIZE
+    if [ "$SKIP_NOTARIZE" != "y" ] && [ "$SKIP_NOTARIZE" != "Y" ]; then
+        exit 1
+    fi
+    SKIP_NOTARIZATION=true
+else
+    SKIP_NOTARIZATION=false
+fi
+
 # Check we're in the right directory
 if [ ! -f "package.json" ]; then
     echo "❌ Error: Run this script from the project root directory"
@@ -53,6 +75,8 @@ fi
 echo ""
 echo "🧹 Cleaning previous builds..."
 rm -rf build dist/*.app dist/CommunityHighlighter "${DMG_NAME}.dmg" "${DMG_NAME}-unsigned.dmg" 2>/dev/null || true
+# Also clean .DS_Store to avoid bundling macOS metadata
+find dist/ -name '.DS_Store' -delete 2>/dev/null || true
 
 # Step 2: Activate virtual environment
 echo ""
@@ -112,43 +136,68 @@ fi
 echo ""
 echo "🔐 Code signing the application..."
 
-# Sign all nested components first (frameworks, dylibs, etc.)
-echo "   Signing nested components..."
-find "dist/${APP_NAME}.app" -type f \( -name "*.dylib" -o -name "*.so" -o -name "*.framework" \) -exec \
-    codesign --force --options runtime --sign "${DEVELOPER_ID}" {} \; 2>/dev/null || true
+ENTITLEMENTS_FILE="entitlements.plist"
+if [ ! -f "${ENTITLEMENTS_FILE}" ]; then
+    echo "❌ Error: ${ENTITLEMENTS_FILE} not found in project root!"
+    exit 1
+fi
 
-# Sign the main executable
+# Step 1: Sign ALL nested binaries (inside-out order is critical for notarization)
+
+# First, remove any nested .app bundles from previous builds that got bundled
+echo "   Removing nested build artifacts..."
+find "dist/${APP_NAME}.app" -path "*/backend/dist" -type d -exec rm -rf {} + 2>/dev/null || true
+find "dist/${APP_NAME}.app" -path "*/backend/build" -type d -exec rm -rf {} + 2>/dev/null || true
+find "dist/${APP_NAME}.app" -path "*/backend/venv" -type d -exec rm -rf {} + 2>/dev/null || true
+find "dist/${APP_NAME}.app" -path "*/backend/.venv" -type d -exec rm -rf {} + 2>/dev/null || true
+find "dist/${APP_NAME}.app" -path "*/__dot__app" -type d -exec rm -rf {} + 2>/dev/null || true
+
+echo "   Signing nested .dylib files..."
+find "dist/${APP_NAME}.app" -type f -name "*.dylib" | while read -r f; do
+    codesign --force --timestamp --options runtime \
+        --sign "${DEVELOPER_ID}" \
+        --entitlements "${ENTITLEMENTS_FILE}" \
+        "$f" || { echo "❌ Failed to sign: $f"; exit 1; }
+done
+
+echo "   Signing nested .so files..."
+find "dist/${APP_NAME}.app" -type f -name "*.so" | while read -r f; do
+    codesign --force --timestamp --options runtime \
+        --sign "${DEVELOPER_ID}" \
+        --entitlements "${ENTITLEMENTS_FILE}" \
+        "$f" || { echo "❌ Failed to sign: $f"; exit 1; }
+done
+
+echo "   Signing ALL nested executables in Frameworks..."
+find "dist/${APP_NAME}.app/Contents/Frameworks" -type f -perm +111 ! -name "*.dylib" ! -name "*.so" 2>/dev/null | \
+    while read -r f; do
+    codesign --force --timestamp --options runtime \
+        --sign "${DEVELOPER_ID}" \
+        --entitlements "${ENTITLEMENTS_FILE}" \
+        "$f" || { echo "⚠️ Could not sign (skipping): $f"; }
+done
+
+# Step 2: Sign the main executable
 echo "   Signing main executable..."
-codesign --force --options runtime --sign "${DEVELOPER_ID}" \
-    "dist/${APP_NAME}.app/Contents/MacOS/CommunityHighlighter" 2>/dev/null || true
+codesign --force --timestamp --options runtime \
+    --sign "${DEVELOPER_ID}" \
+    --entitlements "${ENTITLEMENTS_FILE}" \
+    "dist/${APP_NAME}.app/Contents/MacOS/CommunityHighlighter"
 
-# Sign the entire app bundle
+# Step 3: Sign the entire app bundle (do NOT use --deep, we already signed inside-out)
 echo "   Signing app bundle..."
-codesign --force --deep --options runtime --sign "${DEVELOPER_ID}" \
-    --entitlements /dev/stdin "dist/${APP_NAME}.app" << 'ENTITLEMENTS'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-    <true/>
-    <key>com.apple.security.cs.allow-jit</key>
-    <true/>
-    <key>com.apple.security.cs.disable-library-validation</key>
-    <true/>
-    <key>com.apple.security.network.client</key>
-    <true/>
-    <key>com.apple.security.network.server</key>
-    <true/>
-    <key>com.apple.security.files.user-selected.read-write</key>
-    <true/>
-</dict>
-</plist>
-ENTITLEMENTS
+codesign --force --timestamp --options runtime \
+    --sign "${DEVELOPER_ID}" \
+    --entitlements "${ENTITLEMENTS_FILE}" \
+    "dist/${APP_NAME}.app"
 
 # Verify signature
 echo "   Verifying signature..."
-codesign --verify --deep --strict --verbose=2 "dist/${APP_NAME}.app" 2>&1 | head -5
+codesign --verify --deep --strict --verbose=2 "dist/${APP_NAME}.app" 2>&1 | head -10
+if [ $? -ne 0 ]; then
+    echo "❌ Signature verification FAILED!"
+    exit 1
+fi
 
 echo "✅ Code signing complete"
 
@@ -181,7 +230,7 @@ fi
 
 # Sign the DMG
 echo "   Signing DMG..."
-codesign --force --sign "${DEVELOPER_ID}" "${DMG_NAME}-unsigned.dmg"
+codesign --force --timestamp --sign "${DEVELOPER_ID}" "${DMG_NAME}-unsigned.dmg"
 mv "${DMG_NAME}-unsigned.dmg" "${DMG_NAME}.dmg"
 
 echo "✅ DMG created and signed"
@@ -189,25 +238,31 @@ echo "✅ DMG created and signed"
 # ============================================
 # NOTARIZATION
 # ============================================
-echo ""
-echo "📤 Submitting for notarization (this may take 5-15 minutes)..."
-
-xcrun notarytool submit "${DMG_NAME}.dmg" \
-    --keychain-profile "${NOTARIZE_PROFILE}" \
-    --wait
-
-# Check notarization result
-NOTARIZE_STATUS=$?
-if [ $NOTARIZE_STATUS -eq 0 ]; then
-    echo "✅ Notarization successful!"
-    
-    # Staple the notarization ticket to the DMG
-    echo "   Stapling notarization ticket..."
-    xcrun stapler staple "${DMG_NAME}.dmg"
-    echo "✅ Stapling complete"
+if [ "$SKIP_NOTARIZATION" = "true" ]; then
+    echo ""
+    echo "⚠️  Skipping notarization (no keychain profile configured)"
+    echo "   Users will need to right-click -> Open on first launch"
 else
-    echo "⚠️  Notarization may have issues. Check the log:"
-    echo "   xcrun notarytool log <submission-id> --keychain-profile ${NOTARIZE_PROFILE}"
+    echo ""
+    echo "📤 Submitting for notarization (this may take 5-15 minutes)..."
+
+    xcrun notarytool submit "${DMG_NAME}.dmg" \
+        --keychain-profile "${NOTARIZE_PROFILE}" \
+        --wait
+
+    # Check notarization result
+    NOTARIZE_STATUS=$?
+    if [ $NOTARIZE_STATUS -eq 0 ]; then
+        echo "✅ Notarization successful!"
+
+        # Staple the notarization ticket to the DMG
+        echo "   Stapling notarization ticket..."
+        xcrun stapler staple "${DMG_NAME}.dmg"
+        echo "✅ Stapling complete"
+    else
+        echo "⚠️  Notarization may have issues. Check the log:"
+        echo "   xcrun notarytool log <submission-id> --keychain-profile ${NOTARIZE_PROFILE}"
+    fi
 fi
 
 # ============================================

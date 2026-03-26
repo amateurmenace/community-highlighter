@@ -1,60 +1,16 @@
-# Environment files - NEVER COMMIT THESE
-.env
-.env.*
-backend/.env
-**/.env
-
-# Virtual environments
-.venv/
-venv/
-backend/.venv/
-backend/venv/
-ENV/
-env/
-**/venv/
-
-# Node modules
-node_modules/
-
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-
-# Large binary files
-*.dylib
-*.so
-*.a
-
-# Build outputs
-dist/
-build/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Cache
-.cache/
-*.log
-*.zip
-CommunityHighlighter-*.zip
-*.zip
-
-# Build artifacts - DO NOT COMMIT
+# Build artifacts
 *.dmg
+*.dmg.sha256
 *.zip
+*.app
 dist/
 build/
-*.app
 release/
 AppIcon.icns
 AppIcon.iconset/
+
+# Cache
+backend/cache/
 
 # Python
 __pycache__/
@@ -62,14 +18,36 @@ __pycache__/
 venv/
 .venv/
 *.egg-info/
+.python-version
 
 # Node
 node_modules/
 
+# Database files
+*.sqlite3
+chroma_db/
+
 # Environment
 .env
 .env.local
+env
 
 # OS files
 .DS_Store
 Thumbs.db
+
+# Backup files
+*.backup
+*backup*
+*copy*
+*.bak
+
+# Build scripts (keep in local only)
+build_executable.py
+build_mac_app.py
+create_portable_package.sh
+setup_wizard.py
+
+# Duplicate/old files
+gitignore
+.vscode/

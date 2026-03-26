@@ -9,7 +9,7 @@ import {
   apiOptimizationStats, apiClearCache,
   apiChatWithMeeting, apiChatSuggestions,
   apiAddToKnowledgeBase, apiSearchKnowledgeBase, apiFindRelated,
-  apiClipPreview, apiStartLiveMonitoring,
+  apiClipPreview, apiStartLiveMonitoring, apiVideoFormats, apiClipThumbnails,
   apiStoreTranscript,
   // v6.0: New feature API calls
   apiCreateSubscription, apiListSubscriptions, apiDeleteSubscription, apiCheckSubscriptionMatches,
@@ -2821,37 +2821,6 @@ function CivicMeetingFinder({ onSelectVideo }) {
       <h3>🏛️ Find Civic Meetings</h3>
       <p className="viz-desc">Search for government and civic meetings by city or town name. Click any result to analyze it.</p>
 
-      {/* API Status Warning */}
-      {apiStatus && !apiStatus.configured && (
-        <div style={{ 
-          padding: '12px 14px', 
-          background: '#fef3c7', 
-          borderRadius: '8px', 
-          marginBottom: '16px',
-          border: '1px solid #f59e0b',
-        }}>
-          <div style={{ fontWeight: 600, color: '#92400e', marginBottom: '6px' }}>
-            ⚠️ YouTube API Not Configured
-          </div>
-          <div style={{ fontSize: '12px', color: '#78350f', lineHeight: 1.5 }}>
-            To use this feature, set your API key:
-            <code style={{ 
-              display: 'block', 
-              background: '#fff', 
-              padding: '8px', 
-              borderRadius: '4px', 
-              marginTop: '6px',
-              fontFamily: 'monospace',
-              fontSize: '11px',
-            }}>
-              export YOUTUBE_API_KEY="your-key-here"
-            </code>
-            <div style={{ marginTop: '8px' }}>
-              Get a key at <a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8' }}>console.cloud.google.com</a> → Enable YouTube Data API v3 → Create Credentials → API Key
-            </div>
-          </div>
-        </div>
-      )}
 
       <div style={{ marginBottom: '16px' }}>
         <div style={{ display: 'flex', gap: '8px' }}>
@@ -6331,13 +6300,23 @@ export default function App() {
     playbackSpeed: '1.0',
     showHighlightLabels: true,
     logoWatermark: false,
+    normalizeAudio: true,
     introTitle: '',
     introSubtitle: '',
     outroTitle: '',
-    outroCta: ''
+    outroCta: '',
+    resolution: '720p',
   });
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
-  
+  const [availableFormats, setAvailableFormats] = useState([]);
+  const [clipThumbnails, setClipThumbnails] = useState([]);
+
+  // Desktop editor timeline state
+  const [timelineZoom, setTimelineZoom] = useState(1);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [draggingClipIndex, setDraggingClipIndex] = useState(null);
+  const [playbackPosition, setPlaybackPosition] = useState(0);
+
   const [words, setWords] = useState([]);
   const [entities, setEntities] = useState([]);
   const [loadingEntities, setLoadingEntities] = useState(false);
@@ -6442,6 +6421,12 @@ export default function App() {
     setMatches([]);
     setQuery("");
     setVideoTitle("");
+    setClipThumbnails([]);
+
+    // Fetch available video resolutions in background
+    apiVideoFormats(vid).then(data => {
+      if (data.formats) setAvailableFormats(data.formats);
+    }).catch(() => {});
     setLoadingEntities(true);
 
     setProcessStatus({ active: true, message: "Loading transcript...", percent: 10, isVideoDownload: false });
@@ -6790,26 +6775,100 @@ export default function App() {
   const clearBasket = () => {
     if (confirm("Clear all clips from basket?")) {
       setClipBasket([]);
+      setClipThumbnails([]);
     }
   };
 
+  // Timeline editor handlers (desktop mode)
+  const handleClipDrop = (targetIdx) => {
+    if (draggingClipIndex === null || draggingClipIndex === targetIdx) return;
+    setClipBasket(prev => {
+      const clips = [...prev];
+      const [moved] = clips.splice(draggingClipIndex, 1);
+      clips.splice(targetIdx, 0, moved);
+      return clips;
+    });
+    setDraggingClipIndex(null);
+  };
+
+  const startTrim = (e, clipIdx, edge) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const startX = e.clientX;
+    const clip = clipBasket[clipIdx];
+    const origVal = edge === 'start' ? clip.start : clip.end;
+
+    const onMove = (moveE) => {
+      const deltaX = moveE.clientX - startX;
+      const deltaSec = deltaX / (timelineZoom * 10);
+      setClipBasket(prev => {
+        const clips = [...prev];
+        const c = { ...clips[clipIdx] };
+        if (edge === 'start') {
+          c.start = Math.max(0, Math.min(origVal + deltaSec, c.end - 1));
+        } else {
+          c.end = Math.max(c.start + 1, origVal + deltaSec);
+        }
+        clips[clipIdx] = c;
+        return clips;
+      });
+    };
+
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  const seekToClip = (clip) => {
+    if (playerRef.current) {
+      playerRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(clip.start)}&autoplay=1&enablejsapi=1`;
+    }
+  };
+
+  const removeClipFromTimeline = (idx) => {
+    setClipBasket(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const formatTime = (sec) => {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  };
+
+  // Match a quote against transcript segments (mirrors backend find_quote_timestamp)
+  const findQuoteTimestamp = (quote, transcriptSegments) => {
+    if (!quote || !transcriptSegments || !transcriptSegments.length) return null;
+    const quoteWords = quote.toLowerCase().trim().split(/\s+/).slice(0, 8);
+    const searchPhrase = quoteWords.join(' ');
+
+    let bestTime = null, bestScore = 0;
+    for (const seg of transcriptSegments) {
+      const text = (seg.text || '').toLowerCase();
+      const start = seg.start || 0;
+      if (searchPhrase && text.includes(searchPhrase)) {
+        return { start, end: start + (seg.duration || 15) };
+      }
+      if (quoteWords.slice(0, 4).every(w => text.includes(w))) {
+        return { start, end: start + (seg.duration || 15) };
+      }
+      const matches = quoteWords.filter(w => text.includes(w)).length;
+      if (matches > bestScore) { bestScore = matches; bestTime = start; }
+    }
+    if (bestTime !== null && bestScore >= 2) return { start: bestTime, end: bestTime + 15 };
+    return null;
+  };
+
   const buildReel = async (format = "combined") => {
-    const quotes = highlightsWithQuotes.map(h => h.quote);
-    const highlights = highlightsWithQuotes.map(h => h.highlight);
+    if (!videoId) { alert("Please load a video first."); return; }
+
+    let currentHighlights = highlightsWithQuotes;
 
     // Auto-generate highlights if none exist
-    if (!videoId) {
-      alert("Please load a video first.");
-      return;
-    }
-
-    if (quotes.length === 0) {
-      // No highlights yet - generate them first
-      setProcessStatus({
-        active: true,
-        message: "Generating AI highlights first...",
-        percent: 0
-      });
+    if (currentHighlights.length === 0) {
+      setProcessStatus({ active: true, message: "Generating AI highlights...", percent: 0 });
       setLoading(l => ({ ...l, reel: true }));
 
       try {
@@ -6821,90 +6880,90 @@ export default function App() {
         });
 
         const text = res.summarySentences || "[]";
-        let generatedHighlights = [];
-        try {
-          generatedHighlights = JSON.parse(text);
-        } catch (e) {
-          console.error("Failed to parse highlights JSON:", e);
+        let generated = [];
+        try { generated = JSON.parse(text); } catch (e) {
           const bullets = text.split(/\d+\.|•|-/).filter(s => s.trim().length > 10);
           for (let i = 0; i < Math.min(10, bullets.length); i++) {
-            generatedHighlights.push({
-              highlight: bullets[i].trim().split('\n')[0],
-              quote: 'Quote not found (fallback)'
-            });
+            generated.push({ highlight: bullets[i].trim().split('\n')[0], quote: '' });
           }
         }
-
-        generatedHighlights = generatedHighlights.slice(0, 10);
-        setHighlightsWithQuotes(generatedHighlights);
-
-        // Now build the reel with the generated highlights
-        setProcessStatus({
-          active: true,
-          message: format === 'social' ? "Building social media reel..." : "Building AI highlight reel...",
-          percent: 20
-        });
-
-        const reelRes = await apiHighlightReel({
-          videoId,
-          quotes: generatedHighlights.map(h => h.quote), // Pass ALL quotes - backend will select spread
-          highlights: generatedHighlights.map(h => h.highlight), // Pass ALL highlights
-          transcript: sents,
-          pad: videoOptions.clipPadding,  // Use advanced options padding
-          format: format,
-          captions: reelCaptionsEnabled,
-          // Video editing options
-          ...videoOptions
-        });
-        pollJobStatus(reelRes.jobId);
-
+        generated = generated.slice(0, 10);
+        setHighlightsWithQuotes(generated);
+        currentHighlights = generated;
       } catch (e) {
-        console.error("Reel generation error:", e);
+        console.error("Highlight generation error:", e);
         setProcessStatus({ active: false, message: "", percent: 0 });
         setLoading(l => ({ ...l, reel: false }));
+        return;
       }
+    }
+
+    // DESKTOP MODE: Load clips into timeline for editing instead of rendering immediately
+    if (!isCloudMode) {
+      const pad = videoOptions.clipPadding || 4;
+      const clips = [];
+      for (const h of currentHighlights) {
+        const match = findQuoteTimestamp(h.quote || h.highlight, sents);
+        if (match) {
+          clips.push({
+            start: Math.max(0, match.start - pad),
+            end: match.end + pad,
+            label: (h.highlight || '').slice(0, 80),
+            highlight: (h.highlight || '').slice(0, 80),
+            text: h.quote || '',
+          });
+        }
+      }
+
+      if (clips.length === 0) {
+        // Fallback: distribute clips evenly across transcript
+        const totalDuration = sents.length > 0 ? (sents[sents.length - 1].start || 0) + 15 : 300;
+        const interval = totalDuration / 6;
+        for (let i = 0; i < 5; i++) {
+          const start = Math.floor(i * interval);
+          clips.push({ start, end: start + 15, label: `Highlight ${i + 1}`, highlight: `Highlight ${i + 1}`, text: '' });
+        }
+      }
+
+      // Select up to 8 evenly distributed clips
+      let selectedClips = clips;
+      if (clips.length > 8) {
+        const step = clips.length / 8;
+        selectedClips = Array.from({ length: 8 }, (_, i) => clips[Math.floor(i * step)]);
+      }
+
+      setClipBasket(selectedClips);
+      setClipThumbnails([]);
+      setProcessStatus({ active: false, message: "", percent: 0 });
+      setLoading(l => ({ ...l, reel: false }));
+
+      // Auto-load thumbnails
+      apiClipThumbnails({ videoId, clips: selectedClips })
+        .then(data => { if (data.thumbnails) setClipThumbnails(data.thumbnails); })
+        .catch(() => {});
+
       return;
     }
 
-    // Highlights already exist - build reel directly
-    // Estimate processing time:
-    // - For short videos (<30 min): Download whole video (~2-5 min) + process clips (~2-3 min) = ~4-8 min
-    // - For long videos (>30 min): Download only segments (~1-2 min per clip * 5) = ~5-10 min
-    // Estimate video duration from transcript length (rough: ~150 words per minute of speech)
-    const wordCount = fullText ? fullText.split(/\s+/).length : 0;
-    const estimatedVideoDuration = wordCount / 150; // minutes
-    const isLongVideo = estimatedVideoDuration > 30;
-    
-    let estimatedMinutes;
-    if (isLongVideo) {
-      // Segment download strategy: ~1-2 min per clip for 5 clips
-      estimatedMinutes = Math.ceil(5 * 1.5); // ~8 min
-    } else {
-      // Full video download: depends on video length
-      estimatedMinutes = Math.ceil(Math.min(estimatedVideoDuration * 0.3, 10) + 3); // download time + processing
-    }
-    
+    // CLOUD MODE: Send directly to backend for rendering (existing behavior)
     setProcessStatus({
       active: true,
       message: format === 'social' ? "Building social media reel..." : "Building AI highlight reel...",
       percent: 0,
-      estimatedTime: estimatedMinutes,
+      estimatedTime: 8,
       isVideoDownload: true
     });
     setLoading(l => ({ ...l, reel: true }));
 
     try {
-      // Pass ALL quotes/highlights - backend will select a spread-out sample of 5
-      console.log('[Reel] Video options being sent:', videoOptions);
       const res = await apiHighlightReel({
         videoId,
-        quotes: quotes, // Pass ALL quotes
-        highlights: highlights, // Pass ALL highlights  
-        transcript: sents, // Pass transcript for timestamp matching
-        pad: videoOptions.clipPadding,  // Use advanced options padding
+        quotes: currentHighlights.map(h => h.quote),
+        highlights: currentHighlights.map(h => h.highlight),
+        transcript: sents,
+        pad: videoOptions.clipPadding,
         format: format,
-        captions: reelCaptionsEnabled, // Pass captions preference
-        // Video editing options
+        captions: reelCaptionsEnabled,
         ...videoOptions
       });
       pollJobStatus(res.jobId);
@@ -7290,7 +7349,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="container" style={{ paddingTop: 32, paddingBottom: 100 }}>
+      <main className={`container ${!isCloudMode && videoId ? 'desktop-editor-mode' : ''}`} style={{ paddingTop: 32, paddingBottom: 100 }}>
         {processStatus.active && (
           <ProgressIndicator
             status="active"
@@ -7431,51 +7490,90 @@ export default function App() {
 
         {/* Desktop App Download Banner - Show on landing page when in cloud mode */}
         {!videoId && isCloudMode && (
-          <section className="card section animate-fadeIn" style={{ 
-            marginTop: 16, 
-            background: 'linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%)',
+          <section className="card section animate-fadeIn" style={{
+            marginTop: 16,
+            background: 'linear-gradient(135deg, #1e7f63 0%, #145c47 50%, #0f4435 100%)',
             color: 'white',
-            border: '2px solid #3b82f6'
+            border: 'none',
+            borderRadius: '16px',
+            padding: '28px 32px',
+            boxShadow: '0 4px 24px rgba(30, 127, 99, 0.25)',
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
-              <div>
-                <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  💻 Download Desktop App
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px' }}>
+              <div style={{ flex: 1, minWidth: '280px' }}>
+                <h3 style={{ margin: '0 0 8px 0', fontSize: '20px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  Want video editing & downloads? Get the Desktop App
                 </h3>
-                <p style={{ margin: 0, fontSize: '14px', color: '#94a3b8', maxWidth: '500px' }}>
-                  Get the full-featured desktop version with <strong style={{ color: '#22c55e' }}>video downloads</strong>, 
-                  <strong style={{ color: '#22c55e' }}> highlight reels</strong>, and 
-                  <strong style={{ color: '#22c55e' }}> clip exports</strong> — features not available in the web version.
+                <p style={{ margin: 0, fontSize: '14px', color: 'rgba(255,255,255,0.8)', maxWidth: '520px', lineHeight: '1.5' }}>
+                  The desktop version unlocks <strong style={{ color: '#86efac' }}>video downloads</strong>,
+                  <strong style={{ color: '#86efac' }}> highlight reel creation</strong>,
+                  <strong style={{ color: '#86efac' }}> clip exports</strong>, and
+                  <strong style={{ color: '#86efac' }}> timeline editing</strong> — features not available in the web version.
                 </p>
               </div>
-              <a 
-                href="https://github.com/amateurmenace/community-highlighter/releases/latest"
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  padding: '12px 24px',
-                  background: '#22c55e',
-                  color: 'white',
-                  borderRadius: '8px',
-                  textDecoration: 'none',
-                  fontWeight: 600,
-                  fontSize: '14px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(34, 197, 94, 0.4)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = 'none';
-                }}
-              >
-                ⬇️ Download for macOS
-              </a>
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <a
+                  href="https://github.com/amateurmenace/community-highlighter/releases/latest"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    padding: '12px 24px',
+                    background: 'white',
+                    color: '#1e7f63',
+                    borderRadius: '10px',
+                    textDecoration: 'none',
+                    fontWeight: 700,
+                    fontSize: '14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                    whiteSpace: 'nowrap',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.2)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></svg>
+                  Download for macOS
+                </a>
+                <a
+                  href="https://github.com/amateurmenace/community-highlighter/releases/latest"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    padding: '12px 24px',
+                    background: 'rgba(255,255,255,0.15)',
+                    color: 'white',
+                    borderRadius: '10px',
+                    textDecoration: 'none',
+                    fontWeight: 600,
+                    fontSize: '14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    border: '1.5px solid rgba(255,255,255,0.3)',
+                    transition: 'transform 0.2s ease, background 0.2s ease',
+                    whiteSpace: 'nowrap',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.25)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.15)';
+                  }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+                  Download for Windows
+                </a>
+              </div>
             </div>
           </section>
         )}
@@ -7630,32 +7728,57 @@ export default function App() {
           }}>
             <div style={{ flex: 1, minWidth: '250px' }}>
               <div style={{ fontWeight: '700', color: '#1E7F63', marginBottom: '4px', fontSize: '15px' }}>
-                Want to Download Video Clips?
+                Want video editing & downloads? Get the Desktop App
               </div>
               <div style={{ color: '#166534', fontSize: '13px', lineHeight: '1.4' }}>
-                Video editing features require the desktop app. Download clips, create highlight reels, and export videos locally.
+                Video downloads, highlight reels, clip exports, and timeline editing require the desktop app.
               </div>
             </div>
-            <a 
-              href="https://github.com/amateurmenace/community-highlighter/releases/latest"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                background: '#1E7F63',
-                color: 'white',
-                padding: '10px 20px',
-                borderRadius: '8px',
-                fontWeight: '600',
-                fontSize: '14px',
-                textDecoration: 'none',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              Download Desktop App
-            </a>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <a
+                href="https://github.com/amateurmenace/community-highlighter/releases/latest"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: '#1E7F63',
+                  color: 'white',
+                  padding: '10px 16px',
+                  borderRadius: '8px',
+                  fontWeight: '600',
+                  fontSize: '13px',
+                  textDecoration: 'none',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></svg>
+                macOS
+              </a>
+              <a
+                href="https://github.com/amateurmenace/community-highlighter/releases/latest"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: 'transparent',
+                  color: '#1E7F63',
+                  padding: '10px 16px',
+                  borderRadius: '8px',
+                  fontWeight: '600',
+                  fontSize: '13px',
+                  textDecoration: 'none',
+                  whiteSpace: 'nowrap',
+                  border: '1.5px solid #1E7F63'
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+                Windows
+              </a>
+            </div>
           </div>
         )}
 
@@ -7693,6 +7816,302 @@ export default function App() {
           </section>
         )}
 
+        {/* ================================================================
+           DESKTOP VIDEO EDITOR LAYOUT (when !isCloudMode && videoId)
+           ================================================================ */}
+        {!isCloudMode && videoId && (
+          <>
+            {/* Video Player + Sidebar */}
+            <div className="editor-main-area">
+              <div className={`editor-video-panel ${!sidebarOpen ? 'editor-video-full' : ''}`}>
+                <iframe
+                  ref={playerRef}
+                  title="video-player"
+                  className="video-frame editor-video-frame"
+                  src={`https://www.youtube.com/embed/${videoId}?autoplay=0&mute=0&playsinline=1&enablejsapi=1`}
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  allowFullScreen
+                />
+                <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)}>
+                  {sidebarOpen ? '\u203A' : '\u2039'}
+                </button>
+              </div>
+
+              <div className={`editor-sidebar ${sidebarOpen ? 'editor-sidebar-open' : 'editor-sidebar-closed'}`}>
+                <div style={{ fontWeight: 700, marginBottom: 8, fontSize: '14px' }}>Search & Transcript</div>
+                <input
+                  id="editor-search"
+                  type="text"
+                  className="search-input"
+                  placeholder={t.searchTranscript}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  style={{ width: '100%', marginBottom: 8, boxSizing: 'border-box' }}
+                />
+                {matches.length > 0 && (
+                  <div style={{ fontSize: '12px', color: '#64748b', marginBottom: 8 }}>
+                    {matches.length} results
+                  </div>
+                )}
+                <div className="results-scroll" style={{ maxHeight: '350px' }}>
+                  {matches.map((m, mi) => (
+                    <div key={mi} className="result-card" style={{ padding: '8px', marginBottom: '4px', fontSize: '12px', cursor: 'pointer', borderRadius: '6px', border: '1px solid #e2e8f0' }}
+                      onClick={() => {
+                        if (playerRef.current) playerRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(m.start)}&autoplay=1&enablejsapi=1`;
+                      }}
+                    >
+                      <div style={{ color: '#1E7F63', fontWeight: 600, fontSize: '11px' }}>{formatTime(m.start)}</div>
+                      <div style={{ color: '#334155' }}>{m.text}</div>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: '10px', padding: '2px 8px', marginTop: '4px' }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const clip = { start: Math.max(0, m.start - videoOptions.clipPadding), end: m.start + (m.duration || 15) + videoOptions.clipPadding, label: m.text.slice(0, 60), highlight: m.text.slice(0, 60), text: m.text };
+                          setClipBasket(prev => [...prev, clip]);
+                        }}
+                      >
+                        + Add to Timeline
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Actions - Big Buttons */}
+            <div className="editor-quick-actions">
+              <button className="editor-action-btn editor-action-primary" onClick={() => buildReel('combined')} disabled={loading.reel}>
+                <span className="editor-action-icon">AI</span>
+                <div>
+                  <div className="editor-action-title">AI Highlight Reel</div>
+                  <div className="editor-action-desc">Auto-select best moments</div>
+                </div>
+              </button>
+              <button className="editor-action-btn editor-action-social" onClick={() => buildReel('social')} disabled={loading.reel}>
+                <span className="editor-action-icon">9:16</span>
+                <div>
+                  <div className="editor-action-title">Social Media Reel</div>
+                  <div className="editor-action-desc">Vertical for TikTok / Reels</div>
+                </div>
+              </button>
+              <button className="editor-action-btn editor-action-export" onClick={() => setShowExportModal(true)} disabled={clipBasket.length === 0}>
+                <span className="editor-action-icon">DL</span>
+                <div>
+                  <div className="editor-action-title">Export Clips</div>
+                  <div className="editor-action-desc">{clipBasket.length} clip{clipBasket.length !== 1 ? 's' : ''} in timeline</div>
+                </div>
+              </button>
+              <button className="editor-action-btn editor-action-download" onClick={async () => {
+                setLoading(l => ({...l, mp4: true}));
+                try {
+                  const res = await apiDownloadMp4({ videoId });
+                  if (res.file) window.open(res.file, '_blank');
+                } catch(e) { alert('Download failed: ' + e.message); }
+                setLoading(l => ({...l, mp4: false}));
+              }} disabled={loading.mp4}>
+                <span className="editor-action-icon">{loading.mp4 ? '...' : 'MP4'}</span>
+                <div>
+                  <div className="editor-action-title">Download Full Video</div>
+                  <div className="editor-action-desc">Save original to disk</div>
+                </div>
+              </button>
+            </div>
+
+            {/* Timeline Editor */}
+            <div className="timeline-editor-wrapper">
+              <div className="timeline-toolbar">
+                <span className="timeline-total-duration">
+                  {clipBasket.length} clip{clipBasket.length !== 1 ? 's' : ''} &middot; {formatTime(clipBasket.reduce((sum, c) => sum + (c.end - c.start), 0))} total
+                </span>
+                <div className="timeline-zoom-controls">
+                  <button onClick={() => setTimelineZoom(z => Math.max(0.5, z - 0.25))}>-</button>
+                  <span>{Math.round(timelineZoom * 100)}%</span>
+                  <button onClick={() => setTimelineZoom(z => Math.min(4, z + 0.25))}>+</button>
+                </div>
+                <div className="timeline-actions">
+                  <button className="btn btn-primary" style={{ fontSize: '12px', padding: '6px 14px' }} onClick={() => setShowExportModal(true)} disabled={clipBasket.length === 0}>
+                    Export
+                  </button>
+                  <button className="btn btn-primary" style={{ fontSize: '12px', padding: '6px 14px', background: '#7c3aed' }} onClick={() => buildReel('combined')} disabled={!highlightsWithQuotes.length}>
+                    AI Reel
+                  </button>
+                  <button className="btn btn-primary" style={{ fontSize: '12px', padding: '6px 14px', background: '#ec4899' }} onClick={() => buildReel('social')} disabled={!highlightsWithQuotes.length}>
+                    Social Reel
+                  </button>
+                  {clipBasket.length > 0 && (
+                    <button className="btn btn-ghost" style={{ fontSize: '11px', padding: '4px 10px' }} onClick={clearBasket}>Clear</button>
+                  )}
+                </div>
+              </div>
+
+              {/* Ruler */}
+              <div className="timeline-ruler">
+                {(() => {
+                  const totalDuration = clipBasket.reduce((sum, c) => sum + (c.end - c.start), 0);
+                  const interval = timelineZoom < 1 ? 30 : timelineZoom < 2 ? 10 : 5;
+                  const ticks = [];
+                  for (let t = 0; t <= totalDuration; t += interval) {
+                    ticks.push(
+                      <span key={t} className="timeline-ruler-tick" style={{ width: `${interval * timelineZoom * 10}px` }}>
+                        {formatTime(t)}
+                      </span>
+                    );
+                  }
+                  return ticks;
+                })()}
+              </div>
+
+              {/* Track */}
+              <div className="timeline-track" onDragOver={(e) => e.preventDefault()}>
+                {clipBasket.length === 0 ? (
+                  <div className="timeline-empty">
+                    Search the transcript and add clips to build your timeline, or click "AI Reel" to auto-generate highlights
+                  </div>
+                ) : (
+                  clipBasket.map((clip, idx) => {
+                    const duration = clip.end - clip.start;
+                    const widthPx = Math.max(70, duration * timelineZoom * 10);
+                    const thumb = clipThumbnails.find(t => t.index === idx);
+
+                    return (
+                      <div
+                        key={idx}
+                        className={`timeline-clip ${draggingClipIndex === idx ? 'timeline-clip-dragging' : ''}`}
+                        style={{ width: `${widthPx}px` }}
+                        draggable
+                        onDragStart={() => setDraggingClipIndex(idx)}
+                        onDragEnd={() => setDraggingClipIndex(null)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => handleClipDrop(idx)}
+                        onClick={() => seekToClip(clip)}
+                      >
+                        <div className="trim-handle trim-handle-left" onMouseDown={(e) => startTrim(e, idx, 'start')} />
+
+                        <div className="timeline-clip-content">
+                          {thumb && <img src={thumb.url} className="timeline-clip-thumb" alt="" />}
+                          <span className="timeline-clip-label">{clip.label || clip.highlight || `Clip ${idx + 1}`}</span>
+                          <span className="timeline-clip-duration">{formatTime(clip.start)} - {formatTime(clip.end)} ({duration.toFixed(0)}s)</span>
+                        </div>
+
+                        <div className="trim-handle trim-handle-right" onMouseDown={(e) => startTrim(e, idx, 'end')} />
+
+                        <button className="timeline-clip-remove" onClick={(e) => { e.stopPropagation(); removeClipFromTimeline(idx); }} title="Remove clip">x</button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Job Status */}
+            {job.status !== "idle" && (
+              <div style={{ marginTop: 12, padding: '12px 16px', background: 'var(--card)', border: '2px solid var(--line)', borderRadius: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 600, fontSize: '13px' }}>{job.message}</span>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#1E7F63' }}>{job.percent}%</span>
+                </div>
+                <div style={{ height: 6, background: '#e2e8f0', borderRadius: 3, marginTop: 6, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${job.percent}%`, background: '#1E7F63', borderRadius: 3, transition: 'width 0.3s' }} />
+                </div>
+                {job.status === "done" && job.file && (
+                  <a href={job.file} download style={{ display: 'inline-block', marginTop: 8, color: '#1E7F63', fontWeight: 600, fontSize: '13px' }}>Download Video</a>
+                )}
+              </div>
+            )}
+
+            {/* Compact Options Bar */}
+            <div className="editor-options-bar">
+              <div className="editor-option-inline">
+                <label>Resolution</label>
+                <select value={videoOptions.resolution || '720p'} onChange={(e) => setVideoOptions(v => ({ ...v, resolution: e.target.value }))}>
+                  {availableFormats.length > 0 ? availableFormats.map(f => (
+                    <option key={f.label} value={f.label}>{f.label === 'best' ? 'Best' : f.label}</option>
+                  )) : (
+                    <><option value="best">Best</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option></>
+                  )}
+                </select>
+              </div>
+              <div className="editor-option-inline">
+                <label>Captions</label>
+                <button className={`toggle-pill ${reelCaptionsEnabled ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setReelCaptionsEnabled(!reelCaptionsEnabled)}>
+                  {reelCaptionsEnabled ? 'ON' : 'OFF'}
+                </button>
+              </div>
+              <div className="editor-option-inline">
+                <label>Music</label>
+                <button className={`toggle-pill ${videoOptions.backgroundMusic ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, backgroundMusic: !v.backgroundMusic }))}>
+                  {videoOptions.backgroundMusic ? 'ON' : 'OFF'}
+                </button>
+              </div>
+              <div className="editor-option-inline">
+                <label>Normalize</label>
+                <button className={`toggle-pill ${videoOptions.normalizeAudio ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, normalizeAudio: !v.normalizeAudio }))}>
+                  {videoOptions.normalizeAudio ? 'ON' : 'OFF'}
+                </button>
+              </div>
+              <div className="editor-option-inline">
+                <label>Transitions</label>
+                <button className={`toggle-pill ${videoOptions.transitions ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, transitions: !v.transitions }))}>
+                  {videoOptions.transitions ? 'ON' : 'OFF'}
+                </button>
+              </div>
+              <div className="editor-option-inline">
+                <label>Color</label>
+                <select value={videoOptions.colorFilter} onChange={(e) => setVideoOptions(v => ({ ...v, colorFilter: e.target.value }))}>
+                  <option value="none">None</option><option value="warm">Warm</option><option value="cool">Cool</option><option value="cinematic">Cinematic</option><option value="high_contrast">High Contrast</option>
+                </select>
+              </div>
+              <button className="btn btn-ghost" style={{ fontSize: '11px', marginLeft: 'auto' }} onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}>
+                {showAdvancedOptions ? 'Less Options' : 'More Options'}
+              </button>
+            </div>
+
+            {showAdvancedOptions && (
+              <div className="editor-options-expanded">
+                <div className="editor-option-inline" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                  <label>Speed</label>
+                  <select value={videoOptions.playbackSpeed || '1.0'} onChange={(e) => setVideoOptions(v => ({ ...v, playbackSpeed: e.target.value }))} style={{ width: '100%' }}>
+                    <option value="0.75">0.75x</option><option value="1.0">1.0x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option>
+                  </select>
+                </div>
+                <div className="editor-option-inline" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                  <label>Intro Title</label>
+                  <input value={videoOptions.introTitle} onChange={(e) => setVideoOptions(v => ({ ...v, introTitle: e.target.value }))} placeholder="e.g. Meeting Highlights" style={{ width: '100%', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }} />
+                </div>
+                <div className="editor-option-inline" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                  <label>Intro Subtitle</label>
+                  <input value={videoOptions.introSubtitle} onChange={(e) => setVideoOptions(v => ({ ...v, introSubtitle: e.target.value }))} placeholder="Optional" style={{ width: '100%', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }} />
+                </div>
+                <div className="editor-option-inline" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                  <label>Outro Title</label>
+                  <input value={videoOptions.outroTitle} onChange={(e) => setVideoOptions(v => ({ ...v, outroTitle: e.target.value }))} placeholder="e.g. Thanks for Watching" style={{ width: '100%', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }} />
+                </div>
+                <div className="editor-option-inline" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                  <label>Outro CTA</label>
+                  <input value={videoOptions.outroCta} onChange={(e) => setVideoOptions(v => ({ ...v, outroCta: e.target.value }))} placeholder="e.g. Subscribe" style={{ width: '100%', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }} />
+                </div>
+                <div className="editor-option-inline">
+                  <label>Labels</label>
+                  <button className={`toggle-pill ${videoOptions.showHighlightLabels !== false ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, showHighlightLabels: !(v.showHighlightLabels !== false) }))}>
+                    {videoOptions.showHighlightLabels !== false ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+                <div className="editor-option-inline">
+                  <label>Watermark</label>
+                  <button className={`toggle-pill ${videoOptions.logoWatermark ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, logoWatermark: !v.logoWatermark }))}>
+                    {videoOptions.logoWatermark ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ================================================================
+           CLOUD / PRE-VIDEO LAYOUT (existing two-column layout)
+           ================================================================ */}
+        {(isCloudMode || !videoId) && (
         <div className="twowide">
           <section className="card section left-column animate-fadeIn">
             {!expanded.open && (
@@ -7925,6 +8344,39 @@ export default function App() {
                     />
                   ))}
                 </div>
+
+                {/* Timeline Preview */}
+                {clipThumbnails.length > 0 && (
+                  <div style={{ marginTop: '12px', overflowX: 'auto', display: 'flex', gap: '8px', padding: '8px 0' }}>
+                    {clipThumbnails.map((thumb, idx) => (
+                      <div key={idx} style={{
+                        flex: '0 0 auto', width: '160px', borderRadius: '8px', overflow: 'hidden',
+                        border: '2px solid #e2e8f0', background: '#f8fafc'
+                      }}>
+                        <img src={thumb.url} alt={`Clip ${idx + 1}`} style={{ width: '160px', height: '90px', objectFit: 'cover' }} />
+                        <div style={{ padding: '4px 6px' }}>
+                          <div style={{ fontSize: '10px', color: '#64748b' }}>{Math.floor(thumb.start / 60)}:{String(Math.floor(thumb.start % 60)).padStart(2, '0')} - {Math.floor(thumb.end / 60)}:{String(Math.floor(thumb.end % 60)).padStart(2, '0')} ({thumb.duration}s)</div>
+                          <div style={{ fontSize: '11px', color: '#334155', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{thumb.highlight}</div>
+                        </div>
+                      </div>
+                    ))}
+                    <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', padding: '0 12px', fontSize: '12px', color: '#64748b' }}>
+                      Total: {clipThumbnails.reduce((sum, t) => sum + t.duration, 0).toFixed(0)}s
+                    </div>
+                  </div>
+                )}
+
+                {clipThumbnails.length === 0 && clipBasket.length > 0 && (
+                  <button
+                    onClick={() => {
+                      apiClipThumbnails({ videoId, clips: clipBasket })
+                        .then(data => { if (data.thumbnails) setClipThumbnails(data.thumbnails); });
+                    }}
+                    style={{ marginTop: '8px', fontSize: '11px', color: '#1E7F63', background: 'none', border: '1px solid #1E7F63', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer' }}
+                  >
+                    Load Timeline Preview
+                  </button>
+                )}
               </div>
             )}
 
@@ -8176,7 +8628,7 @@ export default function App() {
                       </div>
 
                       {/* Logo Watermark */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                         <div>
                           <span style={{ fontSize: '13px', color: '#475569' }}>🏢 Logo Watermark</span>
                           <div style={{ fontSize: '11px', color: '#94a3b8' }}>Add branding to video</div>
@@ -8194,6 +8646,84 @@ export default function App() {
                             transition: 'left 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
                           }} />
                         </button>
+                      </div>
+
+                      {/* Audio Normalization */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                        <div>
+                          <span style={{ fontSize: '13px', color: '#475569' }}>🔊 Normalize Audio</span>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>Consistent volume levels (EBU R128)</div>
+                        </div>
+                        <button
+                          onClick={() => setVideoOptions(v => ({ ...v, normalizeAudio: !v.normalizeAudio }))}
+                          style={{
+                            width: '40px', height: '22px', borderRadius: '11px', border: 'none', cursor: 'pointer',
+                            background: videoOptions.normalizeAudio ? '#1E7F63' : '#cbd5e1', position: 'relative'
+                          }}
+                        >
+                          <div style={{
+                            width: '18px', height: '18px', borderRadius: '50%', background: 'white',
+                            position: 'absolute', top: '2px', left: videoOptions.normalizeAudio ? '20px' : '2px',
+                            transition: 'left 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                          }} />
+                        </button>
+                      </div>
+
+                      {/* Video Resolution */}
+                      <div style={{ marginBottom: '12px' }}>
+                        <label style={{ fontSize: '13px', color: '#475569', display: 'block', marginBottom: '4px' }}>📺 Video Resolution</label>
+                        <select
+                          value={videoOptions.resolution || '720p'}
+                          onChange={(e) => setVideoOptions(v => ({ ...v, resolution: e.target.value }))}
+                          style={{
+                            width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0',
+                            fontSize: '13px', background: 'white'
+                          }}
+                        >
+                          {availableFormats.length > 0 ? (
+                            availableFormats.map(f => (
+                              <option key={f.label} value={f.label}>
+                                {f.label === 'best' ? 'Best Available' : f.label}{f.width ? ` (${f.width}x${f.height})` : ''}
+                              </option>
+                            ))
+                          ) : (
+                            <>
+                              <option value="best">Best Available</option>
+                              <option value="1080p">1080p (Full HD)</option>
+                              <option value="720p">720p (HD)</option>
+                              <option value="480p">480p (SD)</option>
+                            </>
+                          )}
+                        </select>
+                      </div>
+
+                      {/* Intro/Outro */}
+                      <div style={{ marginTop: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: '#475569', marginBottom: '8px' }}>🎬 Intro & Outro Slides</div>
+                        <input
+                          placeholder="Intro title (e.g. Meeting Highlights)"
+                          value={videoOptions.introTitle}
+                          onChange={(e) => setVideoOptions(v => ({ ...v, introTitle: e.target.value }))}
+                          style={{ width: '100%', padding: '6px 8px', marginBottom: '6px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }}
+                        />
+                        <input
+                          placeholder="Intro subtitle (optional)"
+                          value={videoOptions.introSubtitle}
+                          onChange={(e) => setVideoOptions(v => ({ ...v, introSubtitle: e.target.value }))}
+                          style={{ width: '100%', padding: '6px 8px', marginBottom: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }}
+                        />
+                        <input
+                          placeholder="Outro title (e.g. Thanks for Watching)"
+                          value={videoOptions.outroTitle}
+                          onChange={(e) => setVideoOptions(v => ({ ...v, outroTitle: e.target.value }))}
+                          style={{ width: '100%', padding: '6px 8px', marginBottom: '6px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }}
+                        />
+                        <input
+                          placeholder="Call-to-action (e.g. Subscribe for more)"
+                          value={videoOptions.outroCta}
+                          onChange={(e) => setVideoOptions(v => ({ ...v, outroCta: e.target.value }))}
+                          style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }}
+                        />
                       </div>
                     </div>
                   )}
@@ -8357,9 +8887,10 @@ export default function App() {
             )}
           </section>
         </div>
+        )}
 
         {fullText && sents.length > 0 && (
-          <section id="analytics-section" className="full-width-viz card section animate-slideUp" style={{ marginTop: 16 }}>
+          <section id="analytics-section" className="full-width-viz card section animate-slideUp" style={{ marginTop: isCloudMode ? 40 : 16 }}>
             <h2 className="section-title">
               Meeting Analytics
             </h2>

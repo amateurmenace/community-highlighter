@@ -356,6 +356,28 @@ export async function apiClipPreview(data) {
   return res.json();
 }
 
+/**
+ * Get available video resolutions/formats for a YouTube video
+ */
+export async function apiVideoFormats(videoId) {
+  const res = await fetch(`${BACKEND_URL}/api/video_formats/${videoId}`);
+  if (!res.ok) return { formats: [] };
+  return res.json();
+}
+
+/**
+ * Generate thumbnails for clip timeline preview
+ */
+export async function apiClipThumbnails(data) {
+  const res = await fetch(`${BACKEND_URL}/api/clip_thumbnails`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) return { thumbnails: [] };
+  return res.json();
+}
+
 // ============================================================================
 // ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â¬ LIVE CHAT APIs (PRESERVED)
 // ============================================================================

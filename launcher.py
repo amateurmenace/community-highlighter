@@ -93,15 +93,37 @@ def load_api_key():
 
 
 def save_api_key(key):
-    """Save API key to .env"""
+    """Save API key to .env, preserving other existing keys"""
     env_path = get_env_path()
     env_dir = os.path.dirname(env_path)
     
     if env_dir and not os.path.exists(env_dir):
         os.makedirs(env_dir, exist_ok=True)
     
+    # Read existing .env content to preserve other keys (like YOUTUBE_API_KEY)
+    existing_lines = []
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, 'r') as f:
+                existing_lines = f.readlines()
+        except:
+            pass
+    
+    # Update or add OPENAI_API_KEY, keep everything else
+    found = False
+    new_lines = []
+    for line in existing_lines:
+        if line.strip().startswith('OPENAI_API_KEY='):
+            new_lines.append(f"OPENAI_API_KEY={key}\n")
+            found = True
+        else:
+            new_lines.append(line)
+    
+    if not found:
+        new_lines.append(f"OPENAI_API_KEY={key}\n")
+    
     with open(env_path, 'w') as f:
-        f.write(f"OPENAI_API_KEY={key}\n")
+        f.writelines(new_lines)
     
     os.environ['OPENAI_API_KEY'] = key
 
@@ -275,10 +297,10 @@ class LauncherApp:
         
         self.api_key_var = tk.StringVar()
         key_entry = tk.Entry(api_frame, textvariable=self.api_key_var,
-                            width=45, show='•', font=('Courier', 11))
+                            width=45, show='â€¢', font=('Courier', 11))
         key_entry.pack(fill='x', pady=(5, 10))
         
-        link = tk.Label(api_frame, text="→ Get free API key from OpenAI",
+        link = tk.Label(api_frame, text="â†’ Get free API key from OpenAI",
                        font=('Helvetica', 10, 'underline'),
                        fg=COLORS['green'], bg=COLORS['bg_dark'],
                        cursor='hand2')
@@ -297,7 +319,7 @@ class LauncherApp:
         status_row = tk.Frame(server_frame, bg=COLORS['bg_dark'])
         status_row.pack(fill='x', pady=(0, 10))
         
-        self.status_dot = tk.Label(status_row, text="●",
+        self.status_dot = tk.Label(status_row, text="â—",
                                    font=('Helvetica', 16),
                                    fg=COLORS['text_light'],
                                    bg=COLORS['bg_dark'])
@@ -314,7 +336,7 @@ class LauncherApp:
         btn_row = tk.Frame(server_frame, bg=COLORS['bg_dark'])
         btn_row.pack(fill='x')
         
-        self.start_btn = tk.Button(btn_row, text="▶ Start Server",
+        self.start_btn = tk.Button(btn_row, text="â–¶ Start Server",
                                    command=self.start_server,
                                    bg=COLORS['green'], fg=COLORS['white'],
                                    font=('Helvetica', 12, 'bold'),
@@ -322,7 +344,7 @@ class LauncherApp:
                                    relief='flat', cursor='hand2')
         self.start_btn.pack(side='left', padx=(0, 10))
         
-        self.stop_btn = tk.Button(btn_row, text="■ Stop",
+        self.stop_btn = tk.Button(btn_row, text="â–  Stop",
                                   command=self.stop_server,
                                   bg=COLORS['error'], fg=COLORS['white'],
                                   font=('Helvetica', 12, 'bold'),

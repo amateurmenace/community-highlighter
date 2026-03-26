@@ -35,11 +35,25 @@ else:
     print(f"  ✗ ERROR: dist/ not found! Run 'npm run build' first")
     sys.exit(1)
 
-# Backend code (required)
+# Backend code (required) - selectively include, excluding venv/dist/build/cache
 backend_path = os.path.join(project_root, 'backend')
 if os.path.exists(backend_path):
-    datas.append((backend_path, 'backend'))
-    print(f"  ✓ Found: backend/")
+    # Directories to EXCLUDE from backend bundling
+    backend_excludes = {'venv', '.venv', 'dist', 'build', 'cache', '__pycache__', '.git', 'node_modules'}
+
+    # Include backend Python files and subdirectories selectively
+    for item in os.listdir(backend_path):
+        if item in backend_excludes:
+            print(f"  ✗ Excluding: backend/{item}/")
+            continue
+        item_path = os.path.join(backend_path, item)
+        if os.path.isfile(item_path):
+            datas.append((item_path, 'backend'))
+            print(f"  ✓ Found: backend/{item}")
+        elif os.path.isdir(item_path):
+            datas.append((item_path, os.path.join('backend', item)))
+            print(f"  ✓ Found: backend/{item}/")
+    print(f"  ✓ Backend collected (excluding venv/dist/build/cache)")
 else:
     print(f"  ✗ ERROR: backend/ not found!")
     sys.exit(1)
@@ -132,7 +146,7 @@ exe = EXE(
     upx=True,
     console=False,  # No terminal window
     disable_windowed_traceback=False,
-    argv_emulation=True,  # Important for macOS
+    argv_emulation=False,  # Must be False - True causes infinite relaunch on macOS
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
