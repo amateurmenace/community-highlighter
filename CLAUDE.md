@@ -1,11 +1,11 @@
 # Community Highlighter
 
-AI-powered desktop + web app for analyzing civic meeting recordings. Extracts transcripts from YouTube videos, generates AI summaries, entity extraction, highlight reels, and video clip downloads. Features a video-editor-first UI with a professional timeline, clip basket, and one-click highlight reel generation.
+AI-powered desktop + web app for analyzing civic meeting recordings. Extracts transcripts from YouTube videos, generates AI summaries, entity extraction, highlight reels, and video clip downloads. Features a video-editor-first UI with a professional timeline, clip basket, and one-click highlight reel generation. Installable as a PWA with mobile-optimized UI.
 
 ## Architecture
 
-- **Frontend**: React 19 + Vite, built to `dist/`. Monolithic `src/App.jsx` (~362KB, ~9000 lines) with 20+ inline sub-components
-- **Backend**: FastAPI (`backend/app.py`, ~300KB monolith), served by Uvicorn on port 8000. 69 API endpoints
+- **Frontend**: React 19 + Vite + vite-plugin-pwa, built to `dist/`. Monolithic `src/App.jsx` (~9200 lines) with 25+ inline sub-components
+- **Backend**: FastAPI (`backend/app.py`, ~300KB monolith), served by Uvicorn on port 8000. 70 API endpoints
 - **Desktop packaging**: PyInstaller bundles into macOS `.app` (signed+notarized) and Windows `.exe`
 - **Cloud deployment**: Render (https://community-highlighter.onrender.com/) — video download disabled in cloud mode
 - **GitHub**: https://github.com/amateurmenace/community-highlighter
@@ -31,24 +31,32 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 5. Three paths to reels: (a) one-click AI auto-reel, (b) clip basket from search/timeline, (c) manual transcript selection
 6. **Highlight reels load into the timeline editor** for review, trimming, reordering, and editing before export
 7. Backend renders clips via ffmpeg, user downloads MP4/ZIP
+8. **Celebration modal** with confetti animation on render completion, download history tracking
 
 ## UI Layout (Video-Editor-First Design)
 
 The interface prioritizes video editing over data visualization:
 
 1. **Video Player** — top of page, embedded YouTube iframe
-2. **Quick Action Buttons** — prominent row directly below player: "AI Highlight Reel", "Clip from Selection", "Add to Timeline"
-3. **Timeline Editor** — professional NLE-style timeline with:
-   - Drag-to-reorder clips on a horizontal track
+2. **Hero Button** — "Make a 2-Minute Highlight Reel" directly below video player, one-click with sensible defaults
+3. **Template Presets** — Quick Share (720p/60s/social), Meeting Brief (1080p/5min), News Clip (720p/90s/titled)
+4. **Quick Action Buttons** — prominent row: "AI Highlight Reel", "Social Media Reel", "Export Clips"
+5. **Full Video Download** — separate amber gradient section with integrated resolution picker
+6. **Timeline Editor** — professional NLE-style timeline with:
+   - Drag-to-reorder clips on a horizontal track (desktop)
+   - Vertical clip cards with -1s/+1s trim buttons (mobile < 768px)
    - Per-clip trim handles (adjust start/end)
    - Waveform visualization per clip
    - Thumbnail strip for visual reference
    - Playback head / scrubber
    - Zoom in/out on timeline
    - Light theme (white/gray background, not dark)
-4. **Clip Basket** — clips added from search results, transcript selections, or AI highlights
-5. **Transcript Panel** — searchable, clickable timestamps
-6. **Analytics/Data Viz** — pushed below the fold (entities, decisions, topics, participation)
+7. **Settings Panel** — always visible, grouped into Quality/Effects/Branding sections (no hidden toggle)
+8. **Clip Basket** — clips added from search results, transcript selections, or AI highlights
+9. **Transcript Panel** — searchable, clickable timestamps, touch "+" buttons on mobile
+10. **Analytics/Data Viz** — pushed below the fold (entities, decisions, topics, participation)
+11. **Share Panel** — Web Share API on mobile, Copy/Twitter/Facebook/Email on desktop
+12. **Download History** — header badge with recent downloads dropdown, toast notifications
 
 ## Video Processing Pipeline
 
@@ -59,6 +67,11 @@ The interface prioritizes video editing over data visualization:
 - Optional Webshare residential proxy for YouTube blocks
 - **Resolution choices**: User can select download quality (best/1080p/720p/480p/360p)
 
+### Cache Management
+- **Automatic cleanup**: `cleanup_cache()` runs on startup and every 6 hours via FastAPI `lifespan`
+- Deletes `.mp4`, `.zip`, `.srt` files older than 24 hours (configurable via `CACHE_MAX_AGE_HOURS` env var)
+- Manual trigger: `POST /api/cache/cleanup` with optional `{"max_age_hours": N}`
+
 ### Clip Rendering (`POST /api/render_clips`, `POST /api/highlight_reel`)
 - **Encoder**: `libx264 -preset fast -crf 20` — consistent high quality across all encodes
 - **Audio**: `aac -ar 44100 -b:a 192k` — explicit bitrate on all encodes
@@ -66,6 +79,7 @@ The interface prioritizes video editing over data visualization:
 - **Font**: Bundled DejaVu Sans Bold (`backend/fonts/`) for reliable cross-platform text overlays
 - **Seeking**: Input seeking (`-ss` before `-i`) + output trim, 1s buffer for keyframe alignment
 - **Text overlays**: `drawtext` filter, 6% of video height, green (#22C55E), DejaVu Sans Bold
+- **Lower thirds**: Speaker name + highlight text bar at 82% height, brand green (#1e7f63) background, fade-in animation, enabled via `lowerThirds` video option
 - **Captions**: SRT subtitles via `subtitles` filter with pill-style backgrounds (`BorderStyle=4`, semi-transparent black)
 - **Color filters**: 8 presets (vintage, warm, cool, high_contrast, bw, sepia, vibrant, cinematic)
 - **Transitions**: `fade` in/out, `xfade` between clips, 0.5s duration
@@ -84,29 +98,8 @@ The interface prioritizes video editing over data visualization:
 
 ### Remaining Opportunities
 - Hardware acceleration (detected but not used — libx264 for reliability)
-- Unbounded cache growth — no automatic cleanup of `backend/cache/`
-- Lower thirds for speaker identification (stub exists at `create_lower_third_filter()`)
 
-## UX Roadmap
-
-### Phase 1: Quick UX Wins (frontend-only)
-- **Celebration Modal**: Full-screen modal with CSS confetti when render completes, big download button, share options. Replaces tiny inline progress bar link
-- **Visible Settings Panel**: Video settings (resolution, captions, filters, speed, intro/outro) moved above timeline, always visible in labeled card instead of hidden "Advanced Options"
-- **Prominent Full Video Download**: Separated from reel buttons, own section with warm gradient, integrated resolution picker
-- **Download History**: Header badge with recent downloads dropdown, toast notifications ("Saved to Downloads folder")
-
-### Phase 2: Mobile & PWA
-- **PWA**: `vite-plugin-pwa`, manifest, service worker, install prompts, iOS "Add to Home Screen" instructions
-- **Mobile Timeline**: Vertical clip cards (< 768px) with swipe-to-delete, long-press reorder, +/- 1s trim buttons instead of mouse drag handles
-- **Touch Transcript**: 48px "+" buttons on segments, bottom sheet clip counter with "Add to Timeline" floating button
-
-### Phase 3: Guided UX for Non-Professionals
-- **One-Click Hero Button**: "Make a 2-Minute Highlight Reel" with sensible defaults, directly below video player
-- **Onboarding Wizard**: 3-step first-visit overlay (paste URL → analyzing → highlights ready)
-- **Social Sharing**: Web Share API on mobile, Copy/Twitter/Facebook/Email on desktop
-- **Template Presets**: Quick Share (720p/60s/social), Meeting Brief (1080p/5min), News Clip (720p/90s/titled)
-
-## API Endpoints (69 total, Key Categories)
+## API Endpoints (70 total, Key Categories)
 
 ### Video/Clips
 - `POST /api/download_mp4` — Download full YouTube video
@@ -117,6 +110,7 @@ The interface prioritizes video editing over data visualization:
 - `POST /api/clip_thumbnails` — Generate timeline preview thumbnails
 - `GET /api/job_status` — Poll render job progress
 - `GET /api/video_capabilities` — Available editing features
+- `POST /api/cache/cleanup` — Manual cache cleanup
 
 ### AI Analysis
 - `POST /api/summary_ai` — Map-reduce summary (concise/detailed/highlights_with_quotes)
@@ -139,11 +133,22 @@ The interface prioritizes video editing over data visualization:
 ## Frontend State Management
 
 - All React hooks (useState/useRef), no Redux/Context
-- ~30+ top-level state variables in App.jsx
-- 20+ inline sub-components (FeedbackModal, DecisionTimeline, TopicHeatMap, MeetingAssistant, etc.)
+- ~35+ top-level state variables in App.jsx
+- 25+ inline sub-components (CelebrationModal, OnboardingWizard, SharePanel, TemplatePresets, ExportModal, FeedbackModal, ProgressIndicator, etc.)
 - YouTube embedded via iframe (no programmatic play/pause control)
 - Job polling: `setInterval` every 1.5s, no exponential backoff
-- Timeline editor state: `timelineClips` array with per-clip start/end/title/thumbnail
+- Timeline editor state: `clipBasket` array with per-clip start/end/title/thumbnail
+- Download history: persisted in localStorage (`ch_downloads`), max 20 entries
+- Onboarding: first-visit wizard tracked via localStorage (`ch_onboarding_done`)
+- Toast notifications: auto-dismiss after 4s, fixed bottom-right
+
+## PWA Support
+
+- **Plugin**: `vite-plugin-pwa` with `generateSW` mode and `autoUpdate` registration
+- **Manifest**: `Community Highlighter`, theme color `#1E7F63`, standalone display
+- **Service Worker**: Workbox precaches static assets, network-first for `/api/*`, network-only for YouTube
+- **iOS**: Apple touch icon, mobile-web-app-capable meta tags
+- **Install**: Browser-native install prompt (Chrome/Edge/Safari)
 
 ## Build & Distribution
 
@@ -201,6 +206,7 @@ gh workflow run build-windows.yml -f version=v7.1.0
 | `CLOUD_MODE` | Auto | `true` on Render, `false` for desktop |
 | `DESKTOP_MODE` | Auto | Set by app_launcher.py |
 | `FFMPEG_PATH` | Auto | Auto-detected from Homebrew (macOS) or PATH (Windows) |
+| `CACHE_MAX_AGE_HOURS` | No | Cache cleanup threshold in hours (default: 24) |
 
 `.env` file locations (checked in order):
 1. `backend/.env`
@@ -220,7 +226,7 @@ gh workflow run build-windows.yml -f version=v7.1.0
 - All nested binaries (.dylib, .so) must be signed with entitlements AND `--timestamp` for notarization
 - PyInstaller specs must EXCLUDE `backend/venv/`, `.venv/`, `dist/`, `build/`, `cache/` — bundling these causes notarization failure (unsigned nested binaries) and massive app size
 - `backend/app.py` is a ~300KB monolith — changes require care
-- `src/App.jsx` is ~362KB, ~9000 lines — also monolithic, 20+ inline components
+- `src/App.jsx` is ~9200 lines — also monolithic, 25+ inline components
 - PyInstaller bundles torch/scipy/sklearn (huge) — could exclude unused ML deps to shrink app further
 - yt-dlp download timeout (10 min) can fail on long videos
 - YouTube API key is optional — transcript fetching falls back to YouTubeTranscriptApi → yt-dlp without it
@@ -228,6 +234,6 @@ gh workflow run build-windows.yml -f version=v7.1.0
 
 ## Version
 
-Current: 7.1.0
+Current: 7.2.0
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)

@@ -1,5 +1,6 @@
 import os, sys, json, uuid, tempfile, shutil, subprocess, threading, re, html, asyncio
 from collections import Counter, defaultdict
+from contextlib import asynccontextmanager
 from datetime import datetime
 from urllib.parse import quote, unquote
 import nltk
@@ -180,7 +181,59 @@ if CLOUD_MODE:
 # Define BASE_DIR early for static files
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-app = FastAPI()
+# --- Cache cleanup ---
+CACHE_MAX_AGE_HOURS = int(os.environ.get("CACHE_MAX_AGE_HOURS", "24"))
+
+def cleanup_cache(max_age_hours=None):
+    """Delete cached video/clip files older than max_age_hours."""
+    if max_age_hours is None:
+        max_age_hours = CACHE_MAX_AGE_HOURS
+    cache_dir = os.path.join(BASE_DIR, "cache")
+    if not os.path.isdir(cache_dir):
+        return {"deleted": 0, "remaining": 0, "freed_bytes": 0}
+    import time as _time
+    now = _time.time()
+    max_age_sec = max_age_hours * 3600
+    deleted = 0
+    freed = 0
+    remaining = 0
+    for fname in os.listdir(cache_dir):
+        fpath = os.path.join(cache_dir, fname)
+        if not os.path.isfile(fpath):
+            continue
+        if not fname.endswith(('.mp4', '.zip', '.srt')):
+            remaining += 1
+            continue
+        age = now - os.path.getmtime(fpath)
+        if age > max_age_sec:
+            size = os.path.getsize(fpath)
+            try:
+                os.remove(fpath)
+                deleted += 1
+                freed += size
+                print(f"[cache_cleanup] Deleted {fname} (age: {age/3600:.1f}h, size: {size/1024/1024:.1f}MB)")
+            except OSError as e:
+                print(f"[cache_cleanup] Failed to delete {fname}: {e}")
+                remaining += 1
+        else:
+            remaining += 1
+    print(f"[cache_cleanup] Done: deleted={deleted}, remaining={remaining}, freed={freed/1024/1024:.1f}MB")
+    return {"deleted": deleted, "remaining": remaining, "freed_bytes": freed}
+
+async def periodic_cache_cleanup():
+    """Run cache cleanup every 6 hours."""
+    while True:
+        await asyncio.sleep(6 * 3600)
+        cleanup_cache()
+
+@asynccontextmanager
+async def lifespan(app):
+    cleanup_cache()
+    task = asyncio.create_task(periodic_cache_cleanup())
+    yield
+    task.cancel()
+
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -1409,6 +1462,18 @@ async def debug_cache():
             vid: {"segments": len(data)} for vid, data in STORED_TRANSCRIPTS.items()
         },
     }
+
+
+@app.post("/api/cache/cleanup")
+async def api_cache_cleanup(req: Request):
+    """Manually trigger cache cleanup. Optional: {"max_age_hours": 12}"""
+    try:
+        data = await req.json()
+    except Exception:
+        data = {}
+    max_age = data.get("max_age_hours", CACHE_MAX_AGE_HOURS)
+    result = cleanup_cache(max_age_hours=max_age)
+    return result
 
 
 @app.post("/api/wordfreq")
@@ -3057,24 +3122,47 @@ def create_watermark_filter(watermark_path, position='bottom_right', opacity=0.7
     return f"[1:v]format=rgba,colorchannelmixer=aa={opacity},scale=iw*{scale}:-1[wm];[0:v][wm]overlay={pos}"
 
 
-def create_lower_third_filter(name, title, video_width, video_height, duration=5, fontsize=20):
-    """Create animated lower third name bar"""
+def create_lower_third_filter(name, title, video_width, video_height, duration=5, fontsize=None):
+    """Create animated lower third name bar with brand-colored background and bundled font."""
+    if not name:
+        return []
     bar_height = int(video_height * 0.08)
-    y_pos = int(video_height * 0.75)
-    
+    y_pos = int(video_height * 0.82)
+    if fontsize is None:
+        fontsize = max(16, int(video_height * 0.03))
+
     # Escape text for FFmpeg
     name_escaped = name.replace("'", "\\'").replace(":", "\\:")
     title_escaped = title.replace("'", "\\'").replace(":", "\\:") if title else ""
-    
+
+    # Font parameter (use bundled DejaVu Sans Bold if available)
+    font_param = f":fontfile='{FONT_DEJAVU_BOLD}'" if FONT_DEJAVU_BOLD and os.path.exists(FONT_DEJAVU_BOLD) else ""
+
+    # Fade timing: appear at 0.3s, disappear 0.3s before end
+    fade_in = 0.3
+    enable = f"between(t,{fade_in},{duration})"
+
     filters = []
-    # Background bar with fade in
-    filters.append(f"drawbox=x=0:y={y_pos}:w={video_width}:h={bar_height}:color=black@0.7:t=fill:enable='between(t,0,{duration})'")
-    # Name text
-    filters.append(f"drawtext=text='{name_escaped}':fontsize={fontsize}:fontcolor=white:x=20:y={y_pos + 10}:enable='between(t,0,{duration})'")
-    # Title text (smaller, below name)
+    # Background bar — brand green with transparency
+    filters.append(
+        f"drawbox=x=0:y={y_pos}:w={video_width}:h={bar_height}"
+        f":color=0x1e7f63@0.85:t=fill:enable='{enable}'"
+    )
+    # Name text (white, bold)
+    filters.append(
+        f"drawtext=text='{name_escaped}':fontsize={fontsize}"
+        f":fontcolor=white:x=20:y={y_pos + 8}{font_param}"
+        f":enable='{enable}'"
+    )
+    # Title/context text (smaller, lighter)
     if title:
-        filters.append(f"drawtext=text='{title_escaped}':fontsize={int(fontsize*0.7)}:fontcolor=gray:x=20:y={y_pos + 10 + fontsize + 5}:enable='between(t,0,{duration})'")
-    
+        small_size = int(fontsize * 0.7)
+        filters.append(
+            f"drawtext=text='{title_escaped}':fontsize={small_size}"
+            f":fontcolor=0xcccccc:x=20:y={y_pos + 8 + fontsize + 4}{font_param}"
+            f":enable='{enable}'"
+        )
+
     return filters
 
 
@@ -3713,7 +3801,8 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
     outro_title = opts.get('outroTitle', '')
     outro_cta = opts.get('outroCta', '')
     resolution = opts.get('resolution', '720p')
-    
+    do_lower_thirds = opts.get('lowerThirds', False)
+
     # Get hardware encoder - use libx264 for reliability
     hw_encoder = 'libx264'  # Always use software encoder for reliability
     print(f"[simple_job] Using encoder: {hw_encoder}")
@@ -4212,6 +4301,17 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     if color_filter_str:
                         vf_filters.append(color_filter_str)
 
+                    # Add lower third speaker label
+                    if do_lower_thirds and clip.get("speaker"):
+                        lt_filters = create_lower_third_filter(
+                            name=clip["speaker"],
+                            title=clip.get("highlight", "")[:60],
+                            video_width=clip_video_width,
+                            video_height=clip_video_height,
+                            duration=min(5, duration),
+                        )
+                        vf_filters.extend(lt_filters)
+
                     # Use input seeking for proper audio sync
                     seek_time = max(0, start - 1)
                     trim_start = start - seek_time
@@ -4441,7 +4541,18 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                         # Add color filter if specified
                         if color_filter_str:
                             vf_filters.append(color_filter_str)
-                        
+
+                        # Add lower third speaker label
+                        if do_lower_thirds and clip.get("speaker"):
+                            lt_filters = create_lower_third_filter(
+                                name=clip["speaker"],
+                                title=clip.get("highlight", "")[:60],
+                                video_width=video_width,
+                                video_height=video_height,
+                                duration=min(5, duration),
+                            )
+                            vf_filters.extend(lt_filters)
+
                         # Add fade in for first clip, fade out for last
                         if use_transitions:
                             if i == 0:
@@ -4647,15 +4758,16 @@ async def render_clips(req: Request):
         'color_filter': 'none' if disable_all else data.get('colorFilter', 'none'),
         'normalize_audio': False if disable_all else data.get('normalizeAudio', False),
         'logo_watermark': False if disable_all else data.get('logoWatermark', False),
+        'lowerThirds': data.get('lowerThirds', False),
         'use_hw_accel': data.get('useHwAccel', True),
     }
-    
+
     if not vid:
         return {"error": "No video ID provided", "jobId": None}
-    
+
     if not clips:
         return {"error": "No clips provided", "jobId": None}
-    
+
     # Try to get transcript for captions
     transcript_data = None
     if captions_enabled:
@@ -4869,6 +4981,17 @@ def multi_video_job(job_id, clips_by_video, format_type, captions_enabled):
                         f":y=30"
                     )
                 
+                # Add lower third speaker label (social format)
+                if do_lower_thirds and clip.get("speaker"):
+                    lt_filters = create_lower_third_filter(
+                        name=clip["speaker"],
+                        title=clip.get("highlight", "")[:60],
+                        video_width=width,
+                        video_height=height,
+                        duration=min(5, duration),
+                    )
+                    vf_filters.extend(lt_filters)
+
                 # Build FFmpeg command
                 if vf_filters:
                     cmd = [
@@ -5313,15 +5436,16 @@ async def highlight_reel(req: Request):
     vid = data.get("videoId", "")
     quotes = data.get("quotes", [])
     highlights = data.get("highlights", [])  # Highlight labels for text overlay
+    speakers = data.get("speakers", [])  # Speaker names per highlight
     pad = data.get("pad", 4)  # seconds of padding before/after
     format_type = data.get("format", "combined")
     transcript_data = data.get("transcript", [])  # Can pass transcript directly
     captions_enabled = data.get("captions", True)  # Whether to add captions
-    
+
     # IMPORTANT: Extract video options from request
     # If disableAllAdvanced is true, skip ALL post-processing
     disable_all = data.get('disableAllAdvanced', True)
-    
+
     video_options = {
         'disable_all': disable_all,
         'transitions': False if disable_all else data.get('transitions', False),
@@ -5329,6 +5453,7 @@ async def highlight_reel(req: Request):
         'color_filter': 'none' if disable_all else data.get('colorFilter', 'none'),
         'normalize_audio': False if disable_all else data.get('normalizeAudio', False),
         'logo_watermark': False if disable_all else data.get('logoWatermark', False),
+        'lowerThirds': data.get('lowerThirds', False),
         'use_hw_accel': data.get('useHwAccel', True),
     }
     print(f"[highlight_reel] Video options (disable_all={disable_all}): {video_options}")
@@ -5382,6 +5507,7 @@ async def highlight_reel(req: Request):
                 "end": clip_end,
                 "label": quote[:60],
                 "highlight": highlight_label[:80],  # Highlight text for overlay
+                "speaker": speakers[i] if i < len(speakers) else "",
                 "quote_start": start_time,  # Original start for caption timing
                 "quote_end": end_time,
                 "original_index": i

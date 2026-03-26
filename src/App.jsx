@@ -4612,6 +4612,127 @@ function ExportModal({ onSelect, onClose, clipCount }) {
   );
 }
 
+const ONBOARDING_STEPS = [
+  { icon: '\uD83C\uDFA5', title: 'Paste a YouTube URL', desc: 'Start by pasting any civic meeting or public hearing video URL into the search bar above.' },
+  { icon: '\uD83E\uDD16', title: 'AI Analyzes the Meeting', desc: 'Our AI automatically extracts the transcript, identifies key moments, speakers, and decisions.' },
+  { icon: '\u2728', title: 'Get Your Highlights', desc: 'Review AI-generated highlights, build custom clips, and export professional highlight reels in one click.' },
+];
+
+function OnboardingWizard({ onClose }) {
+  const [step, setStep] = useState(0);
+  return (
+    <div className="onboarding-overlay" onClick={onClose}>
+      <div className="onboarding-card" onClick={e => e.stopPropagation()}>
+        <div className="onboarding-step-icon">{ONBOARDING_STEPS[step].icon}</div>
+        <div className="onboarding-title">{ONBOARDING_STEPS[step].title}</div>
+        <div className="onboarding-desc">{ONBOARDING_STEPS[step].desc}</div>
+        <div className="onboarding-dots">
+          {ONBOARDING_STEPS.map((_, i) => (
+            <div key={i} className={`onboarding-dot ${i === step ? 'onboarding-dot-active' : ''}`} />
+          ))}
+        </div>
+        {step < ONBOARDING_STEPS.length - 1 ? (
+          <button className="onboarding-btn" onClick={() => setStep(step + 1)}>Next</button>
+        ) : (
+          <button className="onboarding-btn" onClick={onClose}>Get Started</button>
+        )}
+        <div><button className="onboarding-skip" onClick={onClose}>Skip</button></div>
+      </div>
+    </div>
+  );
+}
+
+function SharePanel({ videoId, videoTitle }) {
+  const [copied, setCopied] = useState(false);
+  const shareUrl = videoId ? `${window.location.origin}?v=${videoId}` : window.location.href;
+  const shareText = videoTitle ? `Check out this meeting analysis: ${videoTitle}` : 'Check out this civic meeting analysis';
+
+  const handleNativeShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: videoTitle || 'Community Highlighter', text: shareText, url: shareUrl });
+      } catch (e) { /* user cancelled */ }
+    }
+  };
+
+  return (
+    <div className="share-panel">
+      {navigator.share && (
+        <button className="share-btn" onClick={handleNativeShare}>Share</button>
+      )}
+      <button className="share-btn share-btn-copy" onClick={() => {
+        navigator.clipboard.writeText(shareUrl);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}>{copied ? 'Copied!' : 'Copy Link'}</button>
+      <a className="share-btn share-btn-twitter" href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}`} target="_blank" rel="noopener noreferrer">Twitter</a>
+      <a className="share-btn share-btn-facebook" href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`} target="_blank" rel="noopener noreferrer">Facebook</a>
+      <a className="share-btn share-btn-email" href={`mailto:?subject=${encodeURIComponent(videoTitle || 'Meeting Highlights')}&body=${encodeURIComponent(shareText + '\n' + shareUrl)}`}>Email</a>
+    </div>
+  );
+}
+
+const TEMPLATE_PRESETS = [
+  { id: 'quick', icon: '\u26A1', title: 'Quick Share', desc: '720p / 60s / Social-ready', resolution: '720p', maxDuration: 60, format: 'social' },
+  { id: 'brief', icon: '\uD83D\uDCCB', title: 'Meeting Brief', desc: '1080p / 5min / Full highlights', resolution: '1080p', maxDuration: 300, format: 'combined' },
+  { id: 'news', icon: '\uD83C\uDFA4', title: 'News Clip', desc: '720p / 90s / Titled', resolution: '720p', maxDuration: 90, format: 'titled' },
+];
+
+function TemplatePresets({ onSelect }) {
+  return (
+    <div className="template-presets">
+      {TEMPLATE_PRESETS.map(t => (
+        <div key={t.id} className="template-card" onClick={() => onSelect(t)}>
+          <div className="template-card-icon">{t.icon}</div>
+          <div className="template-card-title">{t.title}</div>
+          <div className="template-card-desc">{t.desc}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CelebrationModal({ fileUrl, onClose, onDownload }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="celebration-overlay" onClick={onClose}>
+      {/* Confetti pieces */}
+      {Array.from({ length: 24 }).map((_, i) => (
+        <div key={i} className="confetti-piece" style={{
+          left: `${4 + Math.random() * 92}%`,
+          animationDelay: `${Math.random() * 2}s`,
+          animationDuration: `${2.5 + Math.random() * 2}s`,
+          backgroundColor: ['#1E7F63', '#0EA5E9', '#F59E0B', '#EC4899', '#8B5CF6', '#22C55E'][i % 6],
+          width: `${8 + Math.random() * 8}px`,
+          height: `${8 + Math.random() * 8}px`,
+          transform: `rotate(${Math.random() * 360}deg)`,
+        }} />
+      ))}
+      <div className="celebration-modal" onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: '48px', marginBottom: '12px' }}>&#127881;</div>
+        <h2 style={{ margin: '0 0 8px', fontSize: '24px', color: '#1a1a1a' }}>Your Video is Ready!</h2>
+        <p style={{ margin: '0 0 24px', color: '#64748b', fontSize: '14px' }}>Your highlight reel has been rendered successfully.</p>
+        <a href={fileUrl} download className="celebration-download-btn" onClick={() => {
+          if (onDownload) onDownload(fileUrl.split('/').pop() || 'highlight_reel.mp4', fileUrl, 'reel');
+        }}>
+          Download Video
+        </a>
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+          <button className="celebration-secondary-btn" onClick={(e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(window.location.origin + fileUrl);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }}>
+            {copied ? 'Copied!' : 'Copy Link'}
+          </button>
+          <button className="celebration-secondary-btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProgressIndicator({ status, percent, message, estimatedTime, isVideoDownload }) {
   const [dots, setDots] = useState('');
   
@@ -6316,10 +6437,36 @@ export default function App() {
     outroTitle: '',
     outroCta: '',
     resolution: '720p',
+    lowerThirds: false,
   });
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [availableFormats, setAvailableFormats] = useState([]);
   const [clipThumbnails, setClipThumbnails] = useState([]);
+
+  // Download history & toasts
+  const [downloadHistory, setDownloadHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ch_downloads') || '[]'); } catch { return []; }
+  });
+  const [showDownloadDropdown, setShowDownloadDropdown] = useState(false);
+  const [toasts, setToasts] = useState([]);
+  const [downloadResolution, setDownloadResolution] = useState('best');
+  const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem('ch_onboarding_done'));
+
+  const addToast = (message) => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, message }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+  };
+
+  const addDownload = (filename, url, type) => {
+    const entry = { filename, url, timestamp: Date.now(), type };
+    setDownloadHistory(prev => {
+      const next = [entry, ...prev].slice(0, 20);
+      localStorage.setItem('ch_downloads', JSON.stringify(next));
+      return next;
+    });
+    addToast(`Downloaded: ${filename}`);
+  };
 
   // Desktop editor timeline state
   const [timelineZoom, setTimelineZoom] = useState(1);
@@ -6358,6 +6505,7 @@ export default function App() {
   const [translation, setTranslation] = useState({ text: "", lang: "", show: false });
   const [translateLang, setTranslateLang] = useState("Spanish");
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showCelebration, setShowCelebration] = useState(null); // {file: url} when render completes
   const [videoTitle, setVideoTitle] = useState("");
 
   const debQuery = useDebounce(query, 220);
@@ -6724,6 +6872,11 @@ export default function App() {
           clearInterval(pollIntervalRef.current);
           pollIntervalRef.current = null;
           setLoading(l => ({ ...l, clips: false, reel: false }));
+          // Show celebration modal on success
+          if (status.status === "done") {
+            const fileUrl = status.zip || status.file || status.output;
+            if (fileUrl) setShowCelebration({ file: fileUrl });
+          }
           // Clear the progress bar after a delay
           setTimeout(() => {
             setProcessStatus({ active: false, message: "", percent: 0, estimatedTime: null, isVideoDownload: false });
@@ -6970,6 +7123,7 @@ export default function App() {
         videoId,
         quotes: currentHighlights.map(h => h.quote),
         highlights: currentHighlights.map(h => h.highlight),
+        speakers: currentHighlights.map(h => h.speaker || ''),
         transcript: sents,
         pad: videoOptions.clipPadding,
         format: format,
@@ -7328,6 +7482,24 @@ export default function App() {
                   <option value="en">English</option>
                 </select>
               </div>
+              <div className="download-history-wrapper">
+                <button className="download-history-badge" onClick={() => setShowDownloadDropdown(!showDownloadDropdown)}>
+                  Downloads {downloadHistory.length > 0 && <span className="badge-count">{downloadHistory.length}</span>}
+                </button>
+                {showDownloadDropdown && (
+                  <div className="download-history-dropdown">
+                    <div className="download-history-header">Recent Downloads</div>
+                    {downloadHistory.length === 0 ? (
+                      <div className="download-empty">No recent downloads</div>
+                    ) : downloadHistory.map((d, i) => (
+                      <a key={i} href={d.url} download className="download-history-item">
+                        <span className="download-item-name">{d.filename}</span>
+                        <span className="download-item-time">{new Date(d.timestamp).toLocaleTimeString()}</span>
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="powered-section">
                 <span className="powered-text">{t.poweredBy}</span>
                 <img src="/secondary.png" alt="BIG" className="secondary-logo-large" />
@@ -7375,6 +7547,14 @@ export default function App() {
             onSelect={exportClips}
             onClose={() => setShowExportModal(false)}
             clipCount={clipBasket.length}
+          />
+        )}
+
+        {showCelebration && (
+          <CelebrationModal
+            fileUrl={showCelebration.file}
+            onClose={() => setShowCelebration(null)}
+            onDownload={addDownload}
           />
         )}
 
@@ -7889,6 +8069,23 @@ export default function App() {
               </div>
             </div>
 
+            {/* Hero Button - One-Click Highlight Reel */}
+            <div className="hero-reel-section">
+              <button className="hero-reel-btn" onClick={() => buildReel('combined')} disabled={loading.reel || loading.summary}>
+                {loading.reel ? 'Building Reel...' : 'Make a 2-Minute Highlight Reel'}
+              </button>
+              <div className="hero-reel-subtitle">AI selects the best moments with sensible defaults</div>
+            </div>
+
+            {/* Template Presets */}
+            <TemplatePresets onSelect={(preset) => {
+              setVideoOptions(v => ({ ...v, resolution: preset.resolution }));
+              buildReel(preset.format);
+            }} />
+
+            {/* Share Panel */}
+            {videoId && <SharePanel videoId={videoId} videoTitle={videoTitle} />}
+
             {/* Quick Actions - Big Buttons */}
             <div className="editor-quick-actions">
               <button className="editor-action-btn editor-action-primary" onClick={() => buildReel('combined')} disabled={loading.reel}>
@@ -7912,20 +8109,36 @@ export default function App() {
                   <div className="editor-action-desc">{clipBasket.length} clip{clipBasket.length !== 1 ? 's' : ''} in timeline</div>
                 </div>
               </button>
-              <button className="editor-action-btn editor-action-download" onClick={async () => {
-                setLoading(l => ({...l, mp4: true}));
-                try {
-                  const res = await apiDownloadMp4({ videoId });
-                  if (res.file) window.open(res.file, '_blank');
-                } catch(e) { alert('Download failed: ' + e.message); }
-                setLoading(l => ({...l, mp4: false}));
-              }} disabled={loading.mp4}>
-                <span className="editor-action-icon">{loading.mp4 ? '...' : 'MP4'}</span>
-                <div>
-                  <div className="editor-action-title">Download Full Video</div>
-                  <div className="editor-action-desc">Save original to disk</div>
-                </div>
-              </button>
+            </div>
+
+            {/* Prominent Full Video Download */}
+            <div className="full-download-section">
+              <div>
+                <div className="full-download-title">Download Full Video</div>
+                <div className="full-download-desc">Save the original video to your computer</div>
+              </div>
+              <div className="full-download-controls">
+                <select value={downloadResolution} onChange={(e) => setDownloadResolution(e.target.value)}>
+                  {availableFormats.length > 0 ? availableFormats.map(f => (
+                    <option key={f.label} value={f.label}>{f.label === 'best' ? 'Best Quality' : f.label}</option>
+                  )) : (
+                    <><option value="best">Best Quality</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option><option value="360p">360p</option></>
+                  )}
+                </select>
+                <button className="full-download-btn" disabled={loading.mp4} onClick={async () => {
+                  setLoading(l => ({...l, mp4: true}));
+                  try {
+                    const res = await apiDownloadMp4({ videoId, resolution: downloadResolution });
+                    if (res.file) {
+                      window.open(res.file, '_blank');
+                      addDownload(`${videoId}.mp4`, res.file, 'full_video');
+                    }
+                  } catch(e) { alert('Download failed: ' + e.message); }
+                  setLoading(l => ({...l, mp4: false}));
+                }}>
+                  {loading.mp4 ? 'Downloading...' : 'Download MP4'}
+                </button>
+              </div>
             </div>
 
             {/* Timeline Editor */}
@@ -8006,6 +8219,13 @@ export default function App() {
 
                         <div className="trim-handle trim-handle-right" onMouseDown={(e) => startTrim(e, idx, 'end')} />
 
+                        {/* Mobile trim controls */}
+                        <div className="mobile-trim-btns">
+                          <button className="mobile-trim-btn" onClick={(e) => { e.stopPropagation(); setClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, start: Math.max(0, c.start - 1) } : c)); }} title="-1s start">-1s</button>
+                          <button className="mobile-trim-btn" onClick={(e) => { e.stopPropagation(); setClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, end: c.end + 1 } : c)); }} title="+1s end">+1s</button>
+                          <button className="mobile-swipe-delete" onClick={(e) => { e.stopPropagation(); removeClipFromTimeline(idx); }}>Delete</button>
+                        </div>
+
                         <button className="timeline-clip-remove" onClick={(e) => { e.stopPropagation(); removeClipFromTimeline(idx); }} title="Remove clip">x</button>
                       </div>
                     );
@@ -8030,91 +8250,106 @@ export default function App() {
               </div>
             )}
 
-            {/* Compact Options Bar */}
-            <div className="editor-options-bar">
-              <div className="editor-option-inline">
-                <label>Resolution</label>
-                <select value={videoOptions.resolution || '720p'} onChange={(e) => setVideoOptions(v => ({ ...v, resolution: e.target.value }))}>
-                  {availableFormats.length > 0 ? availableFormats.map(f => (
-                    <option key={f.label} value={f.label}>{f.label === 'best' ? 'Best' : f.label}</option>
-                  )) : (
-                    <><option value="best">Best</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option></>
-                  )}
-                </select>
+            {/* Video Settings Panel — always visible, grouped */}
+            <div className="editor-settings-panel">
+              <div className="editor-settings-section">
+                <div className="editor-settings-section-title">Quality</div>
+                <div className="editor-settings-row">
+                  <div className="editor-option-inline">
+                    <label>Resolution</label>
+                    <select value={videoOptions.resolution || '720p'} onChange={(e) => setVideoOptions(v => ({ ...v, resolution: e.target.value }))}>
+                      {availableFormats.length > 0 ? availableFormats.map(f => (
+                        <option key={f.label} value={f.label}>{f.label === 'best' ? 'Best' : f.label}</option>
+                      )) : (
+                        <><option value="best">Best</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option></>
+                      )}
+                    </select>
+                  </div>
+                  <div className="editor-option-inline">
+                    <label>Speed</label>
+                    <select value={videoOptions.playbackSpeed || '1.0'} onChange={(e) => setVideoOptions(v => ({ ...v, playbackSpeed: e.target.value }))}>
+                      <option value="0.75">0.75x</option><option value="1.0">1.0x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option>
+                    </select>
+                  </div>
+                  <div className="editor-option-inline">
+                    <label>Normalize</label>
+                    <button className={`toggle-pill ${videoOptions.normalizeAudio ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, normalizeAudio: !v.normalizeAudio }))}>
+                      {videoOptions.normalizeAudio ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div className="editor-option-inline">
-                <label>Captions</label>
-                <button className={`toggle-pill ${reelCaptionsEnabled ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setReelCaptionsEnabled(!reelCaptionsEnabled)}>
-                  {reelCaptionsEnabled ? 'ON' : 'OFF'}
-                </button>
+              <div className="editor-settings-section">
+                <div className="editor-settings-section-title">Effects</div>
+                <div className="editor-settings-row">
+                  <div className="editor-option-inline">
+                    <label>Captions</label>
+                    <button className={`toggle-pill ${reelCaptionsEnabled ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setReelCaptionsEnabled(!reelCaptionsEnabled)}>
+                      {reelCaptionsEnabled ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                  <div className="editor-option-inline">
+                    <label>Color</label>
+                    <select value={videoOptions.colorFilter} onChange={(e) => setVideoOptions(v => ({ ...v, colorFilter: e.target.value }))}>
+                      <option value="none">None</option><option value="warm">Warm</option><option value="cool">Cool</option><option value="cinematic">Cinematic</option><option value="high_contrast">High Contrast</option>
+                    </select>
+                  </div>
+                  <div className="editor-option-inline">
+                    <label>Transitions</label>
+                    <button className={`toggle-pill ${videoOptions.transitions ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, transitions: !v.transitions }))}>
+                      {videoOptions.transitions ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                  <div className="editor-option-inline">
+                    <label>Music</label>
+                    <button className={`toggle-pill ${videoOptions.backgroundMusic ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, backgroundMusic: !v.backgroundMusic }))}>
+                      {videoOptions.backgroundMusic ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div className="editor-option-inline">
-                <label>Music</label>
-                <button className={`toggle-pill ${videoOptions.backgroundMusic ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, backgroundMusic: !v.backgroundMusic }))}>
-                  {videoOptions.backgroundMusic ? 'ON' : 'OFF'}
-                </button>
+              <div className="editor-settings-section">
+                <div className="editor-settings-section-title">Branding</div>
+                <div className="editor-settings-row">
+                  <div className="editor-option-inline" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                    <label>Intro Title</label>
+                    <input value={videoOptions.introTitle} onChange={(e) => setVideoOptions(v => ({ ...v, introTitle: e.target.value }))} placeholder="e.g. Meeting Highlights" style={{ width: '100%', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }} />
+                  </div>
+                  <div className="editor-option-inline" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                    <label>Intro Subtitle</label>
+                    <input value={videoOptions.introSubtitle} onChange={(e) => setVideoOptions(v => ({ ...v, introSubtitle: e.target.value }))} placeholder="Optional" style={{ width: '100%', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }} />
+                  </div>
+                  <div className="editor-option-inline" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                    <label>Outro Title</label>
+                    <input value={videoOptions.outroTitle} onChange={(e) => setVideoOptions(v => ({ ...v, outroTitle: e.target.value }))} placeholder="e.g. Thanks for Watching" style={{ width: '100%', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }} />
+                  </div>
+                  <div className="editor-option-inline" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                    <label>Outro CTA</label>
+                    <input value={videoOptions.outroCta} onChange={(e) => setVideoOptions(v => ({ ...v, outroCta: e.target.value }))} placeholder="e.g. Subscribe" style={{ width: '100%', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }} />
+                  </div>
+                </div>
+                <div className="editor-settings-row" style={{ marginTop: '8px' }}>
+                  <div className="editor-option-inline">
+                    <label>Labels</label>
+                    <button className={`toggle-pill ${videoOptions.showHighlightLabels !== false ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, showHighlightLabels: !(v.showHighlightLabels !== false) }))}>
+                      {videoOptions.showHighlightLabels !== false ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                  <div className="editor-option-inline">
+                    <label>Watermark</label>
+                    <button className={`toggle-pill ${videoOptions.logoWatermark ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, logoWatermark: !v.logoWatermark }))}>
+                      {videoOptions.logoWatermark ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                  <div className="editor-option-inline">
+                    <label>Speaker Labels</label>
+                    <button className={`toggle-pill ${videoOptions.lowerThirds ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, lowerThirds: !v.lowerThirds }))}>
+                      {videoOptions.lowerThirds ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div className="editor-option-inline">
-                <label>Normalize</label>
-                <button className={`toggle-pill ${videoOptions.normalizeAudio ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, normalizeAudio: !v.normalizeAudio }))}>
-                  {videoOptions.normalizeAudio ? 'ON' : 'OFF'}
-                </button>
-              </div>
-              <div className="editor-option-inline">
-                <label>Transitions</label>
-                <button className={`toggle-pill ${videoOptions.transitions ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, transitions: !v.transitions }))}>
-                  {videoOptions.transitions ? 'ON' : 'OFF'}
-                </button>
-              </div>
-              <div className="editor-option-inline">
-                <label>Color</label>
-                <select value={videoOptions.colorFilter} onChange={(e) => setVideoOptions(v => ({ ...v, colorFilter: e.target.value }))}>
-                  <option value="none">None</option><option value="warm">Warm</option><option value="cool">Cool</option><option value="cinematic">Cinematic</option><option value="high_contrast">High Contrast</option>
-                </select>
-              </div>
-              <button className="btn btn-ghost" style={{ fontSize: '11px', marginLeft: 'auto' }} onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}>
-                {showAdvancedOptions ? 'Less Options' : 'More Options'}
-              </button>
             </div>
-
-            {showAdvancedOptions && (
-              <div className="editor-options-expanded">
-                <div className="editor-option-inline" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
-                  <label>Speed</label>
-                  <select value={videoOptions.playbackSpeed || '1.0'} onChange={(e) => setVideoOptions(v => ({ ...v, playbackSpeed: e.target.value }))} style={{ width: '100%' }}>
-                    <option value="0.75">0.75x</option><option value="1.0">1.0x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option>
-                  </select>
-                </div>
-                <div className="editor-option-inline" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
-                  <label>Intro Title</label>
-                  <input value={videoOptions.introTitle} onChange={(e) => setVideoOptions(v => ({ ...v, introTitle: e.target.value }))} placeholder="e.g. Meeting Highlights" style={{ width: '100%', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }} />
-                </div>
-                <div className="editor-option-inline" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
-                  <label>Intro Subtitle</label>
-                  <input value={videoOptions.introSubtitle} onChange={(e) => setVideoOptions(v => ({ ...v, introSubtitle: e.target.value }))} placeholder="Optional" style={{ width: '100%', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }} />
-                </div>
-                <div className="editor-option-inline" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
-                  <label>Outro Title</label>
-                  <input value={videoOptions.outroTitle} onChange={(e) => setVideoOptions(v => ({ ...v, outroTitle: e.target.value }))} placeholder="e.g. Thanks for Watching" style={{ width: '100%', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }} />
-                </div>
-                <div className="editor-option-inline" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
-                  <label>Outro CTA</label>
-                  <input value={videoOptions.outroCta} onChange={(e) => setVideoOptions(v => ({ ...v, outroCta: e.target.value }))} placeholder="e.g. Subscribe" style={{ width: '100%', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', boxSizing: 'border-box' }} />
-                </div>
-                <div className="editor-option-inline">
-                  <label>Labels</label>
-                  <button className={`toggle-pill ${videoOptions.showHighlightLabels !== false ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, showHighlightLabels: !(v.showHighlightLabels !== false) }))}>
-                    {videoOptions.showHighlightLabels !== false ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-                <div className="editor-option-inline">
-                  <label>Watermark</label>
-                  <button className={`toggle-pill ${videoOptions.logoWatermark ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, logoWatermark: !v.logoWatermark }))}>
-                    {videoOptions.logoWatermark ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-              </div>
-            )}
           </>
         )}
 
@@ -8289,8 +8524,15 @@ export default function App() {
                         data-idx={idx}
                         data-start={s.start}
                         data-end={s.end}
+                        style={{ display: 'inline-flex', alignItems: 'center' }}
                       >
                         {s.text}{" "}
+                        <button className="touch-add-btn" onClick={(e) => {
+                          e.stopPropagation();
+                          const clip = { start: Math.max(0, s.start - videoOptions.clipPadding), end: (s.end || s.start + 15) + videoOptions.clipPadding, label: s.text.slice(0, 60), highlight: s.text.slice(0, 60), text: s.text };
+                          setClipBasket(prev => [...prev, clip]);
+                          addToast('Clip added to timeline');
+                        }} title="Add clip">+</button>
                       </span>
                     );
                   })}
@@ -8312,6 +8554,23 @@ export default function App() {
                   allow="autoplay; encrypted-media; picture-in-picture"
                   allowFullScreen
                 />
+
+                {/* Hero Button - One-Click Highlight Reel (cloud) */}
+                <div className="hero-reel-section" style={{ marginTop: 12 }}>
+                  <button className="hero-reel-btn" onClick={() => buildReel('combined')} disabled={loading.reel || loading.summary}>
+                    {loading.reel ? 'Building Reel...' : 'Make a 2-Minute Highlight Reel'}
+                  </button>
+                  <div className="hero-reel-subtitle">AI selects the best moments with sensible defaults</div>
+                </div>
+
+                {/* Template Presets (cloud) */}
+                <TemplatePresets onSelect={(preset) => {
+                  setVideoOptions(v => ({ ...v, resolution: preset.resolution }));
+                  buildReel(preset.format);
+                }} />
+
+                {/* Share Panel (cloud) */}
+                <SharePanel videoId={videoId} videoTitle={videoTitle} />
               </div>
             )}
 
@@ -9115,6 +9374,31 @@ export default function App() {
       {loading.clips && <LoadingCard title="Processing export..." message={job.message} percent={job.percent} />}
       {loading.reel && <LoadingCard title="Building highlight reel..." message="Creating from AI highlights" />}
       {loading.translate && <LoadingCard title="Translating transcript..." message={`Translating to ${translateLang}`} />}
+
+      {/* Onboarding Wizard */}
+      {showOnboarding && (
+        <OnboardingWizard onClose={() => {
+          setShowOnboarding(false);
+          localStorage.setItem('ch_onboarding_done', 'true');
+        }} />
+      )}
+
+      {/* Mobile floating clip counter */}
+      {clipBasket.length > 0 && (
+        <div className="mobile-clip-counter">
+          <span className="mobile-clip-counter-text">{clipBasket.length} clip{clipBasket.length !== 1 ? 's' : ''} selected</span>
+          <button className="mobile-clip-counter-btn" onClick={() => setShowExportModal(true)}>
+            Export Timeline
+          </button>
+        </div>
+      )}
+
+      {/* Toast notifications */}
+      <div className="toast-container">
+        {toasts.map(t => (
+          <div key={t.id} className="toast">{t.message}</div>
+        ))}
+      </div>
     </>
   );
 }
