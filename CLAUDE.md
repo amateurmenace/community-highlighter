@@ -86,9 +86,25 @@ The interface prioritizes video editing over data visualization:
 - Hardware acceleration (detected but not used — libx264 for reliability)
 - Unbounded cache growth — no automatic cleanup of `backend/cache/`
 - Lower thirds for speaker identification (stub exists at `create_lower_third_filter()`)
-- Template presets (News Style, Social Media, Professional, Documentary)
-- Batch export (render same meeting in multiple formats)
-- Cache management UI
+
+## UX Roadmap
+
+### Phase 1: Quick UX Wins (frontend-only)
+- **Celebration Modal**: Full-screen modal with CSS confetti when render completes, big download button, share options. Replaces tiny inline progress bar link
+- **Visible Settings Panel**: Video settings (resolution, captions, filters, speed, intro/outro) moved above timeline, always visible in labeled card instead of hidden "Advanced Options"
+- **Prominent Full Video Download**: Separated from reel buttons, own section with warm gradient, integrated resolution picker
+- **Download History**: Header badge with recent downloads dropdown, toast notifications ("Saved to Downloads folder")
+
+### Phase 2: Mobile & PWA
+- **PWA**: `vite-plugin-pwa`, manifest, service worker, install prompts, iOS "Add to Home Screen" instructions
+- **Mobile Timeline**: Vertical clip cards (< 768px) with swipe-to-delete, long-press reorder, +/- 1s trim buttons instead of mouse drag handles
+- **Touch Transcript**: 48px "+" buttons on segments, bottom sheet clip counter with "Add to Timeline" floating button
+
+### Phase 3: Guided UX for Non-Professionals
+- **One-Click Hero Button**: "Make a 2-Minute Highlight Reel" with sensible defaults, directly below video player
+- **Onboarding Wizard**: 3-step first-visit overlay (paste URL → analyzing → highlights ready)
+- **Social Sharing**: Web Share API on mobile, Copy/Twitter/Facebook/Email on desktop
+- **Template Presets**: Quick Share (720p/60s/social), Meeting Brief (1080p/5min), News Clip (720p/90s/titled)
 
 ## API Endpoints (69 total, Key Categories)
 
