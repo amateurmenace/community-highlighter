@@ -250,14 +250,18 @@ function parseVTT(vtt) {
 
 function splitSentences(cues) {
   const sents = [];
+  const seen = new Set(); // Deduplicate identical text at same timestamp
   for (const c of cues) {
     const parts = c.text.split(/(?<=[.!?])\s+/g);
     for (const p of parts) {
       if (p && p.length > 2) {
-        // Additional cleaning to remove >> symbols
         const cleanText = cleanHtmlEntities(p).replace(/>>+/g, "").trim();
         if (cleanText) {
-          sents.push({ start: c.start, end: c.end, text: cleanText });
+          const key = `${c.start}|${cleanText.toLowerCase()}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            sents.push({ start: c.start, end: c.end, text: cleanText });
+          }
         }
       }
     }
@@ -8284,24 +8288,67 @@ export default function App() {
               </div>
             </div>
 
-            {/* Search Results (below video+wordcloud, full width) */}
+            {/* Search Results + Expandable Transcript Context */}
             <div style={{ marginTop: 8 }}>
-              {/* Search Results (collapsible) */}
-              {matches.length > 0 && (
-                <div style={{ marginTop: '10px', maxHeight: '200px', overflowY: 'auto', borderTop: '1px solid #e2e8f0', paddingTop: '8px' }}>
-                  <div style={{ fontSize: '11px', fontWeight: 600, color: '#166534', marginBottom: '6px' }}>{matches.length} match{matches.length !== 1 ? 'es' : ''} for "{query}"</div>
-                  {matches.slice(0, 15).map((m, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', borderRadius: '6px', marginBottom: '4px', cursor: 'pointer', fontSize: '12px', background: '#f8fafc', border: '1px solid #f1f5f9', transition: 'all 0.15s' }}
-                      onClick={() => { if (playerRef.current) playerRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(m.start)}&autoplay=1&enablejsapi=1`; }}
-                      onMouseEnter={(e) => e.currentTarget.style.borderColor = '#22c55e'}
-                      onMouseLeave={(e) => e.currentTarget.style.borderColor = '#f1f5f9'}
-                    >
-                      <span style={{ color: '#1E7F63', fontWeight: 700, fontSize: '10px', fontFamily: 'monospace', minWidth: '42px' }}>{formatTime(m.start)}</span>
-                      <span style={{ flex: 1, color: '#334155' }}>{m.text}</span>
-                      <button onClick={(e) => { e.stopPropagation(); const clip = { start: Math.max(0, m.start - (videoOptions.clipPadding || 4)), end: m.start + (m.duration || 10) + (videoOptions.clipPadding || 4), label: m.text.slice(0, 60), highlight: m.text, text: m.text }; updateClipBasket(prev => [...prev, clip]); addToast('✂️ Clip added to timeline!'); setTimeout(() => { const track = document.querySelector('.timeline-track'); if (track) { track.classList.add('timeline-flash'); setTimeout(() => track.classList.remove('timeline-flash'), 1500); } }, 100); }} style={{ background: '#22c55e', color: 'white', border: 'none', borderRadius: '50%', width: '22px', height: '22px', cursor: 'pointer', fontSize: '14px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Add to timeline">+</button>
+              {/* Expanded Transcript Context — like cloud mode, replaces search results */}
+              {expanded.open ? (
+                <div className="card" style={{ padding: 0, overflow: 'hidden', animation: 'slideDown 0.2s ease' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', background: '#f0fdf4', borderBottom: '1px solid #d1fae5' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '14px' }}>📝</span>
+                      <span style={{ fontWeight: 700, fontSize: '13px', color: '#166534' }}>Transcript Context</span>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>💡 Highlight text to create clips, or click + on any sentence</span>
                     </div>
-                  ))}
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button className="btn btn-primary" style={{ fontSize: '11px', padding: '4px 12px' }} onClick={createClipFromSelection}>✂️ Save Selection</button>
+                      <button className="btn btn-ghost" style={{ fontSize: '11px', padding: '4px 12px' }} onClick={() => setExpanded({ open: false, focusIdx: null })}>← Back</button>
+                    </div>
+                  </div>
+                  <div className="desktop-transcript-panel" ref={desktopTranscriptRef} onMouseUp={handleDesktopTranscriptMouseUp} style={{ maxHeight: '300px' }}>
+                    {sents.map((s, idx) => {
+                      const isFocus = idx === expanded.focusIdx;
+                      return (
+                        <span key={idx} id={`sent-${idx}`} className={`sent ${isFocus ? 'hit' : ''}`} data-idx={idx} data-start={s.start} data-end={s.end}
+                          style={isFocus ? { background: 'rgba(34,197,94,0.2)', borderRadius: '4px', padding: '2px 4px' } : undefined}
+                        >
+                          {s.text}{' '}
+                          <button className="sent-add-btn" onClick={(e) => {
+                            e.stopPropagation();
+                            const clip = { start: Math.max(0, s.start - (videoOptions.clipPadding || 4)), end: (s.end || s.start + 15) + (videoOptions.clipPadding || 4), label: s.text.slice(0, 60), highlight: s.text.slice(0, 60), text: s.text };
+                            updateClipBasket(prev => [...prev, clip]);
+                            addToast('✂️ Clip added to timeline!');
+                            setTimeout(() => { const track = document.querySelector('.timeline-track'); if (track) { track.classList.add('timeline-flash'); setTimeout(() => track.classList.remove('timeline-flash'), 1500); } }, 100);
+                          }} title="Add this sentence as a clip">+</button>
+                        </span>
+                      );
+                    })}
+                  </div>
                 </div>
+              ) : (
+                <>
+                  {/* Search Results — compact cards with Expand Context button */}
+                  {matches.length > 0 && (
+                    <div style={{ marginTop: '10px', maxHeight: '250px', overflowY: 'auto', borderTop: '1px solid #e2e8f0', paddingTop: '8px' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: '#166534', marginBottom: '6px' }}>{matches.length} match{matches.length !== 1 ? 'es' : ''} for "{query}"</div>
+                      {matches.slice(0, 15).map((m, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', borderRadius: '8px', marginBottom: '4px', cursor: 'pointer', fontSize: '12px', background: '#f8fafc', border: '1px solid #f1f5f9', transition: 'all 0.15s' }}
+                          onClick={() => { if (playerRef.current) playerRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(m.start)}&autoplay=1&enablejsapi=1`; }}
+                          onMouseEnter={(e) => e.currentTarget.style.borderColor = '#22c55e'}
+                          onMouseLeave={(e) => e.currentTarget.style.borderColor = '#f1f5f9'}
+                        >
+                          <span style={{ color: '#1E7F63', fontWeight: 700, fontSize: '10px', fontFamily: 'monospace', minWidth: '42px' }}>{formatTime(m.start)}</span>
+                          <span style={{ flex: 1, color: '#334155' }}>{m.text}</span>
+                          <button onClick={(e) => {
+                            e.stopPropagation();
+                            setExpanded({ open: true, focusIdx: m.idx || i });
+                            setTimeout(() => { const el = document.getElementById(`sent-${m.idx || i}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100);
+                          }} style={{ background: 'none', border: '1px solid #e2e8f0', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', fontSize: '10px', color: '#64748b', flexShrink: 0 }} title="Expand transcript context">📖</button>
+                          <button onClick={(e) => { e.stopPropagation(); const clip = { start: Math.max(0, m.start - (videoOptions.clipPadding || 4)), end: m.start + (m.duration || 10) + (videoOptions.clipPadding || 4), label: m.text.slice(0, 60), highlight: m.text, text: m.text }; updateClipBasket(prev => [...prev, clip]); addToast('✂️ Clip added to timeline!'); setTimeout(() => { const track = document.querySelector('.timeline-track'); if (track) { track.classList.add('timeline-flash'); setTimeout(() => track.classList.remove('timeline-flash'), 1500); } }, 100); }} style={{ background: '#22c55e', color: 'white', border: 'none', borderRadius: '50%', width: '22px', height: '22px', cursor: 'pointer', fontSize: '14px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Add to timeline">+</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
               {/* Translation result */}
               {translation.show && (
@@ -8314,40 +8361,6 @@ export default function App() {
                 </div>
               )}
             </div>
-
-            {/* 📝 Full Transcript Panel — Highlight text to create clips */}
-            {sents.length > 0 && (
-              <div className="card" style={{ marginTop: 12, padding: 0, overflow: 'hidden' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', background: '#f0fdf4', borderBottom: showTranscriptPanel ? '1px solid #d1fae5' : 'none', cursor: 'pointer' }}
-                  onClick={() => setShowTranscriptPanel(!showTranscriptPanel)}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '16px' }}>📝</span>
-                    <span style={{ fontWeight: 700, fontSize: '13px', color: '#166534' }}>Full Transcript</span>
-                    <span style={{ fontSize: '11px', color: '#64748b' }}>
-                      {showTranscriptPanel ? '💡 Highlight text to create clips, or click + on any sentence' : `${sents.length} segments`}
-                    </span>
-                  </div>
-                  <span style={{ fontSize: '12px', color: '#64748b', transition: 'transform 0.2s', transform: showTranscriptPanel ? 'rotate(180deg)' : 'rotate(0)' }}>▼</span>
-                </div>
-                {showTranscriptPanel && (
-                  <div className="desktop-transcript-panel" ref={desktopTranscriptRef} onMouseUp={handleDesktopTranscriptMouseUp}>
-                    {sents.map((s, idx) => (
-                      <span key={idx} className="sent" data-idx={idx} data-start={s.start} data-end={s.end}>
-                        {s.text}{' '}
-                        <button className="sent-add-btn" onClick={(e) => {
-                          e.stopPropagation();
-                          const clip = { start: Math.max(0, s.start - (videoOptions.clipPadding || 4)), end: (s.end || s.start + 15) + (videoOptions.clipPadding || 4), label: s.text.slice(0, 60), highlight: s.text.slice(0, 60), text: s.text };
-                          updateClipBasket(prev => [...prev, clip]);
-                          addToast('✂️ Clip added to timeline!');
-                          setTimeout(() => { const track = document.querySelector('.timeline-track'); if (track) { track.classList.add('timeline-flash'); setTimeout(() => track.classList.remove('timeline-flash'), 1500); } }, 100);
-                        }} title="Add this sentence as a clip">+</button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Floating "Create Clip" button — appears on text selection */}
             {floatingClipBtn && (
