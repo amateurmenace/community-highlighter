@@ -5452,6 +5452,95 @@ header.scrolled {
   color: white;
 }
 
+/* Selected clip highlight */
+.timeline-clip.timeline-clip-selected {
+  border-color: #1E7F63 !important;
+  box-shadow: 0 0 0 2px rgba(30,127,99,0.3), 0 2px 8px rgba(30,127,99,0.15);
+}
+
+/* Previewing clip pulse */
+.timeline-clip.timeline-clip-previewing {
+  border-color: #22c55e !important;
+  box-shadow: 0 0 0 2px rgba(34,197,94,0.4), 0 0 12px rgba(34,197,94,0.2);
+  animation: clip-preview-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes clip-preview-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(34,197,94,0.4), 0 0 12px rgba(34,197,94,0.2); }
+  50% { box-shadow: 0 0 0 3px rgba(34,197,94,0.6), 0 0 20px rgba(34,197,94,0.3); }
+}
+
+/* Preview button on timeline clips */
+.timeline-clip-preview {
+  position: absolute;
+  bottom: 4px;
+  right: 24px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(30,127,99,0.85);
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: 10px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  transition: all 0.15s;
+}
+
+.timeline-clip:hover .timeline-clip-preview {
+  display: flex;
+}
+
+.timeline-clip-preview:hover {
+  background: #1E7F63;
+  transform: scale(1.15);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Per-clip inline controls */
+.clip-inline-controls {
+  position: absolute;
+  bottom: -28px;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 0 0 6px 6px;
+  z-index: 10;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.clip-inline-controls select {
+  border: 1px solid #e2e8f0;
+  border-radius: 3px;
+  background: #f8fafc;
+  cursor: pointer;
+}
+
+/* Keyboard shortcut hint */
+.timeline-shortcuts-hint {
+  font-size: 10px;
+  color: #94a3b8;
+  padding: 4px 8px;
+  text-align: center;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .trim-handle {
   position: absolute;
   top: 0;

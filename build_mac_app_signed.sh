@@ -15,7 +15,7 @@ echo "=============================================="
 DEVELOPER_ID="Developer ID Application: Stephen Walter (6M536MV7GT)"  # UPDATE THIS
 NOTARIZE_PROFILE="community-highlighter-notarize"
 APP_NAME="Community Highlighter"
-VERSION="7.0.0"
+VERSION="7.2.0"
 DMG_NAME="CommunityHighlighter-${VERSION}-macOS"
 BUNDLE_ID="com.communityhighlighter.app"
 
@@ -153,7 +153,8 @@ find "dist/${APP_NAME}.app" -path "*/backend/.venv" -type d -exec rm -rf {} + 2>
 find "dist/${APP_NAME}.app" -path "*/__dot__app" -type d -exec rm -rf {} + 2>/dev/null || true
 
 echo "   Signing nested .dylib files..."
-find "dist/${APP_NAME}.app" -type f -name "*.dylib" | while read -r f; do
+find "dist/${APP_NAME}.app" -type f -not -type l -name "*.dylib" | sort -u | while read -r f; do
+    [ -f "$f" ] || continue
     codesign --force --timestamp --options runtime \
         --sign "${DEVELOPER_ID}" \
         --entitlements "${ENTITLEMENTS_FILE}" \
@@ -161,7 +162,8 @@ find "dist/${APP_NAME}.app" -type f -name "*.dylib" | while read -r f; do
 done
 
 echo "   Signing nested .so files..."
-find "dist/${APP_NAME}.app" -type f -name "*.so" | while read -r f; do
+find "dist/${APP_NAME}.app" -type f -not -type l -name "*.so" | sort -u | while read -r f; do
+    [ -f "$f" ] || continue
     codesign --force --timestamp --options runtime \
         --sign "${DEVELOPER_ID}" \
         --entitlements "${ENTITLEMENTS_FILE}" \

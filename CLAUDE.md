@@ -4,8 +4,8 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 
 ## Architecture
 
-- **Frontend**: React 19 + Vite + vite-plugin-pwa, built to `dist/`. Monolithic `src/App.jsx` (~9200 lines) with 25+ inline sub-components
-- **Backend**: FastAPI (`backend/app.py`, ~300KB monolith), served by Uvicorn on port 8000. 70 API endpoints
+- **Frontend**: React 19 + Vite + vite-plugin-pwa, built to `dist/`. Monolithic `src/App.jsx` (~9400 lines) with 25+ inline sub-components
+- **Backend**: FastAPI (`backend/app.py`, ~304KB monolith), served by Uvicorn on port 8000. 69 API endpoints
 - **Desktop packaging**: PyInstaller bundles into macOS `.app` (signed+notarized) and Windows `.exe`
 - **Cloud deployment**: Render (https://community-highlighter.onrender.com/) — video download disabled in cloud mode
 - **GitHub**: https://github.com/amateurmenace/community-highlighter
@@ -40,9 +40,8 @@ The interface prioritizes video editing over data visualization:
 1. **Video Player** — top of page, embedded YouTube iframe
 2. **Hero Button** — "Make a 2-Minute Highlight Reel" directly below video player, one-click with sensible defaults
 3. **Template Presets** — Quick Share (720p/60s/social), Meeting Brief (1080p/5min), News Clip (720p/90s/titled)
-4. **Quick Action Buttons** — prominent row: "AI Highlight Reel", "Social Media Reel", "Export Clips"
-5. **Full Video Download** — separate amber gradient section with integrated resolution picker
-6. **Timeline Editor** — professional NLE-style timeline with:
+4. **Quick Action Buttons** — compact row: "AI Highlight Reel", "Social Media Reel", "Export Clips", "Download Full Video" (MP4 button with integrated resolution picker)
+5. **Timeline Editor** — professional NLE-style timeline with:
    - Drag-to-reorder clips on a horizontal track (desktop)
    - Vertical clip cards with -1s/+1s trim buttons (mobile < 768px)
    - Per-clip trim handles (adjust start/end)
@@ -51,12 +50,21 @@ The interface prioritizes video editing over data visualization:
    - Playback head / scrubber
    - Zoom in/out on timeline
    - Light theme (white/gray background, not dark)
-7. **Settings Panel** — always visible, grouped into Quality/Effects/Branding sections (no hidden toggle)
-8. **Clip Basket** — clips added from search results, transcript selections, or AI highlights
-9. **Transcript Panel** — searchable, clickable timestamps, touch "+" buttons on mobile
-10. **Analytics/Data Viz** — pushed below the fold (entities, decisions, topics, participation)
-11. **Share Panel** — Web Share API on mobile, Copy/Twitter/Facebook/Email on desktop
-12. **Download History** — header badge with recent downloads dropdown, toast notifications
+   - In-timeline action buttons: Export, AI Reel, Social Reel, Clear
+6. **Settings Panel** — compact horizontal layout with "More/Less Options" toggle:
+   - **Always visible**: Resolution, Captions, Music, Normalize, Transitions, Color
+   - **Expanded**: Speed, Intro/Outro Title/Subtitle/CTA, Labels, Watermark
+7. **Clip Basket** — clips added from search results, transcript selections, or AI highlights
+8. **Transcript Panel** — searchable, clickable timestamps, touch "+" buttons on mobile
+9. **Meeting Analytics** — pushed below the fold (entities, decisions, topics, participation)
+10. **Share Panel** — Web Share API on mobile, Copy/Twitter/Facebook/Email on desktop
+11. **Download History** — header badge with recent downloads dropdown, toast notifications
+
+## Onboarding & First-Visit Experience
+
+- **Onboarding Wizard**: 3-step first-visit overlay introducing key features
+- Tracked via localStorage (`ch_onboarding_done`) — only shows once
+- Steps: (1) Paste a YouTube URL, (2) AI generates highlights, (3) Build and export reels
 
 ## Video Processing Pipeline
 
@@ -98,8 +106,17 @@ The interface prioritizes video editing over data visualization:
 
 ### Remaining Opportunities
 - Hardware acceleration (detected but not used — libx264 for reliability)
+- Shrink PyInstaller bundle by excluding unused ML deps (torch/scipy/sklearn)
+- Exponential backoff for job polling (currently fixed 1.5s interval)
 
-## API Endpoints (70 total, Key Categories)
+## Civic Meeting Finder
+
+- **YouTube Search**: Multi-query strategy searches 5 civic-focused queries in parallel via YouTube Data API
+- **yt-dlp Fallback**: When no YouTube API key is configured, falls back to yt-dlp search (no API key required)
+- **Civic Scoring**: Results scored by civic keyword density + channel/title matching for the queried municipality
+- **Tiered Sorting**: High civic relevance (3+ keywords) → medium (1-2) → low (0), then by date within tiers
+
+## API Endpoints (69 total, Key Categories)
 
 ### Video/Clips
 - `POST /api/download_mp4` — Download full YouTube video
@@ -111,6 +128,11 @@ The interface prioritizes video editing over data visualization:
 - `GET /api/job_status` — Poll render job progress
 - `GET /api/video_capabilities` — Available editing features
 - `POST /api/cache/cleanup` — Manual cache cleanup
+
+### YouTube Search & Status
+- `GET /api/youtube-search` — Civic meeting search (YouTube API with yt-dlp fallback)
+- `GET /api/youtube-status` — Check if YouTube API key is configured
+- `GET /api/youtube-playlist` — Get videos from a YouTube playlist
 
 ### AI Analysis
 - `POST /api/summary_ai` — Map-reduce summary (concise/detailed/highlights_with_quotes)
@@ -170,11 +192,11 @@ npm run build                        # Build React to dist/
 build_windows.bat
 
 # Option 2: Build via GitHub Actions (from any machine)
-gh workflow run build-windows.yml -f version=v7.1.0
+gh workflow run build-windows.yml -f version=v7.2.0
 ```
 
 ### Build Scripts
-- `build_mac_app_signed.sh` — Signed + notarized macOS build (`.app` + `.dmg`)
+- `build_mac_app_signed.sh` — Signed + notarized macOS build (`.app` + `.dmg`), v7.2.0
 - `build_windows.bat` — Windows build (`.exe` in portable ZIP)
 - `CommunityHighlighter.spec` — PyInstaller spec for macOS
 - `CommunityHighlighter-Windows.spec` — PyInstaller spec for Windows
@@ -185,6 +207,7 @@ gh workflow run build-windows.yml -f version=v7.1.0
 - Both specs **exclude** `backend/venv/`, `.venv/`, `dist/`, `build/`, `cache/` to avoid bundling virtualenvs and old build artifacts
 - macOS build script removes nested `__dot__app` bundles before signing
 - All nested binaries (`.dylib`, `.so`) are signed with `--timestamp --options runtime` for notarization
+- Signing uses `sort -u` deduplication and `-not -type l` symlink exclusion to prevent "No such file" errors
 - The `favicon.ico` is auto-generated from `logo.png` via Pillow
 
 ### Code Signing Setup (one-time, macOS only)
@@ -202,7 +225,7 @@ gh workflow run build-windows.yml -f version=v7.1.0
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `OPENAI_API_KEY` | Yes | OpenAI API key for analysis |
-| `YOUTUBE_API_KEY` | No | Improves transcript fetching (optional, app works without it) |
+| `YOUTUBE_API_KEY` | No | Improves transcript fetching and civic meeting search (optional — falls back to yt-dlp without it) |
 | `CLOUD_MODE` | Auto | `true` on Render, `false` for desktop |
 | `DESKTOP_MODE` | Auto | Set by app_launcher.py |
 | `FFMPEG_PATH` | Auto | Auto-detected from Homebrew (macOS) or PATH (Windows) |
@@ -225,11 +248,12 @@ gh workflow run build-windows.yml -f version=v7.1.0
 - `argv_emulation` in PyInstaller spec MUST be `False` — `True` causes infinite app relaunch on macOS
 - All nested binaries (.dylib, .so) must be signed with entitlements AND `--timestamp` for notarization
 - PyInstaller specs must EXCLUDE `backend/venv/`, `.venv/`, `dist/`, `build/`, `cache/` — bundling these causes notarization failure (unsigned nested binaries) and massive app size
-- `backend/app.py` is a ~300KB monolith — changes require care
-- `src/App.jsx` is ~9200 lines — also monolithic, 25+ inline components
+- macOS code signing: `find` for `.so`/`.dylib` must use `sort -u` and `[ -f "$f" ]` guards to avoid duplicate/symlink errors
+- `backend/app.py` is a ~304KB monolith — changes require care
+- `src/App.jsx` is ~9400 lines — also monolithic, 25+ inline components
 - PyInstaller bundles torch/scipy/sklearn (huge) — could exclude unused ML deps to shrink app further
 - yt-dlp download timeout (10 min) can fail on long videos
-- YouTube API key is optional — transcript fetching falls back to YouTubeTranscriptApi → yt-dlp without it
+- YouTube API key is optional — transcript fetching and civic meeting search fall back to yt-dlp without it
 - Windows builds use `msvcrt` for instance locking (macOS uses `fcntl`)
 
 ## Version

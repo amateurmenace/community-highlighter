@@ -536,7 +536,7 @@ Respond in this JSON format:
     return result
 
 
-def synthesize_full_meeting(all_key_points, model="gpt-5.1", strategy="concise"):
+def synthesize_full_meeting(all_key_points, model="gpt-5.1", strategy="concise", reel_style=None):
     """Synthesize all extracted key points into final summary"""
     if not OPENAI_API_KEY or not all_key_points:
         return None
@@ -565,16 +565,29 @@ def synthesize_full_meeting(all_key_points, model="gpt-5.1", strategy="concise")
     combined_quotes = list(dict.fromkeys(combined_quotes))
 
     if strategy == "highlights_with_quotes":
-        system_prompt = """You are an expert at creating compelling, newsworthy highlights from civic meetings.
-Your goal is to identify the most IMPACTFUL moments that citizens would want to see.
+        # Check for reel style override from optimized_prompts
+        from backend.optimized_prompts import get_reel_style_prompt_override
+        reel_style_emphasis = get_reel_style_prompt_override(reel_style) if reel_style else None
 
+        base_instructions = """You are an expert at creating compelling, newsworthy highlights from civic meetings.
+Your goal is to identify the most IMPACTFUL moments that citizens would want to see."""
+
+        if reel_style_emphasis:
+            priority_section = f"""
+STYLE FOCUS:
+{reel_style_emphasis}"""
+        else:
+            priority_section = """
 PRIORITIZE these types of moments (in order):
 1. VOTES & DECISIONS - Any official votes, approvals, denials, or formal decisions
 2. BUDGET & MONEY - Specific dollar amounts, funding allocations, tax implications
 3. EMOTIONAL MOMENTS - Passionate speeches, disagreements, standing ovations, frustration
 4. PUBLIC COMMENTS - Resident testimonials, community concerns, personal stories
 5. KEY ANNOUNCEMENTS - New projects, policy changes, timeline updates
-6. CONTROVERSIES - Debates, split opinions, contentious issues
+6. CONTROVERSIES - Debates, split opinions, contentious issues"""
+
+        system_prompt = f"""{base_instructions}
+{priority_section}
 
 CRITICAL REQUIREMENTS:
 - You MUST return EXACTLY 10 highlights - no more, no less
@@ -1545,6 +1558,7 @@ async def summary_ai(req: Request):
     language = data.get("language", "en")
     model = data.get("model", "gpt-4o")
     strategy = data.get("strategy", "concise")
+    reel_style = data.get("reelStyle", None)  # Optional: key_decisions, public_comments, controversial, budget, action_items
     force_refresh = data.get("forceRefresh", False)  # New: bypass cache and get fresh results
 
     # Validate and normalize model name - ensure we use a valid OpenAI model
@@ -1585,7 +1599,7 @@ async def summary_ai(req: Request):
             }
 
         print(f"[summary_ai] Synthesizing final {strategy}...")
-        ai_result = synthesize_full_meeting(all_key_points, model, strategy)
+        ai_result = synthesize_full_meeting(all_key_points, model, strategy, reel_style=reel_style)
 
         if ai_result:
             if strategy == "highlights_with_quotes":
@@ -3081,7 +3095,7 @@ def create_crossfade_command(clip1_path, clip2_path, output_path, duration=0.5, 
         "-i", clip1_path,
         "-i", clip2_path,
         "-filter_complex",
-        f"[0:v][1:v]xfade=transition=fade:duration={duration}:offset=0[v];"
+        f"[0:v][1:v]xfade=transition={{transition_type or 'fade'}}:duration={duration}:offset=0[v];"
         f"[0:a][1:a]acrossfade=d={duration}[a]",
         "-map", "[v]", "-map", "[a]",
         "-c:v", hw_encoder, "-preset", "fast",
@@ -3089,6 +3103,21 @@ def create_crossfade_command(clip1_path, clip2_path, output_path, duration=0.5, 
         output_path, "-y"
     ]
     return cmd
+
+
+# Supported transition types for xfade
+TRANSITION_TYPES = {
+    'fade': 'fade',
+    'dissolve': 'dissolve',
+    'wiperight': 'wiperight',
+    'wipeleft': 'wipeleft',
+    'slideright': 'slideright',
+    'slideleft': 'slideleft',
+    'circlecrop': 'circlecrop',
+    'pixelize': 'pixelize',
+    'smoothleft': 'smoothleft',
+    'smoothright': 'smoothright',
+}
 
 
 def create_color_filter(filter_type):
@@ -4135,50 +4164,12 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
             total_clip_duration = sum(c.get("end", 0) - c.get("start", 0) for c in clips)
             print(f"[simple_job] Total clip duration needed: {total_clip_duration}s")
             
-            # Strategy: For very long videos (>30 min), download segments individually
-            # This is much faster than downloading a 2-hour video
-            if video_duration > 1800:  # > 30 minutes
-                print(f"[simple_job] Long video ({video_duration/60:.0f} min) - using segment download strategy")
-                use_segment_download = True
-                job["message"] = "Long video detected - downloading only needed clips..."
-                
-            else:  # Short video (<30 min) - download normally
-                job["message"] = "Downloading video..."
-                job["percent"] = 5
-                
-                cmd = [
-                    YTDLP_BIN,
-                    "-f", get_ytdlp_format(resolution),
-                    "--merge-output-format", "mp4",
-                    "--no-playlist",
-                    "-o", video_file,
-                    f"https://www.youtube.com/watch?v={vid}",
-                ]
-                print(f"[simple_job] Downloading: {' '.join(cmd)}")
-                
-                timeout_seconds = max(600, int(video_duration * 0.5)) if video_duration > 0 else 900
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
-                
-                if result.returncode != 0:
-                    print(f"[simple_job] yt-dlp error: {result.stderr}")
-                    raise Exception(f"Failed to download video: {result.stderr[:200]}")
-                
-                # Handle yt-dlp potentially saving with different extension
-                actual_file = find_ytdlp_output(video_file)
-                if actual_file:
-                    video_file = actual_file
-                    print(f"[simple_job] Actual downloaded file: {video_file}")
-                
-                # Get video dimensions after download
-                if os.path.exists(video_file):
-                    video_info = get_video_info(video_file)
-                    video_width = video_info['width']
-                    video_height = video_info['height']
-                    video_fps = video_info['fps']
-                    print(f"[simple_job] Video info: {video_width}x{video_height} @ {video_fps}fps")
-
-            if not use_segment_download and not os.path.exists(video_file):
-                raise Exception(f"Video file not found after download. Expected: {video_file}")
+            # Strategy: Always use segment downloads for clip rendering
+            # Much faster than downloading full videos — only grabs what's needed
+            # Merge overlapping segments (clips within 30s of each other) for efficiency
+            use_segment_download = True
+            job["message"] = "Preparing to download needed clips..."
+            print(f"[simple_job] Using segment download strategy ({len(clips)} clips, {total_clip_duration:.0f}s needed from {video_duration/60:.1f} min video)")
         
         # Prepare color filter if specified
         color_filter_str = create_color_filter(color_filter) if color_filter and color_filter != 'none' else None
@@ -4186,7 +4177,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
             print(f"[simple_job] Applying color filter: {color_filter}")
         
         # Helper function to download a single segment
-        def download_segment(vid, start, end, output_path, padding=5):
+        def download_segment(vid, start, end, output_path, padding=2):
             """Download only the needed segment using yt-dlp --download-sections"""
             # Add padding before/after for smoother transitions
             section_start = max(0, start - padding)
@@ -4296,9 +4287,11 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                                     vf_filters.append(subtitle_filter)
                                     print(f"[individual] Adding {len(clip_transcript)} subtitle segments")
                     
-                    # Add color filter if specified
-                    if color_filter_str:
-                        vf_filters.append(color_filter_str)
+                    # Add color filter — per-clip override or global
+                    clip_color = clip.get("colorFilter") or color_filter
+                    clip_color_str = create_color_filter(clip_color) if clip_color and clip_color != 'none' else color_filter_str
+                    if clip_color_str:
+                        vf_filters.append(clip_color_str)
 
                     # Add lower third speaker label
                     if do_lower_thirds and clip.get("speaker"):
@@ -4315,6 +4308,12 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     seek_time = max(0, start - 1)
                     trim_start = start - seek_time
 
+                    # Per-clip volume control
+                    clip_volume = clip.get("volume", 1.0)
+                    af_args = []
+                    if clip_volume != 1.0:
+                        af_args.append(f"volume={clip_volume}")
+
                     if vf_filters:
                         cmd = [
                             "ffmpeg",
@@ -4324,8 +4323,6 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             "-t", str(duration),
                             "-vf", ",".join(vf_filters),
                             "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-                            "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
-                            clip_file, "-y"
                         ]
                     else:
                         cmd = [
@@ -4335,9 +4332,10 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             "-ss", str(trim_start),
                             "-t", str(duration),
                             "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-                            "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
-                            clip_file, "-y"
                         ]
+                    if af_args:
+                        cmd.extend(["-af", ",".join(af_args)])
+                    cmd.extend(["-c:a", "aac", "-b:a", "192k", "-ar", "44100", clip_file, "-y"])
                     subprocess.run(cmd, capture_output=True)
 
                     if os.path.exists(clip_file):

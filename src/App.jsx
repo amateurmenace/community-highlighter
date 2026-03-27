@@ -6426,6 +6426,7 @@ export default function App() {
     clipPadding: 4,
     backgroundMusic: false,
     transitions: false,
+    transitionType: 'none',
     transitionDuration: 0.5,
     colorFilter: 'none',
     playbackSpeed: '1.0',
@@ -6508,10 +6509,41 @@ export default function App() {
   const [showCelebration, setShowCelebration] = useState(null); // {file: url} when render completes
   const [videoTitle, setVideoTitle] = useState("");
 
+  const [previewingClip, setPreviewingClip] = useState(null); // {idx, clip} when previewing
+  const [selectedClipIndex, setSelectedClipIndex] = useState(null);
+
   const debQuery = useDebounce(query, 220);
   const playerRef = useRef(null);
   const transcriptRef = useRef(null);
   const pollIntervalRef = useRef(null);
+  const previewTimerRef = useRef(null);
+
+  // Undo/redo stacks for clip basket
+  const undoStackRef = useRef([]);
+  const redoStackRef = useRef([]);
+  const updateClipBasket = (newValueOrFn) => {
+    setClipBasket(prev => {
+      const newValue = typeof newValueOrFn === 'function' ? newValueOrFn(prev) : newValueOrFn;
+      undoStackRef.current.push(JSON.parse(JSON.stringify(prev)));
+      if (undoStackRef.current.length > 50) undoStackRef.current.shift();
+      redoStackRef.current = [];
+      return newValue;
+    });
+  };
+  const undoClipBasket = () => {
+    if (undoStackRef.current.length === 0) return;
+    setClipBasket(prev => {
+      redoStackRef.current.push(JSON.parse(JSON.stringify(prev)));
+      return undoStackRef.current.pop();
+    });
+  };
+  const redoClipBasket = () => {
+    if (redoStackRef.current.length === 0) return;
+    setClipBasket(prev => {
+      undoStackRef.current.push(JSON.parse(JSON.stringify(prev)));
+      return redoStackRef.current.pop();
+    });
+  };
 
   const t = translations[lang] || translations.en;
 
@@ -6541,6 +6573,76 @@ export default function App() {
 
     return "";
   };
+  // ⌨️ Keyboard shortcuts for video editing
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Don't capture when typing in input/textarea
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+      if (!videoId || clipBasket.length === 0) return;
+
+      const isMac = navigator.platform.toUpperCase().includes('MAC');
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+
+      // Ctrl+Z / Cmd+Z = Undo
+      if (mod && !e.shiftKey && e.key === 'z') { e.preventDefault(); undoClipBasket(); return; }
+      // Ctrl+Shift+Z / Cmd+Shift+Z = Redo
+      if (mod && e.shiftKey && e.key === 'z') { e.preventDefault(); redoClipBasket(); return; }
+      if (mod && e.key === 'y') { e.preventDefault(); redoClipBasket(); return; }
+
+      // Delete/Backspace = remove selected clip
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedClipIndex !== null) {
+        e.preventDefault(); removeClipFromTimeline(selectedClipIndex); return;
+      }
+
+      // Arrow keys = nudge selected clip ±1s
+      if (e.key === 'ArrowLeft' && selectedClipIndex !== null) {
+        e.preventDefault();
+        updateClipBasket(prev => prev.map((c, i) => i === selectedClipIndex ? { ...c, start: Math.max(0, c.start - 1), end: c.end - 1 } : c));
+        return;
+      }
+      if (e.key === 'ArrowRight' && selectedClipIndex !== null) {
+        e.preventDefault();
+        updateClipBasket(prev => prev.map((c, i) => i === selectedClipIndex ? { ...c, start: c.start + 1, end: c.end + 1 } : c));
+        return;
+      }
+
+      // S = split clip at midpoint (of selected clip)
+      if (e.key === 's' && !mod && selectedClipIndex !== null) {
+        e.preventDefault();
+        const clip = clipBasket[selectedClipIndex];
+        if (!clip) return;
+        const mid = (clip.start + clip.end) / 2;
+        const firstHalf = { ...clip, end: mid, label: (clip.label || `Clip`) + ' (A)' };
+        const secondHalf = { ...clip, start: mid, label: (clip.label || `Clip`) + ' (B)' };
+        updateClipBasket(prev => [...prev.slice(0, selectedClipIndex), firstHalf, secondHalf, ...prev.slice(selectedClipIndex + 1)]);
+        return;
+      }
+
+      // Space = preview selected clip
+      if (e.key === ' ' && selectedClipIndex !== null) {
+        e.preventDefault();
+        const clip = clipBasket[selectedClipIndex];
+        if (clip) previewClip(clip, selectedClipIndex);
+        return;
+      }
+
+      // I = set in-point (trim start to +2s)
+      if (e.key === 'i' && selectedClipIndex !== null) {
+        e.preventDefault();
+        updateClipBasket(prev => prev.map((c, i) => i === selectedClipIndex ? { ...c, start: Math.min(c.start + 2, c.end - 1) } : c));
+        return;
+      }
+      // O = set out-point (trim end to -2s)
+      if (e.key === 'o' && selectedClipIndex !== null) {
+        e.preventDefault();
+        updateClipBasket(prev => prev.map((c, i) => i === selectedClipIndex ? { ...c, end: Math.max(c.end - 2, c.start + 1) } : c));
+        return;
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [videoId, clipBasket, selectedClipIndex]);
+
   // ⚙️ NEW: Load optimization stats on mount
   useEffect(() => {
     const loadStats = async () => {
@@ -6897,7 +6999,7 @@ export default function App() {
   }, []);
 
   const addToBasket = (clip) => {
-    setClipBasket(prev => [...prev, clip]);
+    updateClipBasket(prev => [...prev, clip]);
   };
 
   const exportClips = async (format) => {
@@ -6937,15 +7039,16 @@ export default function App() {
 
   const clearBasket = () => {
     if (confirm("Clear all clips from basket?")) {
-      setClipBasket([]);
+      updateClipBasket([]);
       setClipThumbnails([]);
+      setSelectedClipIndex(null);
     }
   };
 
   // Timeline editor handlers (desktop mode)
   const handleClipDrop = (targetIdx) => {
     if (draggingClipIndex === null || draggingClipIndex === targetIdx) return;
-    setClipBasket(prev => {
+    updateClipBasket(prev => {
       const clips = [...prev];
       const [moved] = clips.splice(draggingClipIndex, 1);
       clips.splice(targetIdx, 0, moved);
@@ -6985,14 +7088,37 @@ export default function App() {
     document.addEventListener('mouseup', onUp);
   };
 
-  const seekToClip = (clip) => {
+  const seekToClip = (clip, idx) => {
     if (playerRef.current) {
       playerRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(clip.start)}&autoplay=1&enablejsapi=1`;
+      setSelectedClipIndex(idx ?? null);
     }
   };
 
+  const previewClip = (clip, idx) => {
+    if (!playerRef.current) return;
+    // Clear any existing preview timer
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    // Seek to clip start and autoplay
+    playerRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(clip.start)}&autoplay=1&enablejsapi=1`;
+    setPreviewingClip({ idx, clip });
+    setSelectedClipIndex(idx);
+    // Auto-stop after clip duration
+    const duration = (clip.end - clip.start) * 1000;
+    previewTimerRef.current = setTimeout(() => {
+      setPreviewingClip(null);
+      // Pause by reloading without autoplay
+      if (playerRef.current) {
+        playerRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(clip.end)}&enablejsapi=1`;
+      }
+    }, duration);
+    // Scroll player into view
+    playerRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
   const removeClipFromTimeline = (idx) => {
-    setClipBasket(prev => prev.filter((_, i) => i !== idx));
+    updateClipBasket(prev => prev.filter((_, i) => i !== idx));
+    if (selectedClipIndex === idx) setSelectedClipIndex(null);
   };
 
   const formatTime = (sec) => {
@@ -7024,14 +7150,15 @@ export default function App() {
     return null;
   };
 
-  const buildReel = async (format = "combined") => {
+  const buildReel = async (format = "combined", options = {}) => {
     if (!videoId) { alert("Please load a video first."); return; }
+    const reelStyle = options.reelStyle || null;
 
     let currentHighlights = highlightsWithQuotes;
 
-    // Auto-generate highlights if none exist
-    if (currentHighlights.length === 0) {
-      setProcessStatus({ active: true, message: "Generating AI highlights...", percent: 0 });
+    // Auto-generate highlights if none exist, or if a specific reel style is requested
+    if (currentHighlights.length === 0 || reelStyle) {
+      setProcessStatus({ active: true, message: reelStyle ? `Generating ${reelStyle.replace('_', ' ')} highlights...` : "Generating AI highlights...", percent: 0 });
       setLoading(l => ({ ...l, reel: true }));
 
       try {
@@ -7039,7 +7166,8 @@ export default function App() {
           transcript: fullText.slice(0, 100000),
           language: lang === "es" ? "es" : "en",
           model: aiModel,
-          strategy: "highlights_with_quotes"
+          strategy: "highlights_with_quotes",
+          ...(reelStyle ? { reelStyle, forceRefresh: true } : {})
         });
 
         const text = res.summarySentences || "[]";
@@ -7095,7 +7223,7 @@ export default function App() {
         selectedClips = Array.from({ length: 8 }, (_, i) => clips[Math.floor(i * step)]);
       }
 
-      setClipBasket(selectedClips);
+      updateClipBasket(selectedClips);
       setClipThumbnails([]);
       setProcessStatus({ active: false, message: "", percent: 0 });
       setLoading(l => ({ ...l, reel: false }));
@@ -8013,7 +8141,7 @@ export default function App() {
           <>
             {/* Video Player + Sidebar */}
             <div className="editor-main-area">
-              <div className={`editor-video-panel ${!sidebarOpen ? 'editor-video-full' : ''}`}>
+              <div className={`editor-video-panel ${!sidebarOpen ? 'editor-video-full' : ''}`} style={{ position: 'relative' }}>
                 <iframe
                   ref={playerRef}
                   title="video-player"
@@ -8022,6 +8150,17 @@ export default function App() {
                   allow="autoplay; encrypted-media; picture-in-picture"
                   allowFullScreen
                 />
+                {previewingClip && (
+                  <div style={{
+                    position: 'absolute', top: 12, left: 12, background: 'rgba(30,127,99,0.9)', color: 'white',
+                    padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, zIndex: 10,
+                    display: 'flex', alignItems: 'center', gap: '8px', animation: 'fadeIn 0.3s ease'
+                  }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', display: 'inline-block', animation: 'pulse 1s infinite' }} />
+                    Previewing Clip {previewingClip.idx + 1}
+                    <button onClick={() => { setPreviewingClip(null); if (previewTimerRef.current) clearTimeout(previewTimerRef.current); }} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '14px', padding: 0 }}>✕</button>
+                  </div>
+                )}
                 <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)}>
                   {sidebarOpen ? '\u203A' : '\u2039'}
                 </button>
@@ -8058,7 +8197,7 @@ export default function App() {
                         onClick={(e) => {
                           e.stopPropagation();
                           const clip = { start: Math.max(0, m.start - videoOptions.clipPadding), end: m.start + (m.duration || 15) + videoOptions.clipPadding, label: m.text.slice(0, 60), highlight: m.text.slice(0, 60), text: m.text };
-                          setClipBasket(prev => [...prev, clip]);
+                          updateClipBasket(prev => [...prev, clip]);
                         }}
                       >
                         + Add to Timeline
@@ -8077,11 +8216,62 @@ export default function App() {
               <div className="hero-reel-subtitle">AI selects the best moments with sensible defaults</div>
             </div>
 
-            {/* Template Presets */}
-            <TemplatePresets onSelect={(preset) => {
-              setVideoOptions(v => ({ ...v, resolution: preset.resolution }));
-              buildReel(preset.format);
-            }} />
+            {/* Reel Style Picker — AI-focused reel generation */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px', margin: '12px 0' }}>
+              {[
+                { key: 'key_decisions', icon: '🏛️', title: 'Key Decisions', desc: 'Votes & motions' },
+                { key: 'public_comments', icon: '💬', title: 'Public Comments', desc: 'Resident voices' },
+                { key: 'controversial', icon: '🔥', title: 'Controversial', desc: 'Debates & disputes' },
+                { key: 'budget', icon: '💰', title: 'Budget', desc: 'Money & funding' },
+                { key: 'action_items', icon: '✅', title: 'Action Items', desc: 'Tasks & follow-ups' },
+              ].map(style => (
+                <button
+                  key={style.key}
+                  onClick={() => buildReel('combined', { reelStyle: style.key })}
+                  disabled={loading.reel || loading.summary}
+                  style={{
+                    padding: '12px', background: 'white', border: '2px solid #e2e8f0', borderRadius: '10px',
+                    cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#22c55e'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                >
+                  <div style={{ fontSize: '24px', marginBottom: '4px' }}>{style.icon}</div>
+                  <div style={{ fontWeight: 600, fontSize: '12px', color: '#1e293b' }}>{style.title}</div>
+                  <div style={{ fontSize: '10px', color: '#64748b' }}>{style.desc}</div>
+                </button>
+              ))}
+            </div>
+
+            {/* Shuffle button */}
+            {highlightsWithQuotes.length > 0 && clipBasket.length > 0 && (
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginBottom: '12px' }}>
+                <button
+                  className="btn btn-ghost"
+                  style={{ fontSize: '12px' }}
+                  onClick={() => {
+                    // Shuffle: randomly select different subset of highlights
+                    const shuffled = [...highlightsWithQuotes].sort(() => Math.random() - 0.5);
+                    const subset = shuffled.slice(0, Math.min(8, shuffled.length));
+                    const clips = subset.map((h, i) => {
+                      const ts = findQuoteTimestamp(h.quote, sents, videoOptions.clipPadding || 4);
+                      return ts ? { start: ts.start, end: ts.end, label: h.highlight, highlight: h.highlight, speaker: h.speaker } : null;
+                    }).filter(Boolean);
+                    if (clips.length > 0) updateClipBasket(clips);
+                  }}
+                >
+                  🔀 Shuffle Clips
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  style={{ fontSize: '12px' }}
+                  onClick={() => { generateHighlightsWithQuotes(true).then(() => buildReel('combined')); }}
+                  disabled={loading.reel}
+                >
+                  🔄 Regenerate
+                </button>
+              </div>
+            )}
 
             {/* Share Panel */}
             {videoId && <SharePanel videoId={videoId} videoTitle={videoTitle} />}
@@ -8202,14 +8392,14 @@ export default function App() {
                     return (
                       <div
                         key={idx}
-                        className={`timeline-clip ${draggingClipIndex === idx ? 'timeline-clip-dragging' : ''} ${job.status === 'running' ? 'timeline-clip-rendering' : ''}`}
+                        className={`timeline-clip ${draggingClipIndex === idx ? 'timeline-clip-dragging' : ''} ${job.status === 'running' ? 'timeline-clip-rendering' : ''} ${selectedClipIndex === idx ? 'timeline-clip-selected' : ''} ${previewingClip?.idx === idx ? 'timeline-clip-previewing' : ''}`}
                         style={{ width: `${widthPx}px` }}
                         draggable
                         onDragStart={() => setDraggingClipIndex(idx)}
                         onDragEnd={() => setDraggingClipIndex(null)}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={() => handleClipDrop(idx)}
-                        onClick={() => seekToClip(clip)}
+                        onClick={() => { setSelectedClipIndex(idx); seekToClip(clip, idx); }}
                       >
                         <div className="trim-handle trim-handle-left" onMouseDown={(e) => startTrim(e, idx, 'start')} />
 
@@ -8221,10 +8411,30 @@ export default function App() {
 
                         <div className="trim-handle trim-handle-right" onMouseDown={(e) => startTrim(e, idx, 'end')} />
 
+                        {/* Preview button */}
+                        <button className="timeline-clip-preview" onClick={(e) => { e.stopPropagation(); previewClip(clip, idx); }} title="Preview clip">▶</button>
+
+                        {/* Per-clip controls (shown when selected) */}
+                        {selectedClipIndex === idx && (
+                          <div className="clip-inline-controls" onClick={(e) => e.stopPropagation()}>
+                            <select value={clip.colorFilter || 'none'} onChange={(e) => updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, colorFilter: e.target.value } : c))} title="Color filter" style={{ fontSize: '10px', padding: '1px 2px', width: '60px' }}>
+                              <option value="none">Color</option>
+                              <option value="warm">Warm</option>
+                              <option value="cool">Cool</option>
+                              <option value="cinematic">Cinema</option>
+                              <option value="high_contrast">Hi-Con</option>
+                              <option value="bw">B&W</option>
+                              <option value="sepia">Sepia</option>
+                            </select>
+                            <input type="range" min="0" max="200" value={Math.round((clip.volume || 1) * 100)} onChange={(e) => updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, volume: parseInt(e.target.value) / 100 } : c))} title={`Volume: ${Math.round((clip.volume || 1) * 100)}%`} style={{ width: '50px', height: '12px' }} />
+                            <span style={{ fontSize: '9px', color: '#64748b' }}>{Math.round((clip.volume || 1) * 100)}%</span>
+                          </div>
+                        )}
+
                         {/* Mobile trim controls */}
                         <div className="mobile-trim-btns">
-                          <button className="mobile-trim-btn" onClick={(e) => { e.stopPropagation(); setClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, start: Math.max(0, c.start - 1) } : c)); }} title="-1s start">-1s</button>
-                          <button className="mobile-trim-btn" onClick={(e) => { e.stopPropagation(); setClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, end: c.end + 1 } : c)); }} title="+1s end">+1s</button>
+                          <button className="mobile-trim-btn" onClick={(e) => { e.stopPropagation(); updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, start: Math.max(0, c.start - 1) } : c)); }} title="-1s start">-1s</button>
+                          <button className="mobile-trim-btn" onClick={(e) => { e.stopPropagation(); updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, end: c.end + 1 } : c)); }} title="+1s end">+1s</button>
                           <button className="mobile-swipe-delete" onClick={(e) => { e.stopPropagation(); removeClipFromTimeline(idx); }}>Delete</button>
                         </div>
 
@@ -8234,6 +8444,11 @@ export default function App() {
                   })
                 )}
               </div>
+              {clipBasket.length > 0 && (
+                <div className="timeline-shortcuts-hint">
+                  ⌨️ Space: preview · Delete: remove · S: split · I/O: trim · ←→: nudge · ⌘Z: undo
+                </div>
+              )}
             </div>
 
             {/* Job Status */}
@@ -8298,9 +8513,16 @@ export default function App() {
                   </div>
                   <div className="editor-option-inline">
                     <label>Transitions</label>
-                    <button className={`toggle-pill ${videoOptions.transitions ? 'toggle-pill-on' : 'toggle-pill-off'}`} onClick={() => setVideoOptions(v => ({ ...v, transitions: !v.transitions }))}>
-                      {videoOptions.transitions ? 'ON' : 'OFF'}
-                    </button>
+                    <select value={videoOptions.transitionType || 'none'} onChange={(e) => setVideoOptions(v => ({ ...v, transitionType: e.target.value, transitions: e.target.value !== 'none' }))} className="editor-select">
+                      <option value="none">None</option>
+                      <option value="fade">Fade</option>
+                      <option value="dissolve">Dissolve</option>
+                      <option value="wiperight">Wipe Right</option>
+                      <option value="slideleft">Slide Left</option>
+                      <option value="slideright">Slide Right</option>
+                      <option value="circlecrop">Circle</option>
+                      <option value="pixelize">Pixelize</option>
+                    </select>
                   </div>
                   <div className="editor-option-inline">
                     <label>Music</label>
@@ -8353,6 +8575,115 @@ export default function App() {
               </div>
             </div>
           </>
+        )}
+
+        {/* ================================================================
+           TRANSCRIPT & ANALYSIS TOOLS (desktop mode, after timeline)
+           ================================================================ */}
+        {!isCloudMode && videoId && fullText && (
+          <section className="card section animate-slideUp" style={{ marginTop: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+              <h2 className="section-title" style={{ margin: 0 }}>📝 Transcript & Tools</h2>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {/* Translate dropdown */}
+                <select
+                  value={translateLang}
+                  onChange={(e) => setTranslateLang(e.target.value)}
+                  style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px' }}
+                >
+                  <option value="Spanish">Spanish</option>
+                  <option value="French">French</option>
+                  <option value="Portuguese">Portuguese</option>
+                  <option value="Chinese">Chinese</option>
+                  <option value="Japanese">Japanese</option>
+                  <option value="Korean">Korean</option>
+                </select>
+                <button className="btn btn-primary" style={{ fontSize: '12px', padding: '6px 12px' }} onClick={translateTranscript} disabled={loading.translate}>
+                  {loading.translate ? 'Translating...' : '🌐 Translate'}
+                </button>
+                <button className="btn btn-ghost" style={{ fontSize: '12px', padding: '6px 12px' }} onClick={() => {
+                  const blob = new Blob([vtt || fullText], { type: vtt ? 'text/vtt' : 'text/plain' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `transcript-${videoId}.${vtt ? 'vtt' : 'txt'}`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}>
+                  ⬇️ Download
+                </button>
+              </div>
+            </div>
+
+            {/* Transcript Search */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+              <input
+                className="input"
+                placeholder="Search transcript..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              {query && <button className="btn btn-ghost" onClick={() => setQuery('')} style={{ padding: '6px 10px' }}>✕</button>}
+            </div>
+
+            {/* Word Cloud */}
+            {words.length > 0 && (
+              <div style={{ marginBottom: '16px', padding: '12px', background: '#f0fdf4', borderRadius: '10px' }}>
+                <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px', color: '#166534' }}>🔤 Key Terms — click to search</div>
+                <div className="word-cloud-expanded">
+                  {words.slice(0, 40).map((w, i) => {
+                    const maxCount = words[0].count;
+                    const ratio = w.count / maxCount;
+                    let sizeClass = 'word-tiny';
+                    if (ratio > 0.7) sizeClass = 'word-mega';
+                    else if (ratio > 0.5) sizeClass = 'word-xl';
+                    else if (ratio > 0.35) sizeClass = 'word-large';
+                    else if (ratio > 0.2) sizeClass = 'word-medium';
+                    else if (ratio > 0.1) sizeClass = 'word-small';
+                    const colors = ['#1e7f63', '#2d9f7f', '#3cbf9f', '#4ddfbf', '#166534'];
+                    const colorIndex = Math.floor((1 - ratio) * (colors.length - 1));
+                    return (
+                      <span key={w.text} className={`word-cloud-item ${sizeClass}`}
+                        style={{ color: colors[colorIndex], fontWeight: ratio > 0.5 ? '900' : ratio > 0.3 ? '700' : '400', cursor: 'pointer' }}
+                        title={`"${fixBrooklyn(w.text)}" (${w.count})`}
+                        onClick={() => setQuery(fixBrooklyn(w.text))}
+                      >{fixBrooklyn(w.text)}</span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Search Results with + to add clip */}
+            {matches.length > 0 && (
+              <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: '#166534', marginBottom: '8px' }}>
+                  {matches.length} match{matches.length !== 1 ? 'es' : ''} for "{query}"
+                </div>
+                {matches.slice(0, 20).map((m, i) => (
+                  <div key={i} style={{ padding: '8px 12px', background: '#f8fafc', borderRadius: '8px', marginBottom: '6px', fontSize: '13px', display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', border: '1px solid #e2e8f0' }}
+                    onClick={() => { if (playerRef.current) playerRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(m.start)}&autoplay=1&enablejsapi=1`; }}
+                  >
+                    <span style={{ color: '#1E7F63', fontWeight: 700, fontSize: '11px', minWidth: '45px' }}>{formatTime(m.start)}</span>
+                    <span style={{ flex: 1 }}>{m.text}</span>
+                    <button onClick={(e) => { e.stopPropagation(); const clip = { start: Math.max(0, m.start - (videoOptions.clipPadding || 4)), end: m.start + (m.duration || 10) + (videoOptions.clipPadding || 4), label: m.text.slice(0, 60), highlight: m.text, text: m.text }; updateClipBasket(prev => [...prev, clip]); }} style={{ background: '#22c55e', color: 'white', border: 'none', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer', fontSize: '14px', flexShrink: 0 }} title="Add to timeline">+</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Translation result */}
+            {translation.show && (
+              <div style={{ marginTop: '12px', padding: '12px', background: '#fef3c7', borderRadius: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ fontWeight: 600, fontSize: '13px' }}>🌐 Translation ({translation.lang})</span>
+                  <button onClick={() => setTranslation(prev => ({ ...prev, show: false }))} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
+                </div>
+                <div style={{ maxHeight: '200px', overflow: 'auto', fontSize: '13px', lineHeight: 1.6 }}>{translation.text}</div>
+              </div>
+            )}
+          </section>
         )}
 
         {/* ================================================================
@@ -8532,7 +8863,7 @@ export default function App() {
                         <button className="touch-add-btn" onClick={(e) => {
                           e.stopPropagation();
                           const clip = { start: Math.max(0, s.start - videoOptions.clipPadding), end: (s.end || s.start + 15) + videoOptions.clipPadding, label: s.text.slice(0, 60), highlight: s.text.slice(0, 60), text: s.text };
-                          setClipBasket(prev => [...prev, clip]);
+                          updateClipBasket(prev => [...prev, clip]);
                           addToast('Clip added to timeline');
                         }} title="Add clip">+</button>
                       </span>

@@ -180,6 +180,79 @@ Meeting:
 
 JSON:"""
 
+# ============================================================================
+# Reel Style Prompts — focused AI prompts for different highlight reel types
+# ============================================================================
+
+REEL_STYLE_PROMPTS = {
+    "key_decisions": {
+        "name": "Key Decisions",
+        "emphasis": """Focus EXCLUSIVELY on votes, motions, approvals, and formal decisions.
+At least 7 out of 10 highlights MUST be about:
+- Formal votes (unanimous, split, roll call)
+- Motions made and seconded
+- Approvals or denials of permits, budgets, proposals
+- Policy changes adopted
+- Appointments or elections
+Include the exact vote count when available (e.g. "5-2 vote").""",
+    },
+    "public_comments": {
+        "name": "Public Comments",
+        "emphasis": """Focus EXCLUSIVELY on public participation and resident voices.
+At least 8 out of 10 highlights MUST be from:
+- Public comment periods
+- Resident testimonials and personal stories
+- Community concerns and complaints
+- Citizen questions to officials
+- Petitions or community requests
+Prioritize emotional, personal, and passionate statements from residents.""",
+    },
+    "controversial": {
+        "name": "Controversial Moments",
+        "emphasis": """Focus EXCLUSIVELY on disagreements, debates, and contentious moments.
+At least 7 out of 10 highlights MUST involve:
+- Split votes or close votes
+- Heated exchanges between officials
+- Strong disagreements on policy
+- Controversial proposals that drew opposition
+- Interruptions or tense moments
+- Divided opinions on key issues
+Prioritize the most dramatic and contentious moments.""",
+    },
+    "budget": {
+        "name": "Budget Discussion",
+        "emphasis": """Focus EXCLUSIVELY on financial matters and budget discussions.
+At least 8 out of 10 highlights MUST mention:
+- Specific dollar amounts, tax rates, or percentages
+- Budget line items and appropriations
+- Funding requests or grants
+- Revenue projections or shortfalls
+- Cost overruns or savings
+- Tax impact on residents
+Include exact numbers when mentioned.""",
+    },
+    "action_items": {
+        "name": "Action Items",
+        "emphasis": """Focus EXCLUSIVELY on tasks, assignments, and follow-up items.
+At least 8 out of 10 highlights MUST be about:
+- Specific tasks assigned to staff or officials
+- Deadlines and timelines mentioned
+- Reports or studies requested
+- Items tabled for future meetings
+- Follow-up commitments made
+- Next steps and action plans
+Include WHO is responsible and WHEN it's due when mentioned.""",
+    },
+}
+
+
+def get_reel_style_prompt_override(reel_style):
+    """Get the prompt emphasis override for a specific reel style.
+    Returns the emphasis text to inject into the highlights prompt, or None."""
+    style = REEL_STYLE_PROMPTS.get(reel_style)
+    return style["emphasis"] if style else None
+
+
 def get_cross_reference_prompt(text: str, entities: list) -> str:
     """
     Optimized cross-reference detection
