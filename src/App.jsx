@@ -7228,6 +7228,16 @@ export default function App() {
       setProcessStatus({ active: false, message: "", percent: 0 });
       setLoading(l => ({ ...l, reel: false }));
 
+      // Visual feedback: scroll timeline into view and flash
+      setTimeout(() => {
+        const track = document.querySelector('.timeline-track');
+        if (track) {
+          track.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          track.classList.add('timeline-flash');
+          setTimeout(() => track.classList.remove('timeline-flash'), 1500);
+        }
+      }, 100);
+
       // Auto-load thumbnails
       apiClipThumbnails({ videoId, clips: selectedClips })
         .then(data => { if (data.thumbnails) setClipThumbnails(data.thumbnails); })
@@ -8139,73 +8149,93 @@ export default function App() {
            ================================================================ */}
         {!isCloudMode && videoId && (
           <>
-            {/* Video Player + Sidebar */}
-            <div className="editor-main-area">
-              <div className={`editor-video-panel ${!sidebarOpen ? 'editor-video-full' : ''}`} style={{ position: 'relative' }}>
-                <iframe
-                  ref={playerRef}
-                  title="video-player"
-                  className="video-frame editor-video-frame"
-                  src={`https://www.youtube.com/embed/${videoId}?autoplay=0&mute=0&playsinline=1&enablejsapi=1`}
-                  allow="autoplay; encrypted-media; picture-in-picture"
-                  allowFullScreen
-                />
-                {previewingClip && (
-                  <div style={{
-                    position: 'absolute', top: 12, left: 12, background: 'rgba(30,127,99,0.9)', color: 'white',
-                    padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, zIndex: 10,
-                    display: 'flex', alignItems: 'center', gap: '8px', animation: 'fadeIn 0.3s ease'
-                  }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', display: 'inline-block', animation: 'pulse 1s infinite' }} />
-                    Previewing Clip {previewingClip.idx + 1}
-                    <button onClick={() => { setPreviewingClip(null); if (previewTimerRef.current) clearTimeout(previewTimerRef.current); }} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '14px', padding: 0 }}>✕</button>
-                  </div>
-                )}
-                <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)}>
-                  {sidebarOpen ? '\u203A' : '\u2039'}
-                </button>
-              </div>
+            {/* Video Player — Full Width (no sidebar) */}
+            <div style={{ position: 'relative' }}>
+              <iframe
+                ref={playerRef}
+                title="video-player"
+                className="video-frame"
+                style={{ width: '100%', height: '420px', borderRadius: '12px', border: 'none' }}
+                src={`https://www.youtube.com/embed/${videoId}?autoplay=0&mute=0&playsinline=1&enablejsapi=1`}
+                allow="autoplay; encrypted-media; picture-in-picture"
+                allowFullScreen
+              />
+              {previewingClip && (
+                <div style={{
+                  position: 'absolute', top: 12, left: 12, background: 'rgba(30,127,99,0.9)', color: 'white',
+                  padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, zIndex: 10,
+                  display: 'flex', alignItems: 'center', gap: '8px', animation: 'fadeIn 0.3s ease'
+                }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', display: 'inline-block', animation: 'pulse 1s infinite' }} />
+                  Previewing Clip {previewingClip.idx + 1}
+                  <button onClick={() => { setPreviewingClip(null); if (previewTimerRef.current) clearTimeout(previewTimerRef.current); }} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '14px', padding: 0 }}>✕</button>
+                </div>
+              )}
+            </div>
 
-              <div className={`editor-sidebar ${sidebarOpen ? 'editor-sidebar-open' : 'editor-sidebar-closed'}`}>
-                <div style={{ fontWeight: 700, marginBottom: 8, fontSize: '14px' }}>Search & Transcript</div>
-                <input
-                  id="editor-search"
-                  type="text"
-                  className="search-input"
-                  placeholder={t.searchTranscript}
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  style={{ width: '100%', marginBottom: 8, boxSizing: 'border-box' }}
-                />
-                {matches.length > 0 && (
-                  <div style={{ fontSize: '12px', color: '#64748b', marginBottom: 8 }}>
-                    {matches.length} results
-                  </div>
-                )}
-                <div className="results-scroll" style={{ maxHeight: '350px' }}>
-                  {matches.map((m, mi) => (
-                    <div key={mi} className="result-card" style={{ padding: '8px', marginBottom: '4px', fontSize: '12px', cursor: 'pointer', borderRadius: '6px', border: '1px solid #e2e8f0' }}
-                      onClick={() => {
-                        if (playerRef.current) playerRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(m.start)}&autoplay=1&enablejsapi=1`;
-                      }}
+            {/* 📝 Transcript & Tools — Compact Bar */}
+            <div className="card" style={{ marginTop: 12, padding: '12px 16px' }}>
+              {/* Word Cloud Row */}
+              {words.length > 0 && (
+                <div style={{ marginBottom: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#166534', marginRight: '4px' }}>🔤</span>
+                  {words.slice(0, 25).map((w, i) => {
+                    const maxCount = words[0].count;
+                    const ratio = w.count / maxCount;
+                    const size = ratio > 0.6 ? '16px' : ratio > 0.3 ? '13px' : '11px';
+                    return (
+                      <span key={w.text} style={{ fontSize: size, fontWeight: ratio > 0.4 ? 700 : 400, color: '#1e7f63', cursor: 'pointer', transition: 'all 0.15s' }}
+                        title={`"${fixBrooklyn(w.text)}" (${w.count} mentions) — click to search`}
+                        onClick={() => setQuery(fixBrooklyn(w.text))}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = '#059669'; e.currentTarget.style.textDecoration = 'underline'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = '#1e7f63'; e.currentTarget.style.textDecoration = 'none'; }}
+                      >{fixBrooklyn(w.text)}</span>
+                    );
+                  })}
+                </div>
+              )}
+              {/* Search + Translate + Download Row */}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: '200px', position: 'relative' }}>
+                  <input className="input" placeholder="🔍 Search transcript..." value={query} onChange={(e) => setQuery(e.target.value)} style={{ width: '100%', paddingRight: query ? '30px' : '8px', boxSizing: 'border-box' }} />
+                  {query && <button onClick={() => setQuery('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '14px' }}>✕</button>}
+                </div>
+                <select value={translateLang} onChange={(e) => setTranslateLang(e.target.value)} style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px' }}>
+                  <option value="Spanish">ES</option><option value="French">FR</option><option value="Portuguese">PT</option><option value="Chinese">ZH</option>
+                </select>
+                <button className="btn btn-ghost" style={{ fontSize: '11px', padding: '5px 10px' }} onClick={translateTranscript} disabled={loading.translate}>🌐 {loading.translate ? '...' : 'Translate'}</button>
+                <button className="btn btn-ghost" style={{ fontSize: '11px', padding: '5px 10px' }} onClick={() => {
+                  const blob = new Blob([vtt || fullText], { type: vtt ? 'text/vtt' : 'text/plain' });
+                  const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `transcript-${videoId}.${vtt ? 'vtt' : 'txt'}`; a.click(); URL.revokeObjectURL(url);
+                }}>⬇️ Download</button>
+              </div>
+              {/* Search Results (collapsible) */}
+              {matches.length > 0 && (
+                <div style={{ marginTop: '10px', maxHeight: '200px', overflowY: 'auto', borderTop: '1px solid #e2e8f0', paddingTop: '8px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 600, color: '#166534', marginBottom: '6px' }}>{matches.length} match{matches.length !== 1 ? 'es' : ''} for "{query}"</div>
+                  {matches.slice(0, 15).map((m, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', borderRadius: '6px', marginBottom: '4px', cursor: 'pointer', fontSize: '12px', background: '#f8fafc', border: '1px solid #f1f5f9', transition: 'all 0.15s' }}
+                      onClick={() => { if (playerRef.current) playerRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(m.start)}&autoplay=1&enablejsapi=1`; }}
+                      onMouseEnter={(e) => e.currentTarget.style.borderColor = '#22c55e'}
+                      onMouseLeave={(e) => e.currentTarget.style.borderColor = '#f1f5f9'}
                     >
-                      <div style={{ color: '#1E7F63', fontWeight: 600, fontSize: '11px' }}>{formatTime(m.start)}</div>
-                      <div style={{ color: '#334155' }}>{m.text}</div>
-                      <button
-                        className="btn btn-ghost"
-                        style={{ fontSize: '10px', padding: '2px 8px', marginTop: '4px' }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const clip = { start: Math.max(0, m.start - videoOptions.clipPadding), end: m.start + (m.duration || 15) + videoOptions.clipPadding, label: m.text.slice(0, 60), highlight: m.text.slice(0, 60), text: m.text };
-                          updateClipBasket(prev => [...prev, clip]);
-                        }}
-                      >
-                        + Add to Timeline
-                      </button>
+                      <span style={{ color: '#1E7F63', fontWeight: 700, fontSize: '10px', fontFamily: 'monospace', minWidth: '42px' }}>{formatTime(m.start)}</span>
+                      <span style={{ flex: 1, color: '#334155' }}>{m.text}</span>
+                      <button onClick={(e) => { e.stopPropagation(); const clip = { start: Math.max(0, m.start - (videoOptions.clipPadding || 4)), end: m.start + (m.duration || 10) + (videoOptions.clipPadding || 4), label: m.text.slice(0, 60), highlight: m.text, text: m.text }; updateClipBasket(prev => [...prev, clip]); }} style={{ background: '#22c55e', color: 'white', border: 'none', borderRadius: '50%', width: '22px', height: '22px', cursor: 'pointer', fontSize: '14px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Add to timeline">+</button>
                     </div>
                   ))}
                 </div>
-              </div>
+              )}
+              {/* Translation result */}
+              {translation.show && (
+                <div style={{ marginTop: '10px', padding: '10px', background: '#fef3c7', borderRadius: '8px', maxHeight: '150px', overflow: 'auto' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <span style={{ fontWeight: 600, fontSize: '12px' }}>🌐 {translation.lang}</span>
+                    <button onClick={() => setTranslation(prev => ({ ...prev, show: false }))} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px' }}>✕</button>
+                  </div>
+                  <div style={{ fontSize: '12px', lineHeight: 1.5 }}>{translation.text}</div>
+                </div>
+              )}
             </div>
 
             {/* Hero Button - One-Click Highlight Reel */}
@@ -8219,22 +8249,24 @@ export default function App() {
             {/* Reel Style Picker — AI-focused reel generation */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px', margin: '12px 0' }}>
               {[
-                { key: 'key_decisions', icon: '🏛️', title: 'Key Decisions', desc: 'Votes & motions' },
-                { key: 'public_comments', icon: '💬', title: 'Public Comments', desc: 'Resident voices' },
-                { key: 'controversial', icon: '🔥', title: 'Controversial', desc: 'Debates & disputes' },
-                { key: 'budget', icon: '💰', title: 'Budget', desc: 'Money & funding' },
-                { key: 'action_items', icon: '✅', title: 'Action Items', desc: 'Tasks & follow-ups' },
+                { key: 'key_decisions', icon: '🏛️', title: 'Key Decisions', desc: 'Votes & motions', tooltip: 'AI focuses on formal votes, motions, approvals, and official decisions — includes vote counts when available' },
+                { key: 'public_comments', icon: '💬', title: 'Public Comments', desc: 'Resident voices', tooltip: 'AI highlights resident testimonials, community concerns, personal stories, and public participation moments' },
+                { key: 'controversial', icon: '🔥', title: 'Controversial', desc: 'Debates & disputes', tooltip: 'AI finds heated debates, split votes, strong disagreements, interruptions, and contentious policy moments' },
+                { key: 'budget', icon: '💰', title: 'Budget', desc: 'Money & funding', tooltip: 'AI focuses on specific dollar amounts, tax rates, funding requests, budget line items, and financial impacts' },
+                { key: 'action_items', icon: '✅', title: 'Action Items', desc: 'Tasks & follow-ups', tooltip: 'AI extracts tasks assigned to staff, deadlines, follow-up commitments, reports requested, and next steps' },
               ].map(style => (
                 <button
                   key={style.key}
+                  title={style.tooltip}
                   onClick={() => buildReel('combined', { reelStyle: style.key })}
                   disabled={loading.reel || loading.summary}
                   style={{
                     padding: '12px', background: 'white', border: '2px solid #e2e8f0', borderRadius: '10px',
-                    cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s',
+                    cursor: loading.reel ? 'wait' : 'pointer', textAlign: 'center', transition: 'all 0.2s',
+                    opacity: loading.reel ? 0.6 : 1,
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#22c55e'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                  onMouseEnter={(e) => { if (!loading.reel) { e.currentTarget.style.borderColor = '#22c55e'; e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(34,197,94,0.15)'; } }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
                 >
                   <div style={{ fontSize: '24px', marginBottom: '4px' }}>{style.icon}</div>
                   <div style={{ fontWeight: 600, fontSize: '12px', color: '#1e293b' }}>{style.title}</div>
@@ -8343,14 +8375,14 @@ export default function App() {
                   <button onClick={() => setTimelineZoom(z => Math.min(4, z + 0.25))}>+</button>
                 </div>
                 <div className="timeline-actions">
-                  <button className="btn btn-primary" style={{ fontSize: '12px', padding: '6px 14px' }} onClick={() => setShowExportModal(true)} disabled={clipBasket.length === 0}>
-                    Export
+                  <button className="btn btn-primary" style={{ fontSize: '12px', padding: '6px 14px' }} onClick={() => setShowExportModal(true)} disabled={clipBasket.length === 0} title={clipBasket.length === 0 ? 'Add clips to timeline first — click a reel style above or search the transcript' : 'Export clips as video'}>
+                    {clipBasket.length === 0 ? '📦 Export' : `📦 Export ${clipBasket.length} clips`}
                   </button>
-                  <button className="btn btn-primary" style={{ fontSize: '12px', padding: '6px 14px', background: '#7c3aed' }} onClick={() => buildReel('combined')} disabled={!highlightsWithQuotes.length}>
-                    AI Reel
+                  <button className="btn btn-primary" style={{ fontSize: '12px', padding: '6px 14px', background: '#7c3aed' }} onClick={() => buildReel('combined')} disabled={loading.reel} title={loading.reel ? 'Generating...' : 'Auto-generate AI highlight clips and load into timeline'}>
+                    {loading.reel ? '⏳ Generating...' : '🤖 AI Reel'}
                   </button>
-                  <button className="btn btn-primary" style={{ fontSize: '12px', padding: '6px 14px', background: '#ec4899' }} onClick={() => buildReel('social')} disabled={!highlightsWithQuotes.length}>
-                    Social Reel
+                  <button className="btn btn-primary" style={{ fontSize: '12px', padding: '6px 14px', background: '#ec4899' }} onClick={() => buildReel('social')} disabled={loading.reel} title="Generate vertical 9:16 reel for TikTok/Instagram">
+                    📱 Social Reel
                   </button>
                   {clipBasket.length > 0 && (
                     <button className="btn btn-ghost" style={{ fontSize: '11px', padding: '4px 10px' }} onClick={clearBasket}>Clear</button>
@@ -8380,13 +8412,13 @@ export default function App() {
                 {clipBasket.length === 0 ? (
                   <div className="timeline-empty">
                     {job.status === 'running'
-                      ? `Rendering... ${job.percent}%`
-                      : 'Search the transcript and add clips to build your timeline, or click "AI Reel" to auto-generate highlights'}
+                      ? `🎬 Rendering... ${job.percent}%`
+                      : '✨ Click a reel style above (🏛️💬🔥💰✅) to auto-generate clips, or search the transcript and click + to add clips manually'}
                   </div>
                 ) : (
                   clipBasket.map((clip, idx) => {
                     const duration = clip.end - clip.start;
-                    const widthPx = Math.max(70, duration * timelineZoom * 10);
+                    const widthPx = Math.max(120, duration * timelineZoom * 10);
                     const thumb = clipThumbnails.find(t => t.index === idx);
 
                     return (
@@ -8414,22 +8446,25 @@ export default function App() {
                         {/* Preview button */}
                         <button className="timeline-clip-preview" onClick={(e) => { e.stopPropagation(); previewClip(clip, idx); }} title="Preview clip">▶</button>
 
-                        {/* Per-clip controls (shown when selected) */}
+                        {/* Per-clip controls — always visible at bottom of clip when selected */}
                         {selectedClipIndex === idx && (
-                          <div className="clip-inline-controls" onClick={(e) => e.stopPropagation()}>
-                            <select value={clip.colorFilter || 'none'} onChange={(e) => updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, colorFilter: e.target.value } : c))} title="Color filter" style={{ fontSize: '10px', padding: '1px 2px', width: '60px' }}>
-                              <option value="none">Color</option>
-                              <option value="warm">Warm</option>
-                              <option value="cool">Cool</option>
-                              <option value="cinematic">Cinema</option>
-                              <option value="high_contrast">Hi-Con</option>
-                              <option value="bw">B&W</option>
-                              <option value="sepia">Sepia</option>
+                          <div onClick={(e) => e.stopPropagation()} style={{
+                            display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 6px',
+                            background: 'rgba(255,255,255,0.95)', borderTop: '1px solid rgba(30,127,99,0.2)',
+                            position: 'absolute', bottom: 0, left: 0, right: 0, borderRadius: '0 0 4px 4px', zIndex: 8
+                          }}>
+                            <span style={{ fontSize: '9px', color: '#64748b' }}>🎨</span>
+                            <select value={clip.colorFilter || 'none'} onChange={(e) => updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, colorFilter: e.target.value } : c))} style={{ fontSize: '9px', padding: '1px', border: '1px solid #e2e8f0', borderRadius: '3px', background: '#f8fafc', width: '50px' }}>
+                              <option value="none">—</option><option value="warm">Warm</option><option value="cool">Cool</option><option value="cinematic">Film</option><option value="bw">B&W</option><option value="sepia">Sepia</option>
                             </select>
-                            <input type="range" min="0" max="200" value={Math.round((clip.volume || 1) * 100)} onChange={(e) => updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, volume: parseInt(e.target.value) / 100 } : c))} title={`Volume: ${Math.round((clip.volume || 1) * 100)}%`} style={{ width: '50px', height: '12px' }} />
-                            <span style={{ fontSize: '9px', color: '#64748b' }}>{Math.round((clip.volume || 1) * 100)}%</span>
+                            <span style={{ fontSize: '9px', color: '#64748b' }}>🔊</span>
+                            <input type="range" min="0" max="200" value={Math.round((clip.volume || 1) * 100)} onChange={(e) => updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, volume: parseInt(e.target.value) / 100 } : c))} style={{ width: '40px', height: '10px', accentColor: '#1E7F63' }} />
+                            <span style={{ fontSize: '8px', color: '#64748b', minWidth: '22px' }}>{Math.round((clip.volume || 1) * 100)}%</span>
                           </div>
                         )}
+                        {/* Show indicators for clips with custom settings */}
+                        {(clip.colorFilter && clip.colorFilter !== 'none') && <span style={{ position: 'absolute', top: 2, right: 28, fontSize: '10px' }} title={`Color: ${clip.colorFilter}`}>🎨</span>}
+                        {(clip.volume && clip.volume !== 1) && <span style={{ position: 'absolute', top: 2, right: 42, fontSize: '10px' }} title={`Volume: ${Math.round(clip.volume * 100)}%`}>🔊</span>}
 
                         {/* Mobile trim controls */}
                         <div className="mobile-trim-btns">
@@ -8575,115 +8610,6 @@ export default function App() {
               </div>
             </div>
           </>
-        )}
-
-        {/* ================================================================
-           TRANSCRIPT & ANALYSIS TOOLS (desktop mode, after timeline)
-           ================================================================ */}
-        {!isCloudMode && videoId && fullText && (
-          <section className="card section animate-slideUp" style={{ marginTop: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
-              <h2 className="section-title" style={{ margin: 0 }}>📝 Transcript & Tools</h2>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {/* Translate dropdown */}
-                <select
-                  value={translateLang}
-                  onChange={(e) => setTranslateLang(e.target.value)}
-                  style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px' }}
-                >
-                  <option value="Spanish">Spanish</option>
-                  <option value="French">French</option>
-                  <option value="Portuguese">Portuguese</option>
-                  <option value="Chinese">Chinese</option>
-                  <option value="Japanese">Japanese</option>
-                  <option value="Korean">Korean</option>
-                </select>
-                <button className="btn btn-primary" style={{ fontSize: '12px', padding: '6px 12px' }} onClick={translateTranscript} disabled={loading.translate}>
-                  {loading.translate ? 'Translating...' : '🌐 Translate'}
-                </button>
-                <button className="btn btn-ghost" style={{ fontSize: '12px', padding: '6px 12px' }} onClick={() => {
-                  const blob = new Blob([vtt || fullText], { type: vtt ? 'text/vtt' : 'text/plain' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `transcript-${videoId}.${vtt ? 'vtt' : 'txt'}`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                }}>
-                  ⬇️ Download
-                </button>
-              </div>
-            </div>
-
-            {/* Transcript Search */}
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-              <input
-                className="input"
-                placeholder="Search transcript..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                style={{ flex: 1 }}
-              />
-              {query && <button className="btn btn-ghost" onClick={() => setQuery('')} style={{ padding: '6px 10px' }}>✕</button>}
-            </div>
-
-            {/* Word Cloud */}
-            {words.length > 0 && (
-              <div style={{ marginBottom: '16px', padding: '12px', background: '#f0fdf4', borderRadius: '10px' }}>
-                <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px', color: '#166534' }}>🔤 Key Terms — click to search</div>
-                <div className="word-cloud-expanded">
-                  {words.slice(0, 40).map((w, i) => {
-                    const maxCount = words[0].count;
-                    const ratio = w.count / maxCount;
-                    let sizeClass = 'word-tiny';
-                    if (ratio > 0.7) sizeClass = 'word-mega';
-                    else if (ratio > 0.5) sizeClass = 'word-xl';
-                    else if (ratio > 0.35) sizeClass = 'word-large';
-                    else if (ratio > 0.2) sizeClass = 'word-medium';
-                    else if (ratio > 0.1) sizeClass = 'word-small';
-                    const colors = ['#1e7f63', '#2d9f7f', '#3cbf9f', '#4ddfbf', '#166534'];
-                    const colorIndex = Math.floor((1 - ratio) * (colors.length - 1));
-                    return (
-                      <span key={w.text} className={`word-cloud-item ${sizeClass}`}
-                        style={{ color: colors[colorIndex], fontWeight: ratio > 0.5 ? '900' : ratio > 0.3 ? '700' : '400', cursor: 'pointer' }}
-                        title={`"${fixBrooklyn(w.text)}" (${w.count})`}
-                        onClick={() => setQuery(fixBrooklyn(w.text))}
-                      >{fixBrooklyn(w.text)}</span>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Search Results with + to add clip */}
-            {matches.length > 0 && (
-              <div style={{ maxHeight: '300px', overflow: 'auto' }}>
-                <div style={{ fontSize: '12px', fontWeight: 600, color: '#166534', marginBottom: '8px' }}>
-                  {matches.length} match{matches.length !== 1 ? 'es' : ''} for "{query}"
-                </div>
-                {matches.slice(0, 20).map((m, i) => (
-                  <div key={i} style={{ padding: '8px 12px', background: '#f8fafc', borderRadius: '8px', marginBottom: '6px', fontSize: '13px', display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', border: '1px solid #e2e8f0' }}
-                    onClick={() => { if (playerRef.current) playerRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(m.start)}&autoplay=1&enablejsapi=1`; }}
-                  >
-                    <span style={{ color: '#1E7F63', fontWeight: 700, fontSize: '11px', minWidth: '45px' }}>{formatTime(m.start)}</span>
-                    <span style={{ flex: 1 }}>{m.text}</span>
-                    <button onClick={(e) => { e.stopPropagation(); const clip = { start: Math.max(0, m.start - (videoOptions.clipPadding || 4)), end: m.start + (m.duration || 10) + (videoOptions.clipPadding || 4), label: m.text.slice(0, 60), highlight: m.text, text: m.text }; updateClipBasket(prev => [...prev, clip]); }} style={{ background: '#22c55e', color: 'white', border: 'none', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer', fontSize: '14px', flexShrink: 0 }} title="Add to timeline">+</button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Translation result */}
-            {translation.show && (
-              <div style={{ marginTop: '12px', padding: '12px', background: '#fef3c7', borderRadius: '10px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <span style={{ fontWeight: 600, fontSize: '13px' }}>🌐 Translation ({translation.lang})</span>
-                  <button onClick={() => setTranslation(prev => ({ ...prev, show: false }))} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
-                </div>
-                <div style={{ maxHeight: '200px', overflow: 'auto', fontSize: '13px', lineHeight: 1.6 }}>{translation.text}</div>
-              </div>
-            )}
-          </section>
         )}
 
         {/* ================================================================

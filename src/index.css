@@ -5319,13 +5319,26 @@ header.scrolled {
 .timeline-track {
   display: flex;
   align-items: stretch;
-  min-height: 120px;
-  gap: 4px;
-  padding: 12px 0;
+  min-height: 160px;
+  gap: 8px;
+  padding: 16px 8px;
   overflow-x: auto;
   position: relative;
   scrollbar-width: thin;
   scrollbar-color: #cbd5e1 #f1f5f9;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  border-radius: 8px;
+}
+
+/* Flash animation when clips are loaded */
+.timeline-track.timeline-flash {
+  animation: timeline-flash-anim 1.5s ease;
+}
+
+@keyframes timeline-flash-anim {
+  0% { box-shadow: inset 0 0 0 3px rgba(34,197,94,0.5); }
+  50% { box-shadow: inset 0 0 0 3px rgba(34,197,94,0.2); }
+  100% { box-shadow: none; }
 }
 
 .timeline-track::-webkit-scrollbar {
@@ -5363,19 +5376,35 @@ header.scrolled {
 
 .timeline-clip {
   position: relative;
-  min-width: 70px;
-  height: 96px;
+  min-width: 100px;
+  height: 130px;
   background: linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%);
   border: 2px solid #1E7F63;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: grab;
-  overflow: hidden;
+  overflow: visible;
   flex-shrink: 0;
   display: flex;
   align-items: stretch;
   user-select: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: all 0.2s ease;
+  animation: clipSlideIn 0.4s ease backwards;
 }
+
+@keyframes clipSlideIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Stagger clip animations */
+.timeline-clip:nth-child(1) { animation-delay: 0s; }
+.timeline-clip:nth-child(2) { animation-delay: 0.05s; }
+.timeline-clip:nth-child(3) { animation-delay: 0.1s; }
+.timeline-clip:nth-child(4) { animation-delay: 0.15s; }
+.timeline-clip:nth-child(5) { animation-delay: 0.2s; }
+.timeline-clip:nth-child(6) { animation-delay: 0.25s; }
+.timeline-clip:nth-child(7) { animation-delay: 0.3s; }
+.timeline-clip:nth-child(8) { animation-delay: 0.35s; }
 
 .timeline-clip:hover {
   border-color: #059669;
@@ -5393,36 +5422,40 @@ header.scrolled {
 .timeline-clip-content {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  padding: 4px 10px;
+  justify-content: flex-start;
+  padding: 6px 10px;
   overflow: hidden;
   flex: 1;
   min-width: 0;
-  gap: 2px;
+  gap: 3px;
 }
 
 .timeline-clip-thumb {
   width: 100%;
-  height: 48px;
+  height: 60px;
   object-fit: cover;
-  border-radius: 3px;
-  margin-bottom: 2px;
+  border-radius: 4px;
+  margin-bottom: 3px;
 }
 
 .timeline-clip-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: #065f46;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 1.2;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
 }
 
 .timeline-clip-duration {
   font-size: 10px;
   color: #1E7F63;
   font-family: 'SF Mono', 'Fira Code', monospace;
+  margin-top: auto;
 }
 
 .timeline-clip-remove {
@@ -5452,10 +5485,13 @@ header.scrolled {
   color: white;
 }
 
-/* Selected clip highlight */
+/* Selected clip highlight — very obvious */
 .timeline-clip.timeline-clip-selected {
-  border-color: #1E7F63 !important;
-  box-shadow: 0 0 0 2px rgba(30,127,99,0.3), 0 2px 8px rgba(30,127,99,0.15);
+  border-color: #059669 !important;
+  border-width: 3px !important;
+  box-shadow: 0 0 0 3px rgba(5,150,105,0.25), 0 4px 16px rgba(5,150,105,0.2);
+  transform: translateY(-2px);
+  z-index: 5;
 }
 
 /* Previewing clip pulse */
