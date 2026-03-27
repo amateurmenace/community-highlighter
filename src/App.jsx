@@ -6511,6 +6511,10 @@ export default function App() {
 
   const [previewingClip, setPreviewingClip] = useState(null); // {idx, clip} when previewing
   const [selectedClipIndex, setSelectedClipIndex] = useState(null);
+  const [floatingClipBtn, setFloatingClipBtn] = useState(null); // {x, y} for floating "Create Clip" button
+  const [showTranscriptPanel, setShowTranscriptPanel] = useState(true);
+  const [transitionPickerIdx, setTransitionPickerIdx] = useState(null); // which clip transition to edit
+  const desktopTranscriptRef = useRef(null);
 
   const debQuery = useDebounce(query, 220);
   const playerRef = useRef(null);
@@ -6543,6 +6547,56 @@ export default function App() {
       undoStackRef.current.push(JSON.parse(JSON.stringify(prev)));
       return redoStackRef.current.pop();
     });
+  };
+
+  // Floating "Create Clip" button on text selection in desktop transcript
+  const handleDesktopTranscriptMouseUp = () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) { setFloatingClipBtn(null); return; }
+    const range = sel.getRangeAt(0);
+    const container = desktopTranscriptRef.current;
+    if (!container || !container.contains(range.commonAncestorContainer)) { setFloatingClipBtn(null); return; }
+    const rect = range.getBoundingClientRect();
+    setFloatingClipBtn({ x: rect.left + rect.width / 2, y: rect.top - 10 });
+  };
+
+  const createClipFromSelection = () => {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    const container = desktopTranscriptRef.current;
+    if (!container || !container.contains(range.commonAncestorContainer)) return;
+    // Find all .sent nodes in range
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_ELEMENT, {
+      acceptNode: (node) => node.classList?.contains('sent') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
+    });
+    const sentNodes = [];
+    let node;
+    while (node = walker.nextNode()) { if (range.intersectsNode(node)) sentNodes.push(node); }
+    if (!sentNodes.length) return;
+    const idxs = sentNodes.map(n => parseInt(n.dataset.idx)).filter(i => !isNaN(i));
+    const minIdx = Math.min(...idxs);
+    const maxIdx = Math.max(...idxs);
+    const startTime = sents[minIdx]?.start;
+    const endTime = sents[maxIdx]?.end || sents[maxIdx]?.start + 15;
+    if (startTime === undefined) return;
+    const pad = videoOptions.clipPadding || 4;
+    const clip = {
+      start: Math.max(0, Math.floor(startTime - pad)),
+      end: Math.floor(endTime + pad),
+      label: sents.slice(minIdx, maxIdx + 1).map(s => s.text).join(' ').slice(0, 80),
+      highlight: sents.slice(minIdx, maxIdx + 1).map(s => s.text).join(' ').slice(0, 80),
+      text: sents.slice(minIdx, maxIdx + 1).map(s => s.text).join(' ')
+    };
+    updateClipBasket(prev => [...prev, clip]);
+    addToast('✂️ Clip created from highlighted text!');
+    sel.removeAllRanges();
+    setFloatingClipBtn(null);
+    // Pulse timeline
+    setTimeout(() => {
+      const track = document.querySelector('.timeline-track');
+      if (track) { track.classList.add('timeline-flash'); setTimeout(() => track.classList.remove('timeline-flash'), 1500); }
+    }, 100);
   };
 
   const t = translations[lang] || translations.en;
@@ -6642,6 +6696,17 @@ export default function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [videoId, clipBasket, selectedClipIndex]);
+
+  // Dismiss floating clip button on outside click
+  useEffect(() => {
+    const dismiss = (e) => {
+      if (floatingClipBtn && !e.target.closest('.floating-clip-btn') && !e.target.closest('.desktop-transcript-panel')) {
+        setFloatingClipBtn(null);
+      }
+    };
+    document.addEventListener('mousedown', dismiss);
+    return () => document.removeEventListener('mousedown', dismiss);
+  }, [floatingClipBtn]);
 
   // ⚙️ NEW: Load optimization stats on mount
   useEffect(() => {
@@ -8233,7 +8298,7 @@ export default function App() {
                     >
                       <span style={{ color: '#1E7F63', fontWeight: 700, fontSize: '10px', fontFamily: 'monospace', minWidth: '42px' }}>{formatTime(m.start)}</span>
                       <span style={{ flex: 1, color: '#334155' }}>{m.text}</span>
-                      <button onClick={(e) => { e.stopPropagation(); const clip = { start: Math.max(0, m.start - (videoOptions.clipPadding || 4)), end: m.start + (m.duration || 10) + (videoOptions.clipPadding || 4), label: m.text.slice(0, 60), highlight: m.text, text: m.text }; updateClipBasket(prev => [...prev, clip]); }} style={{ background: '#22c55e', color: 'white', border: 'none', borderRadius: '50%', width: '22px', height: '22px', cursor: 'pointer', fontSize: '14px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Add to timeline">+</button>
+                      <button onClick={(e) => { e.stopPropagation(); const clip = { start: Math.max(0, m.start - (videoOptions.clipPadding || 4)), end: m.start + (m.duration || 10) + (videoOptions.clipPadding || 4), label: m.text.slice(0, 60), highlight: m.text, text: m.text }; updateClipBasket(prev => [...prev, clip]); addToast('✂️ Clip added to timeline!'); setTimeout(() => { const track = document.querySelector('.timeline-track'); if (track) { track.classList.add('timeline-flash'); setTimeout(() => track.classList.remove('timeline-flash'), 1500); } }, 100); }} style={{ background: '#22c55e', color: 'white', border: 'none', borderRadius: '50%', width: '22px', height: '22px', cursor: 'pointer', fontSize: '14px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Add to timeline">+</button>
                     </div>
                   ))}
                 </div>
@@ -8249,6 +8314,47 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            {/* 📝 Full Transcript Panel — Highlight text to create clips */}
+            {sents.length > 0 && (
+              <div className="card" style={{ marginTop: 12, padding: 0, overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', background: '#f0fdf4', borderBottom: showTranscriptPanel ? '1px solid #d1fae5' : 'none', cursor: 'pointer' }}
+                  onClick={() => setShowTranscriptPanel(!showTranscriptPanel)}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '16px' }}>📝</span>
+                    <span style={{ fontWeight: 700, fontSize: '13px', color: '#166534' }}>Full Transcript</span>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>
+                      {showTranscriptPanel ? '💡 Highlight text to create clips, or click + on any sentence' : `${sents.length} segments`}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '12px', color: '#64748b', transition: 'transform 0.2s', transform: showTranscriptPanel ? 'rotate(180deg)' : 'rotate(0)' }}>▼</span>
+                </div>
+                {showTranscriptPanel && (
+                  <div className="desktop-transcript-panel" ref={desktopTranscriptRef} onMouseUp={handleDesktopTranscriptMouseUp}>
+                    {sents.map((s, idx) => (
+                      <span key={idx} className="sent" data-idx={idx} data-start={s.start} data-end={s.end}>
+                        {s.text}{' '}
+                        <button className="sent-add-btn" onClick={(e) => {
+                          e.stopPropagation();
+                          const clip = { start: Math.max(0, s.start - (videoOptions.clipPadding || 4)), end: (s.end || s.start + 15) + (videoOptions.clipPadding || 4), label: s.text.slice(0, 60), highlight: s.text.slice(0, 60), text: s.text };
+                          updateClipBasket(prev => [...prev, clip]);
+                          addToast('✂️ Clip added to timeline!');
+                          setTimeout(() => { const track = document.querySelector('.timeline-track'); if (track) { track.classList.add('timeline-flash'); setTimeout(() => track.classList.remove('timeline-flash'), 1500); } }, 100);
+                        }} title="Add this sentence as a clip">+</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Floating "Create Clip" button — appears on text selection */}
+            {floatingClipBtn && (
+              <button className="floating-clip-btn" style={{ left: floatingClipBtn.x, top: floatingClipBtn.y, transform: 'translate(-50%, -100%)' }} onClick={createClipFromSelection}>
+                ✂️ Create Clip
+              </button>
+            )}
 
             {/* Hero Button - One-Click Highlight Reel */}
             <div className="hero-reel-section">
@@ -8425,7 +8531,7 @@ export default function App() {
                   <div className="timeline-empty">
                     {job.status === 'running'
                       ? `🎬 Rendering... ${job.percent}%`
-                      : '✨ Click a reel style above (🏛️💬🔥💰✅) to auto-generate clips, or search the transcript and click + to add clips manually'}
+                      : '✨ Click a reel style above (🏛️💬🔥💰✅) to auto-generate clips, highlight text in the transcript, or search and click + to add clips'}
                   </div>
                 ) : (
                   clipBasket.map((clip, idx) => {
@@ -8434,69 +8540,148 @@ export default function App() {
                     const thumb = clipThumbnails.find(t => t.index === idx);
 
                     return (
-                      <div
-                        key={idx}
-                        className={`timeline-clip ${draggingClipIndex === idx ? 'timeline-clip-dragging' : ''} ${job.status === 'running' ? 'timeline-clip-rendering' : ''} ${selectedClipIndex === idx ? 'timeline-clip-selected' : ''} ${previewingClip?.idx === idx ? 'timeline-clip-previewing' : ''}`}
-                        style={{ width: `${widthPx}px` }}
-                        draggable
-                        onDragStart={() => setDraggingClipIndex(idx)}
-                        onDragEnd={() => setDraggingClipIndex(null)}
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={() => handleClipDrop(idx)}
-                        onClick={() => { setSelectedClipIndex(idx); seekToClip(clip, idx); }}
-                      >
-                        <div className="trim-handle trim-handle-left" onMouseDown={(e) => startTrim(e, idx, 'start')} />
+                      <React.Fragment key={idx}>
+                        <div
+                          className={`timeline-clip ${draggingClipIndex === idx ? 'timeline-clip-dragging' : ''} ${job.status === 'running' ? 'timeline-clip-rendering' : ''} ${selectedClipIndex === idx ? 'timeline-clip-selected' : ''} ${previewingClip?.idx === idx ? 'timeline-clip-previewing' : ''}`}
+                          style={{ width: `${widthPx}px`, animationDelay: `${idx * 0.05}s` }}
+                          draggable
+                          onDragStart={() => setDraggingClipIndex(idx)}
+                          onDragEnd={() => setDraggingClipIndex(null)}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={() => handleClipDrop(idx)}
+                          onClick={() => { setSelectedClipIndex(idx); seekToClip(clip, idx); }}
+                        >
+                          <div className="trim-handle trim-handle-left" onMouseDown={(e) => startTrim(e, idx, 'start')} title="Drag to trim start" />
 
-                        <div className="timeline-clip-content">
-                          {thumb && <img src={thumb.url} className="timeline-clip-thumb" alt="" />}
-                          <span className="timeline-clip-label">{clip.label || clip.highlight || `Clip ${idx + 1}`}</span>
-                          <span className="timeline-clip-duration">{formatTime(clip.start)} - {formatTime(clip.end)} ({duration.toFixed(0)}s)</span>
+                          <div className="timeline-clip-content">
+                            {thumb && <img src={thumb.url} className="timeline-clip-thumb" alt="" />}
+                            <span className="timeline-clip-label">{clip.label || clip.highlight || `Clip ${idx + 1}`}</span>
+                            <span className="timeline-clip-duration">{formatTime(clip.start)} – {formatTime(clip.end)} ({duration.toFixed(0)}s)</span>
+                          </div>
+
+                          <div className="trim-handle trim-handle-right" onMouseDown={(e) => startTrim(e, idx, 'end')} title="Drag to trim end" />
+
+                          {/* Hover controls */}
+                          <button className="timeline-clip-preview" onClick={(e) => { e.stopPropagation(); previewClip(clip, idx); }} title="Preview clip">▶</button>
+                          <button className="clip-split-btn" onClick={(e) => {
+                            e.stopPropagation();
+                            const mid = (clip.start + clip.end) / 2;
+                            const clipA = { ...clip, end: mid, label: (clip.label || '') + ' (A)' };
+                            const clipB = { ...clip, start: mid, label: (clip.label || '') + ' (B)' };
+                            updateClipBasket(prev => [...prev.slice(0, idx), clipA, clipB, ...prev.slice(idx + 1)]);
+                            addToast('✂️ Clip split into two!');
+                          }} title="Split clip at midpoint">✂️</button>
+
+                          {/* Custom settings indicators */}
+                          {(clip.colorFilter && clip.colorFilter !== 'none') && <span style={{ position: 'absolute', top: 3, right: 28, fontSize: '10px' }} title={`Color: ${clip.colorFilter}`}>🎨</span>}
+                          {(clip.volume && clip.volume !== 1) && <span style={{ position: 'absolute', top: 3, right: 44, fontSize: '10px' }} title={`Volume: ${Math.round(clip.volume * 100)}%`}>🔊</span>}
+
+                          {/* Mobile trim controls */}
+                          <div className="mobile-trim-btns">
+                            <button className="mobile-trim-btn" onClick={(e) => { e.stopPropagation(); updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, start: Math.max(0, c.start - 1) } : c)); }}>-1s</button>
+                            <button className="mobile-trim-btn" onClick={(e) => { e.stopPropagation(); updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, end: c.end + 1 } : c)); }}>+1s</button>
+                            <button className="mobile-swipe-delete" onClick={(e) => { e.stopPropagation(); removeClipFromTimeline(idx); }}>Delete</button>
+                          </div>
+
+                          <button className="timeline-clip-remove" onClick={(e) => { e.stopPropagation(); removeClipFromTimeline(idx); }} title="Remove clip">×</button>
                         </div>
 
-                        <div className="trim-handle trim-handle-right" onMouseDown={(e) => startTrim(e, idx, 'end')} />
-
-                        {/* Preview button */}
-                        <button className="timeline-clip-preview" onClick={(e) => { e.stopPropagation(); previewClip(clip, idx); }} title="Preview clip">▶</button>
-
-                        {/* Per-clip controls — always visible at bottom of clip when selected */}
-                        {selectedClipIndex === idx && (
-                          <div onClick={(e) => e.stopPropagation()} style={{
-                            display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 6px',
-                            background: 'rgba(255,255,255,0.95)', borderTop: '1px solid rgba(30,127,99,0.2)',
-                            position: 'absolute', bottom: 0, left: 0, right: 0, borderRadius: '0 0 4px 4px', zIndex: 8
-                          }}>
-                            <span style={{ fontSize: '9px', color: '#64748b' }}>🎨</span>
-                            <select value={clip.colorFilter || 'none'} onChange={(e) => updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, colorFilter: e.target.value } : c))} style={{ fontSize: '9px', padding: '1px', border: '1px solid #e2e8f0', borderRadius: '3px', background: '#f8fafc', width: '50px' }}>
-                              <option value="none">—</option><option value="warm">Warm</option><option value="cool">Cool</option><option value="cinematic">Film</option><option value="bw">B&W</option><option value="sepia">Sepia</option>
-                            </select>
-                            <span style={{ fontSize: '9px', color: '#64748b' }}>🔊</span>
-                            <input type="range" min="0" max="200" value={Math.round((clip.volume || 1) * 100)} onChange={(e) => updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, volume: parseInt(e.target.value) / 100 } : c))} style={{ width: '40px', height: '10px', accentColor: '#1E7F63' }} />
-                            <span style={{ fontSize: '8px', color: '#64748b', minWidth: '22px' }}>{Math.round((clip.volume || 1) * 100)}%</span>
+                        {/* Transition indicator between clips */}
+                        {idx < clipBasket.length - 1 && (
+                          <div className="clip-transition-indicator" onClick={(e) => { e.stopPropagation(); setTransitionPickerIdx(transitionPickerIdx === idx ? null : idx); }}
+                            title={`Transition: ${clip.transition || 'cut'} — click to change`}
+                          >
+                            {clip.transition === 'fade' ? '⬛' : clip.transition === 'dissolve' ? '🔀' : clip.transition === 'wipe' ? '➡️' : '·'}
+                            {transitionPickerIdx === idx && (
+                              <div className="clip-transition-picker" onClick={(e) => e.stopPropagation()}>
+                                {['cut', 'fade', 'dissolve', 'wipe'].map(tr => (
+                                  <button key={tr} className={clip.transition === tr || (!clip.transition && tr === 'cut') ? 'active' : ''}
+                                    onClick={() => { updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, transition: tr } : c)); setTransitionPickerIdx(null); }}
+                                  >{tr}</button>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
-                        {/* Show indicators for clips with custom settings */}
-                        {(clip.colorFilter && clip.colorFilter !== 'none') && <span style={{ position: 'absolute', top: 2, right: 28, fontSize: '10px' }} title={`Color: ${clip.colorFilter}`}>🎨</span>}
-                        {(clip.volume && clip.volume !== 1) && <span style={{ position: 'absolute', top: 2, right: 42, fontSize: '10px' }} title={`Volume: ${Math.round(clip.volume * 100)}%`}>🔊</span>}
-
-                        {/* Mobile trim controls */}
-                        <div className="mobile-trim-btns">
-                          <button className="mobile-trim-btn" onClick={(e) => { e.stopPropagation(); updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, start: Math.max(0, c.start - 1) } : c)); }} title="-1s start">-1s</button>
-                          <button className="mobile-trim-btn" onClick={(e) => { e.stopPropagation(); updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, end: c.end + 1 } : c)); }} title="+1s end">+1s</button>
-                          <button className="mobile-swipe-delete" onClick={(e) => { e.stopPropagation(); removeClipFromTimeline(idx); }}>Delete</button>
-                        </div>
-
-                        <button className="timeline-clip-remove" onClick={(e) => { e.stopPropagation(); removeClipFromTimeline(idx); }} title="Remove clip">x</button>
-                      </div>
+                      </React.Fragment>
                     );
                   })
                 )}
               </div>
-              {clipBasket.length > 0 && (
-                <div className="timeline-shortcuts-hint">
-                  ⌨️ Space: preview · Delete: remove · S: split · I/O: trim · ←→: nudge · ⌘Z: undo
-                </div>
-              )}
             </div>
+
+            {/* Clip Inspector Panel — below timeline when clip is selected */}
+            {selectedClipIndex !== null && clipBasket[selectedClipIndex] && (() => {
+              const clip = clipBasket[selectedClipIndex];
+              const idx = selectedClipIndex;
+              const colorSwatches = [
+                { id: 'none', label: 'None', color: '#f1f5f9' },
+                { id: 'warm', label: 'Warm', color: '#fbbf24' },
+                { id: 'cool', label: 'Cool', color: '#60a5fa' },
+                { id: 'cinematic', label: 'Cinema', color: '#8b5cf6' },
+                { id: 'high_contrast', label: 'Hi-Con', color: '#1e293b' },
+                { id: 'bw', label: 'B&W', color: '#6b7280' },
+                { id: 'sepia', label: 'Sepia', color: '#92400e' },
+                { id: 'vibrant', label: 'Vibrant', color: '#ec4899' },
+              ];
+              return (
+                <div className="clip-inspector">
+                  <div className="clip-inspector-header">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '14px' }}>🎬</span>
+                      <span style={{ fontWeight: 700, fontSize: '13px', color: '#1e293b' }}>Clip {idx + 1} of {clipBasket.length}</span>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>({(clip.end - clip.start).toFixed(1)}s)</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button className="btn btn-ghost" style={{ fontSize: '11px', padding: '4px 10px' }} onClick={() => { updateClipBasket(prev => [...prev, { ...clip, label: (clip.label || '') + ' (copy)' }]); addToast('📋 Clip duplicated!'); }} title="Duplicate clip">📋 Duplicate</button>
+                      <button className="btn btn-ghost" style={{ fontSize: '11px', padding: '4px 10px', color: '#ef4444' }} onClick={() => { removeClipFromTimeline(idx); setSelectedClipIndex(null); }} title="Delete clip">🗑️ Delete</button>
+                    </div>
+                  </div>
+                  <div className="clip-inspector-row">
+                    {/* Time controls */}
+                    <div className="clip-inspector-field">
+                      <label>Start</label>
+                      <button onClick={() => updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, start: Math.max(0, c.start - 1) } : c))} style={{ width: 24, height: 24, border: '1px solid #e2e8f0', borderRadius: 4, background: 'white', cursor: 'pointer' }}>−</button>
+                      <span style={{ fontFamily: 'monospace', fontSize: '12px', minWidth: '40px', textAlign: 'center' }}>{formatTime(clip.start)}</span>
+                      <button onClick={() => updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, start: c.start + 1 } : c))} style={{ width: 24, height: 24, border: '1px solid #e2e8f0', borderRadius: 4, background: 'white', cursor: 'pointer' }}>+</button>
+                    </div>
+                    <div className="clip-inspector-field">
+                      <label>End</label>
+                      <button onClick={() => updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, end: c.end - 1 } : c))} style={{ width: 24, height: 24, border: '1px solid #e2e8f0', borderRadius: 4, background: 'white', cursor: 'pointer' }}>−</button>
+                      <span style={{ fontFamily: 'monospace', fontSize: '12px', minWidth: '40px', textAlign: 'center' }}>{formatTime(clip.end)}</span>
+                      <button onClick={() => updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, end: c.end + 1 } : c))} style={{ width: 24, height: 24, border: '1px solid #e2e8f0', borderRadius: 4, background: 'white', cursor: 'pointer' }}>+</button>
+                    </div>
+
+                    {/* Divider */}
+                    <div style={{ width: 1, height: 28, background: '#e2e8f0' }} />
+
+                    {/* Color filter swatches */}
+                    <div className="clip-inspector-field">
+                      <label>Color</label>
+                      <div className="color-swatches">
+                        {colorSwatches.map(sw => (
+                          <div key={sw.id} className={`color-swatch ${(clip.colorFilter || 'none') === sw.id ? 'active' : ''}`}
+                            style={{ background: sw.color }}
+                            title={sw.label}
+                            onClick={() => updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, colorFilter: sw.id } : c))}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Divider */}
+                    <div style={{ width: 1, height: 28, background: '#e2e8f0' }} />
+
+                    {/* Volume */}
+                    <div className="clip-inspector-field">
+                      <label>🔊</label>
+                      <input type="range" min="0" max="200" value={Math.round((clip.volume || 1) * 100)} onChange={(e) => updateClipBasket(prev => prev.map((c, i) => i === idx ? { ...c, volume: parseInt(e.target.value) / 100 } : c))} style={{ width: '80px', accentColor: '#1E7F63' }} />
+                      <span style={{ fontSize: '11px', color: '#64748b', minWidth: '30px' }}>{Math.round((clip.volume || 1) * 100)}%</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Job Status */}
             {job.status !== "idle" && (

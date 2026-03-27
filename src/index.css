@@ -5577,30 +5577,321 @@ header.scrolled {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Trim handles — visible bars on hover */
 .trim-handle {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 8px;
+  width: 10px;
   cursor: col-resize;
   background: transparent;
   z-index: 5;
-  transition: background 0.1s;
+  transition: all 0.15s;
 }
 
-.trim-handle:hover,
-.trim-handle:active {
-  background: rgba(151, 214, 141, 0.4);
+.trim-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 24px;
+  background: rgba(30,127,99,0.4);
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.timeline-clip:hover .trim-handle::after,
+.trim-handle:active::after {
+  opacity: 1;
+}
+
+.trim-handle:hover::after,
+.trim-handle:active::after {
+  background: rgba(30,127,99,0.8);
+  height: 32px;
 }
 
 .trim-handle-left {
   left: 0;
-  border-radius: 6px 0 0 6px;
+  border-radius: 8px 0 0 8px;
+}
+
+.trim-handle-left::after {
+  left: 2px;
 }
 
 .trim-handle-right {
   right: 0;
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 8px 8px 0;
+}
+
+.trim-handle-right::after {
+  right: 2px;
+}
+
+/* Split button — appears on hover at top center */
+.clip-split-btn {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255,255,255,0.9);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.15s;
+  z-index: 6;
+}
+
+.timeline-clip:hover .clip-split-btn {
+  opacity: 1;
+}
+
+.clip-split-btn:hover {
+  background: #fff;
+  transform: translateX(-50%) scale(1.15);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+/* Transition indicator between clips */
+.clip-transition-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #f1f5f9;
+  border: 2px solid #e2e8f0;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  align-self: center;
+  position: relative;
+}
+
+.clip-transition-indicator:hover {
+  border-color: #22c55e;
+  background: #ecfdf5;
+  transform: scale(1.1);
+}
+
+.clip-transition-picker {
+  position: absolute;
+  bottom: 36px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  display: flex;
+  gap: 4px;
+  z-index: 20;
+  white-space: nowrap;
+}
+
+.clip-transition-picker button {
+  padding: 4px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+  font-size: 10px;
+  transition: all 0.1s;
+}
+
+.clip-transition-picker button:hover {
+  background: #ecfdf5;
+  border-color: #22c55e;
+}
+
+.clip-transition-picker button.active {
+  background: #1E7F63;
+  color: white;
+  border-color: #1E7F63;
+}
+
+/* Clip inspector panel below timeline */
+.clip-inspector {
+  margin-top: 8px;
+  padding: 14px 16px;
+  background: white;
+  border: 2px solid #d1fae5;
+  border-radius: 10px;
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.clip-inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.clip-inspector-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.clip-inspector-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.clip-inspector-field label {
+  font-weight: 600;
+  color: #64748b;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Color swatches */
+.color-swatches {
+  display: flex;
+  gap: 4px;
+}
+
+.color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid #e2e8f0;
+  cursor: pointer;
+  transition: all 0.15s;
+  position: relative;
+}
+
+.color-swatch:hover {
+  transform: scale(1.15);
+  border-color: #94a3b8;
+}
+
+.color-swatch.active {
+  border-color: #1E7F63;
+  box-shadow: 0 0 0 2px rgba(30,127,99,0.3);
+}
+
+.color-swatch.active::after {
+  content: '✓';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+/* Clip just-added animation */
+.timeline-clip-just-added {
+  animation: clipJustAdded 1s ease !important;
+}
+
+@keyframes clipJustAdded {
+  0% { box-shadow: 0 0 0 4px rgba(34,197,94,0.5); }
+  100% { box-shadow: none; }
+}
+
+/* Transcript panel for desktop */
+.desktop-transcript-panel {
+  max-height: 250px;
+  overflow-y: auto;
+  padding: 12px 16px;
+  border-left: 3px solid #22c55e;
+  background: #fafffe;
+  border-radius: 0 8px 8px 0;
+  line-height: 1.8;
+  font-size: 13px;
+  color: #334155;
+  scrollbar-width: thin;
+}
+
+.desktop-transcript-panel .sent {
+  display: inline;
+  cursor: text;
+  border-radius: 3px;
+  padding: 1px 2px;
+  transition: background 0.1s;
+}
+
+.desktop-transcript-panel .sent:hover {
+  background: rgba(34,197,94,0.1);
+}
+
+.desktop-transcript-panel .sent-add-btn {
+  display: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: #22c55e;
+  color: white;
+  font-size: 12px;
+  cursor: pointer;
+  vertical-align: middle;
+  margin-left: 2px;
+  line-height: 1;
+}
+
+.desktop-transcript-panel .sent:hover .sent-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Floating create-clip button for text selection */
+.floating-clip-btn {
+  position: fixed;
+  z-index: 100;
+  background: #1E7F63;
+  color: white;
+  border: none;
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(30,127,99,0.4);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  animation: floatIn 0.2s ease;
+  white-space: nowrap;
+}
+
+@keyframes floatIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.floating-clip-btn:hover {
+  background: #166534;
+  transform: scale(1.05);
 }
 
 .timeline-empty {
