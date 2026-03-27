@@ -8149,66 +8149,78 @@ export default function App() {
            ================================================================ */}
         {!isCloudMode && videoId && (
           <>
-            {/* Video Player — Full Width (no sidebar) */}
-            <div style={{ position: 'relative' }}>
-              <iframe
-                ref={playerRef}
-                title="video-player"
-                className="video-frame"
-                style={{ width: '100%', height: '420px', borderRadius: '12px', border: 'none' }}
-                src={`https://www.youtube.com/embed/${videoId}?autoplay=0&mute=0&playsinline=1&enablejsapi=1`}
-                allow="autoplay; encrypted-media; picture-in-picture"
-                allowFullScreen
-              />
-              {previewingClip && (
-                <div style={{
-                  position: 'absolute', top: 12, left: 12, background: 'rgba(30,127,99,0.9)', color: 'white',
-                  padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, zIndex: 10,
-                  display: 'flex', alignItems: 'center', gap: '8px', animation: 'fadeIn 0.3s ease'
-                }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', display: 'inline-block', animation: 'pulse 1s infinite' }} />
-                  Previewing Clip {previewingClip.idx + 1}
-                  <button onClick={() => { setPreviewingClip(null); if (previewTimerRef.current) clearTimeout(previewTimerRef.current); }} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '14px', padding: 0 }}>✕</button>
+            {/* Video Player + Word Cloud — Two Column Layout */}
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'stretch' }}>
+              {/* Left: Video Player */}
+              <div style={{ flex: '1 1 65%', position: 'relative', minWidth: 0 }}>
+                <iframe
+                  ref={playerRef}
+                  title="video-player"
+                  className="video-frame"
+                  style={{ width: '100%', height: '380px', borderRadius: '12px', border: 'none' }}
+                  src={`https://www.youtube.com/embed/${videoId}?autoplay=0&mute=0&playsinline=1&enablejsapi=1`}
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  allowFullScreen
+                />
+                {previewingClip && (
+                  <div style={{
+                    position: 'absolute', top: 12, left: 12, background: 'rgba(30,127,99,0.9)', color: 'white',
+                    padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, zIndex: 10,
+                    display: 'flex', alignItems: 'center', gap: '8px', animation: 'fadeIn 0.3s ease'
+                  }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', display: 'inline-block', animation: 'pulse 1s infinite' }} />
+                    Previewing Clip {previewingClip.idx + 1}
+                    <button onClick={() => { setPreviewingClip(null); if (previewTimerRef.current) clearTimeout(previewTimerRef.current); }} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '14px', padding: 0 }}>✕</button>
+                  </div>
+                )}
+              </div>
+
+              {/* Right: Word Cloud + Transcript Tools */}
+              <div style={{ flex: '0 0 32%', display: 'flex', flexDirection: 'column', gap: '10px', minWidth: '280px' }}>
+                {/* Word Cloud */}
+                {words.length > 0 && (
+                  <div style={{ padding: '14px', background: '#f0fdf4', borderRadius: '12px', border: '1px solid #d1fae5', flex: 1, overflow: 'auto' }}>
+                    <div style={{ fontWeight: 700, fontSize: '12px', color: '#166534', marginBottom: '10px' }}>🔤 Key Terms <span style={{ fontWeight: 400, fontSize: '10px', color: '#64748b' }}>click to search</span></div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 8px', alignItems: 'baseline' }}>
+                      {words.slice(0, 35).map((w, i) => {
+                        const maxCount = words[0].count;
+                        const ratio = w.count / maxCount;
+                        const size = ratio > 0.7 ? '20px' : ratio > 0.5 ? '17px' : ratio > 0.3 ? '14px' : ratio > 0.15 ? '12px' : '11px';
+                        const weight = ratio > 0.5 ? 800 : ratio > 0.3 ? 600 : 400;
+                        const colors = ['#166534', '#15803d', '#16a34a', '#22c55e', '#4ade80'];
+                        const colorIdx = Math.min(Math.floor((1 - ratio) * colors.length), colors.length - 1);
+                        return (
+                          <span key={w.text} style={{ fontSize: size, fontWeight: weight, color: colors[colorIdx], cursor: 'pointer', transition: 'all 0.15s', lineHeight: 1.3 }}
+                            title={`"${fixBrooklyn(w.text)}" — ${w.count} mentions`}
+                            onClick={() => setQuery(fixBrooklyn(w.text))}
+                            onMouseEnter={(e) => { e.currentTarget.style.color = '#059669'; e.currentTarget.style.textDecoration = 'underline'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.color = colors[colorIdx]; e.currentTarget.style.textDecoration = 'none'; }}
+                          >{fixBrooklyn(w.text)}</span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {/* Search + Tools */}
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: '140px', position: 'relative' }}>
+                    <input className="input" placeholder="🔍 Search transcript..." value={query} onChange={(e) => setQuery(e.target.value)} style={{ width: '100%', paddingRight: query ? '30px' : '8px', boxSizing: 'border-box', fontSize: '12px' }} />
+                    {query && <button onClick={() => setQuery('')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '13px' }}>✕</button>}
+                  </div>
+                  <select value={translateLang} onChange={(e) => setTranslateLang(e.target.value)} style={{ padding: '5px 6px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '11px' }}>
+                    <option value="Spanish">ES</option><option value="French">FR</option><option value="Portuguese">PT</option><option value="Chinese">ZH</option>
+                  </select>
+                  <button className="btn btn-ghost" style={{ fontSize: '10px', padding: '4px 8px' }} onClick={translateTranscript} disabled={loading.translate}>🌐</button>
+                  <button className="btn btn-ghost" style={{ fontSize: '10px', padding: '4px 8px' }} onClick={() => {
+                    const blob = new Blob([vtt || fullText], { type: vtt ? 'text/vtt' : 'text/plain' });
+                    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `transcript-${videoId}.${vtt ? 'vtt' : 'txt'}`; a.click(); URL.revokeObjectURL(url);
+                  }}>⬇️</button>
                 </div>
-              )}
+              </div>
             </div>
 
-            {/* 📝 Transcript & Tools — Compact Bar */}
-            <div className="card" style={{ marginTop: 12, padding: '12px 16px' }}>
-              {/* Word Cloud Row */}
-              {words.length > 0 && (
-                <div style={{ marginBottom: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#166534', marginRight: '4px' }}>🔤</span>
-                  {words.slice(0, 25).map((w, i) => {
-                    const maxCount = words[0].count;
-                    const ratio = w.count / maxCount;
-                    const size = ratio > 0.6 ? '16px' : ratio > 0.3 ? '13px' : '11px';
-                    return (
-                      <span key={w.text} style={{ fontSize: size, fontWeight: ratio > 0.4 ? 700 : 400, color: '#1e7f63', cursor: 'pointer', transition: 'all 0.15s' }}
-                        title={`"${fixBrooklyn(w.text)}" (${w.count} mentions) — click to search`}
-                        onClick={() => setQuery(fixBrooklyn(w.text))}
-                        onMouseEnter={(e) => { e.currentTarget.style.color = '#059669'; e.currentTarget.style.textDecoration = 'underline'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = '#1e7f63'; e.currentTarget.style.textDecoration = 'none'; }}
-                      >{fixBrooklyn(w.text)}</span>
-                    );
-                  })}
-                </div>
-              )}
-              {/* Search + Translate + Download Row */}
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: '200px', position: 'relative' }}>
-                  <input className="input" placeholder="🔍 Search transcript..." value={query} onChange={(e) => setQuery(e.target.value)} style={{ width: '100%', paddingRight: query ? '30px' : '8px', boxSizing: 'border-box' }} />
-                  {query && <button onClick={() => setQuery('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '14px' }}>✕</button>}
-                </div>
-                <select value={translateLang} onChange={(e) => setTranslateLang(e.target.value)} style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px' }}>
-                  <option value="Spanish">ES</option><option value="French">FR</option><option value="Portuguese">PT</option><option value="Chinese">ZH</option>
-                </select>
-                <button className="btn btn-ghost" style={{ fontSize: '11px', padding: '5px 10px' }} onClick={translateTranscript} disabled={loading.translate}>🌐 {loading.translate ? '...' : 'Translate'}</button>
-                <button className="btn btn-ghost" style={{ fontSize: '11px', padding: '5px 10px' }} onClick={() => {
-                  const blob = new Blob([vtt || fullText], { type: vtt ? 'text/vtt' : 'text/plain' });
-                  const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `transcript-${videoId}.${vtt ? 'vtt' : 'txt'}`; a.click(); URL.revokeObjectURL(url);
-                }}>⬇️ Download</button>
-              </div>
+            {/* Search Results (below video+wordcloud, full width) */}
+            <div style={{ marginTop: 8 }}>
               {/* Search Results (collapsible) */}
               {matches.length > 0 && (
                 <div style={{ marginTop: '10px', maxHeight: '200px', overflowY: 'auto', borderTop: '1px solid #e2e8f0', paddingTop: '8px' }}>
