@@ -54,7 +54,7 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
      - **Row 2 (secondary, when clips exist)**: Shuffle | Regenerate | Clear | Titles ON/OFF | Import .chreel (desktop)
      - **Download Full Video** — own compact row below toolbar (desktop only)
      - **Cloud**: Share Reel Link (blue), Render in Desktop App (green, downloads `.chreel`)
-   - **Timeline Editor** — dark-themed NLE track with drag-to-reorder, trim handles, loading animation, tooltips, YouTube thumbnail fallback
+   - **Timeline Editor** — dark-themed NLE track with drag-to-reorder, trim handles, loading animation, tooltips, per-clip thumbnails (backend 360p segment extraction with YouTube fallback)
    - **Highlights Panel** — always-visible panel under timeline showing all 10 AI highlights with "✓ In timeline" / "+ Add" status
    - **Clip Inspector** — dark-themed panel when clip selected
    - **Job Status** — progress bar during render
@@ -114,7 +114,7 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
 - **Seeking**: Input seeking (`-ss` before `-i`) + output trim, 1s buffer for keyframe alignment
 - **Text overlays**: `drawtext` filter, 6% of video height, green (#22C55E), DejaVu Sans Bold
 - **Lower thirds**: Speaker name + highlight text bar at 82% height, brand green (#1e7f63) background, fade-in animation, enabled via `lowerThirds` video option
-- **Captions**: SRT subtitles via `subtitles` filter with pill-style backgrounds (`BorderStyle=4`, semi-transparent black)
+- **Captions**: SRT subtitles via `subtitles` filter with pill-style backgrounds (`BorderStyle=4`, semi-transparent black). Default OFF — user must enable via toggle. Frontend sends `captions` flag in export request.
 - **Color filters**: 8 presets (vintage, warm, cool, high_contrast, bw, sepia, vibrant, cinematic)
 - **Transitions**: `fade` in/out, `xfade` between clips, 0.5s duration
 - **Speed**: `setpts` + `atempo` for 0.5x-2.0x
@@ -308,6 +308,6 @@ gh workflow run build-windows.yml -f version=v7.2.0
 
 ## Version
 
-Current: 7.3.1
+Current: 7.3.2
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)
