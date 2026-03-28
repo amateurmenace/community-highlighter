@@ -282,155 +282,32 @@ function HowToGuide({ onOpenAssistant }) {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
       element.style.transition = 'box-shadow 0.3s';
       element.style.boxShadow = '0 0 20px rgba(30, 127, 99, 0.5)';
-      setTimeout(() => {
-        element.style.boxShadow = 'none';
-      }, 1500);
+      setTimeout(() => { element.style.boxShadow = 'none'; }, 1500);
     }
   };
 
-  const borderColors = ['#000000', '#000000', '#000000', '#000000'];
-  const numColors = ['#059669', '#0891b2', '#7c3aed', '#db2777'];  // Colored backgrounds for numbers
-  const mainGreen = '#1e7f63';
+  const steps = [
+    { num: 1, color: '#059669', icon: '🔍', title: 'Search a Meeting', desc: 'Search any word or phrase across the full transcript. Click words in the word cloud to instantly find every mention.', target: 'search-section' },
+    { num: 2, color: '#0891b2', icon: '💬', title: 'Talk to a Meeting', desc: 'Ask an AI agent questions about the meeting. It reads the full transcript and gives you answers with citations.', action: 'assistant' },
+    { num: 3, color: '#7c3aed', icon: '🎬', title: 'Remix a Meeting', desc: 'AI selects the best moments and loads them into a video editor. Trim, reorder, and export highlight reels in one click.', target: 'editing-workspace' },
+    { num: 4, color: '#db2777', icon: '🔗', title: 'Share Highlights', desc: 'Export clips as video, share reel links with timestamps, or download the full transcript in multiple languages.', target: 'clip-basket-section' },
+  ];
 
   return (
-    <section 
-      className="how-to-permanent"
-      style={{
-        background: 'white',
-        padding: '16px 0',
-        borderBottom: '1px solid #e2e8f0'
-      }}
-    >
+    <section className="how-to-permanent" style={{ background: 'white', padding: '16px 0', borderBottom: '1px solid #e2e8f0' }}>
       <div className="howto" style={{ gap: '12px' }}>
-        {/* Step 1: Search a Meeting */}
-        <div 
-          className="step step-clickable" 
-          onClick={() => scrollToElement('search-section')}
-          style={{ 
-            cursor: 'pointer',
-            padding: '18px',
-            minHeight: '85px',
-            border: '2px solid ' + borderColors[0],
-            background: 'white',
-            borderRadius: '12px'
-          }}
-        >
-          <div className="num" style={{ 
-            background: numColors[0],
-            fontSize: '18px',
-            width: '40px',
-            height: '40px',
-          }}>1</div>
-          <div>
-            <div style={{ 
-              fontSize: '22px', 
-              fontWeight: '900',
-              color: mainGreen,
-              letterSpacing: '-0.5px'
-            }}>Search a Meeting</div>
-            <div className="step-subtitle" style={{ marginTop: '4px' }}>
-              Use the search bar or word cloud to find anything anywhere at anytime
+        {steps.map(step => (
+          <div key={step.num} className="step step-clickable"
+            onClick={() => step.action === 'assistant' ? (onOpenAssistant && onOpenAssistant(true)) : scrollToElement(step.target)}
+            style={{ cursor: 'pointer', padding: '18px', minHeight: '85px', border: '2px solid #000', background: 'white', borderRadius: '12px' }}
+          >
+            <div className="num" style={{ background: step.color, fontSize: '18px', width: '40px', height: '40px' }}>{step.num}</div>
+            <div>
+              <div style={{ fontSize: '22px', fontWeight: '900', color: '#1e7f63', letterSpacing: '-0.5px' }}>{step.title}</div>
+              <div className="step-subtitle" style={{ marginTop: '4px' }}>{step.desc}</div>
             </div>
           </div>
-        </div>
-
-        {/* Step 2: Talk to a Meeting */}
-        <div 
-          className="step step-clickable" 
-          onClick={() => {
-            if (onOpenAssistant) onOpenAssistant(true);
-          }}
-          style={{ 
-            cursor: 'pointer',
-            padding: '18px',
-            minHeight: '85px',
-            border: '2px solid ' + borderColors[1],
-            background: 'white',
-            borderRadius: '12px'
-          }}
-        >
-          <div className="num" style={{ 
-            background: numColors[1],
-            fontSize: '18px',
-            width: '40px',
-            height: '40px',
-          }}>2</div>
-          <div>
-            <div style={{ 
-              fontSize: '22px', 
-              fontWeight: '900',
-              color: mainGreen,
-              letterSpacing: '-0.5px'
-            }}>Talk to a Meeting</div>
-            <div className="step-subtitle" style={{ marginTop: '4px' }}>
-              An AI Agent will embed in the meeting and answer your questions
-            </div>
-          </div>
-        </div>
-
-        {/* Step 3: Analyze a Meeting */}
-        <div 
-          className="step step-clickable" 
-          onClick={() => scrollToElement('analytics-section')}
-          style={{ 
-            cursor: 'pointer',
-            padding: '18px',
-            minHeight: '85px',
-            border: '2px solid ' + borderColors[2],
-            background: 'white',
-            borderRadius: '12px'
-          }}
-        >
-          <div className="num" style={{ 
-            background: numColors[2],
-            fontSize: '18px',
-            width: '40px',
-            height: '40px',
-          }}>3</div>
-          <div>
-            <div style={{ 
-              fontSize: '22px', 
-              fontWeight: '900',
-              color: mainGreen,
-              letterSpacing: '-0.5px'
-            }}>Analyze a Meeting</div>
-            <div className="step-subtitle" style={{ marginTop: '4px' }}>
-              Use data visualizations to make quick sense of long meetings
-            </div>
-          </div>
-        </div>
-
-        {/* Step 4: Highlight a Meeting */}
-        <div 
-          className="step step-clickable" 
-          onClick={() => scrollToElement('clip-basket-section')}
-          style={{ 
-            cursor: 'pointer',
-            padding: '18px',
-            minHeight: '85px',
-            border: '2px solid ' + borderColors[3],
-            background: 'white',
-            borderRadius: '12px'
-          }}
-        >
-          <div className="num" style={{ 
-            background: numColors[3],
-            fontSize: '18px',
-            width: '40px',
-            height: '40px',
-          }}>4</div>
-          <div>
-            <div style={{ 
-              fontSize: '22px', 
-              fontWeight: '900',
-              color: mainGreen,
-              letterSpacing: '-0.5px'
-            }}>Highlight a Meeting</div>
-            <div className="step-subtitle" style={{ marginTop: '4px' }}>
-              Choose clips to watch, download, & even auto edit into a reel - or have AI do it all for you!
-            </div>
-          </div>
-        </div>
+        ))}
       </div>
     </section>
   );
