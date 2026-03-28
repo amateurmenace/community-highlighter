@@ -7,7 +7,7 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 - **Frontend**: React 19 + Vite + vite-plugin-pwa, built to `dist/`. Monolithic `src/App.jsx` (~9400 lines) with 25+ inline sub-components
 - **Backend**: FastAPI (`backend/app.py`, ~304KB monolith), served by Uvicorn on port 8000. 69 API endpoints
 - **Desktop packaging**: PyInstaller bundles into macOS `.app` (signed+notarized) and Windows `.exe`
-- **Cloud deployment**: Render (https://community-highlighter.onrender.com/) — video download disabled in cloud mode
+- **Cloud deployment**: Render (https://community-highlighter.onrender.com/) — full video editor with Share Reel Link + Desktop Handoff (.chreel); video download/render disabled in cloud mode
 - **GitHub**: https://github.com/amateurmenace/community-highlighter
 - **Latest release**: https://github.com/amateurmenace/community-highlighter/releases/latest
 
@@ -27,53 +27,66 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 1. Paste YouTube URL → Load Video
 2. Transcript auto-extracted (YouTubeTranscriptApi → YouTube Data API → yt-dlp fallback chain)
 3. AI generates summary + 10 key highlights with direct quotes (GPT-4o/GPT-5.1, map-reduce for long transcripts)
-4. User can: search transcript, view analytics (entities, decisions, topics, participation), build highlight reels
-5. Three paths to reels: (a) one-click AI auto-reel, (b) clip basket from search/timeline, (c) manual transcript selection
-6. **Highlight reels load into the timeline editor** for review, trimming, reordering, and editing before export
-7. Backend renders clips via ffmpeg, user downloads MP4/ZIP
-8. **Celebration modal** with confetti animation on render completion, download history tracking
+4. **Hero "Make AI Highlight Reel" button** — prominent green CTA directly below video, one-click with sensible defaults
+5. User selects reel style from collapsible "Choose Reel Style" panel: Decisions, Comments, Controversial, Budget, Actions, Social (with descriptions)
+6. **Top 5 of 10 AI highlights auto-load into dark timeline editor** — user can add remaining 5 from the Highlights panel (shows "✓ In timeline" / "+ Add" per highlight)
+7. User can also: search transcript (rich result cards with Watch/+Timeline/Context/Investigate), view analytics, build clips manually
+8. Export via labeled "Export N Clips as Video" button + "Download Full Video" button (orange, with resolution picker) in toolbar → backend renders via ffmpeg → MP4/ZIP download
+9. **Celebration modal** with confetti animation on render completion, download history tracking
 
-## UI Layout (Video-Editor-First Design)
+## UI Layout (Video Editor — Dark Workspace Design)
 
-The interface prioritizes video editing over data visualization:
+Both desktop and cloud users get the same full video editor. Cloud users can build and preview reels, then share via link or export as `.chreel` file for desktop rendering. The interface uses a unified dark editing workspace inspired by professional NLEs (Premiere Pro / DaVinci Resolve):
 
-1. **Video Player** — top of page, embedded YouTube iframe
-2. **Hero Button** — "Make a 2-Minute Highlight Reel" directly below video player, one-click with sensible defaults
-3. **Template Presets** — Quick Share (720p/60s/social), Meeting Brief (1080p/5min), News Clip (720p/90s/titled)
-4. **Quick Action Buttons** — compact row: "AI Highlight Reel", "Social Media Reel", "Export Clips", "Download Full Video" (MP4 button with integrated resolution picker)
-5. **Timeline Editor** — professional NLE-style timeline with:
-   - Drag-to-reorder clips on a horizontal track (desktop)
-   - Vertical clip cards with -1s/+1s trim buttons (mobile < 768px)
-   - Per-clip trim handles (adjust start/end)
-   - Waveform visualization per clip
-   - Thumbnail strip for visual reference
-   - Playback head / scrubber
-   - Zoom in/out on timeline
-   - Light theme (white/gray background, not dark)
-   - In-timeline action buttons: Export, AI Reel, Social Reel, Clear
-6. **Settings Panel** — compact horizontal layout with "More/Less Options" toggle:
-   - **Always visible**: Resolution, Captions, Music, Normalize, Transitions, Color
-   - **Expanded**: Speed, Intro/Outro Title/Subtitle/CTA, Labels, Watermark
-7. **Clip Basket** — clips added from search results, transcript selections, or AI highlights
-8. **Transcript Panel** — searchable, clickable timestamps, touch "+" buttons on mobile
+1. **Search & Discover Zone** — appears ABOVE the editor, white card with neo-brutalist borders:
+   - **Search Bar** — full-width, large input (15px), 🔬 Investigate, 🌐 Translate, ⬇️ Download, language selector (8 languages)
+   - **Search Sparkline** — timeline distribution bar (50 bins) when searching
+   - **Two-column grid**:
+     - **Left**: Word Cloud Hero (420px min-height, dark blueprint bg, ALL words, top 3 glow) OR Search Result Cards (when searching)
+     - **Right**: Small preview video (240px YouTube embed, `searchPlayerRef`) + Jargon Translator + compact Highlights list
+   - Search result "▶ Watch" seeks the small preview player; timeline clips seek the big editor player
+2. **Dark Editing Workspace** (`#0f1419` background) — video + toolbar + timeline as one connected unit:
+   - **Video Player** — full-width, 520px height, embedded YouTube iframe (`playerRef`)
+   - **Hero AI Reel Button** — full-width green gradient CTA "Make AI Highlight Reel" (loads top 5 of 10 highlights)
+   - **Collapsible Reel Styles** — "🎬 Choose Reel Style" toggle reveals 6 cards with descriptions
+   - **Compact Toolbar** — adapts to environment:
+     - **Desktop**: Export button (green), Download Full Video (orange) with resolution picker
+     - **Cloud**: Share Reel Link (blue), Render in Desktop App (green, downloads `.chreel`)
+     - **Both**: clip count, zoom, Chapter Titles ON/OFF, Shuffle/Regenerate/Clear, "⚙️ Customize Settings"
+   - **Timeline Editor** — dark-themed NLE track with drag-to-reorder, trim handles, loading animation, tooltips
+   - **Clip Inspector** — dark-themed panel when clip selected
+   - **Job Status** — progress bar during render
+3. **Bottom Panel** — AI Summary, Key Highlights, Transcript Tools (Translate/Download/View Full Transcript)
+4. **Meeting Analyzer Button** — large animated toggle button with decorative divider lines:
+   - "📊 Open Meeting Analyzer ▼" — dark themed, pulsing icon, hover glow
+   - Reveals ALL data visualizations: Scorecard, Entities, Participation, Topics, Timeline, Disagreements, Dynamics, Cross-References, Subscriptions, Issue Tracker
+   - Hidden by default to reduce page length
+5. **Settings Drawer** — slides from right edge (400px), triggered by "⚙️ Customize Settings":
+   - Quality: Resolution, Speed, Audio Normalize
+   - Effects: Captions, Color Filter, Transitions, Background Music
+   - Branding: Intro/Outro Title/Subtitle/CTA, Chapter Titles, Watermark, Speaker Labels
+   - Full Video Download with resolution picker (desktop only)
 9. **Meeting Analytics** — pushed below the fold (entities, decisions, topics, participation)
-10. **Share Panel** — Web Share API on mobile, Copy/Twitter/Facebook/Email on desktop
+10. **Share Panel** — integrated in insights panel and bottom panel
 11. **Download History** — header badge with recent downloads dropdown, toast notifications
 
 ## Onboarding & First-Visit Experience
 
 - **Onboarding Wizard**: 3-step first-visit overlay introducing key features
+- **First-clip tooltip**: When AI loads clips into timeline, first clip shows tip: "Click to edit, drag edges to trim, drag to reorder, click Customize Settings for effects"
 - Tracked via localStorage (`ch_onboarding_done`) — only shows once
 - Steps: (1) Paste a YouTube URL, (2) AI generates highlights, (3) Build and export reels
 
 ## Video Processing Pipeline
 
 ### Download
-- yt-dlp with format `best[ext=mp4]/best`, 10-min timeout
-- Cached in `backend/cache/{videoId}.mp4`
+- yt-dlp with format `bv*[height<=H]+ba/b` + `-S res:H,ext:mp4` for proper DASH stream support (1080p+ are separate video+audio on YouTube)
+- `--merge-output-format mp4` merges DASH streams into MP4
+- Cached in `backend/cache/{videoId}_{resolution}.mp4` (resolution-specific to avoid cache collisions)
+- Async download with progress tracking via JOBS system (polls every 1.5s, shows percentage)
 - Non-MP4 outputs remuxed via `ffmpeg -c copy -movflags +faststart`
 - Optional Webshare residential proxy for YouTube blocks
-- **Resolution choices**: User can select download quality (best/1080p/720p/480p/360p)
+- **Resolution choices**: User can select download quality (best/2160p/1440p/1080p/720p/480p/360p)
 
 ### Cache Management
 - **Automatic cleanup**: `cleanup_cache()` runs on startup and every 6 hours via FastAPI `lifespan`
@@ -105,6 +118,10 @@ The interface prioritizes video editing over data visualization:
 - Fallback: clips at regular intervals if no timestamps matched
 
 ### Remaining Opportunities
+- ~~Render pipeline double-encoding~~ **FIXED**: Concat now uses `-c copy` (stream copy) when no intro/outro slides — skips the expensive second re-encode pass
+- ~~Slow encoding preset~~ **FIXED**: Changed from `-preset fast` to `-preset veryfast` for all clip extraction
+- **Sequential clip processing**: All clips processed one at a time — parallelizing extraction (2-4 threads) would save 30-50%
+- **Per-clip segment downloads**: Each clip triggers a separate yt-dlp download — merging adjacent segments would reduce network overhead
 - Hardware acceleration (detected but not used — libx264 for reliability)
 - Shrink PyInstaller bundle by excluding unused ML deps (torch/scipy/sklearn)
 - Exponential backoff for job polling (currently fixed 1.5s interval)
@@ -160,6 +177,8 @@ The interface prioritizes video editing over data visualization:
 - YouTube embedded via iframe (no programmatic play/pause control)
 - Job polling: `setInterval` every 1.5s, no exponential backoff
 - Timeline editor state: `clipBasket` array with per-clip start/end/title/thumbnail
+- Settings drawer state: `showSettingsDrawer` — slides from right, closes on Escape
+- Two-column analysis grid: layout adapts based on search state (results left + word cloud right, or word cloud left + insights right)
 - Download history: persisted in localStorage (`ch_downloads`), max 20 entries
 - Onboarding: first-visit wizard tracked via localStorage (`ch_onboarding_done`)
 - Toast notifications: auto-dismiss after 4s, fixed bottom-right

@@ -3799,13 +3799,13 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
     """
     # Build yt-dlp format string based on resolution option
     def get_ytdlp_format(res):
+        """Build yt-dlp format string. Uses bv+ba for DASH stream support (1080p+)."""
         if not res or res == 'best':
-            return "best[ext=mp4]/best"
-        # Extract height number from strings like '720p', '1080p'
+            return "bv*+ba/b"
         h = re.sub(r'[^0-9]', '', str(res))
         if h:
-            return f"best[ext=mp4][height<={h}]/best[ext=mp4]/best"
-        return "best[ext=mp4][height<=720]/best[ext=mp4]/best"
+            return f"bv*[height<={h}]+ba/b[height<={h}]/bv*+ba/b"
+        return "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b"
 
     job = JOBS[job_id]
     job["status"] = "running"
@@ -4186,9 +4186,13 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
             # Use yt-dlp's download-sections feature
             section_spec = f"*{section_start}-{section_end}"
             
+            # Build format and sort args for proper resolution selection
+            seg_h = re.sub(r'[^0-9]', '', str(resolution)) if resolution and resolution != 'best' else ''
+            seg_sort = ["-S", f"res:{seg_h},ext:mp4"] if seg_h else ["-S", "res,ext:mp4"]
             cmd = [
                 YTDLP_BIN,
                 "-f", get_ytdlp_format(resolution),
+                *seg_sort,
                 "--merge-output-format", "mp4",
                 "--download-sections", section_spec,
                 "--force-keyframes-at-cuts",
@@ -4322,7 +4326,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             "-ss", str(trim_start),
                             "-t", str(duration),
                             "-vf", ",".join(vf_filters),
-                            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                         ]
                     else:
                         cmd = [
@@ -4331,7 +4335,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             "-i", current_video,
                             "-ss", str(trim_start),
                             "-t", str(duration),
-                            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                         ]
                     if af_args:
                         cmd.extend(["-af", ",".join(af_args)])
@@ -4446,7 +4450,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                         "-ss", str(trim_start),
                         "-t", str(duration),
                         "-filter_complex", filter_complex,
-                        "-c:v", "libx264", "-preset", "fast",
+                        "-c:v", "libx264", "-preset", "veryfast",
                         "-crf", "20",
                         "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                         clip_file, "-y"
@@ -4460,20 +4464,21 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                         clip_files.append(clip_file)
                         running_time += duration
                 
-                # Concatenate clips - always re-encode for consistent audio
+                # Concatenate clips — use stream copy (clips already encoded)
                 if clip_files:
                     concat_file = os.path.join(work, "social_concat.txt")
                     with open(concat_file, "w") as f:
                         for cf in clip_files:
                             f.write(f"file '{cf}'\n")
-                    
+
                     cmd = [
                         "ffmpeg", "-f", "concat", "-safe", "0",
                         "-i", concat_file,
-                        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-                        "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
+                        "-c", "copy",
+                        "-movflags", "+faststart",
                         output, "-y"
                     ]
+                    print(f"[simple_job] Social concat using stream copy (no re-encode)")
                     result = subprocess.run(cmd, capture_output=True)
 
         else:  # combined / default
@@ -4572,7 +4577,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                                 "-ss", str(trim_start),  # Output seeking (accurate)
                                 "-t", str(duration),
                                 "-vf", vf_string,
-                                "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                                 "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                                 "-async", "1",  # Audio sync
                                 clip_file, "-y"
@@ -4585,7 +4590,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                                 "-i", current_video,
                                 "-ss", str(trim_start),
                                 "-t", str(duration),
-                                "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                                 "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                                 "-async", "1",
                                 clip_file, "-y"
@@ -4594,7 +4599,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                         if result.returncode != 0:
                             print(f"[combined] FFmpeg error: {result.stderr[:500]}")
                     else:
-                        # Re-encode even without captions for consistent audio sync
+                        # Re-encode without filters — use faster preset since concat will stream copy
                         clip_file = os.path.join(work, f"temp_{i}.mp4")
                         seek_time = max(0, start - 1)
                         trim_start = start - seek_time
@@ -4604,7 +4609,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             "-i", current_video,
                             "-ss", str(trim_start),
                             "-t", str(duration),
-                            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                             "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                             clip_file, "-y"
                         ]
@@ -4637,14 +4642,29 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     for cf in clip_files_for_concat:
                         f.write(f"file '{cf}'\n")
 
-                # Always re-encode for consistent audio sync
-                cmd = [
-                    "ffmpeg", "-f", "concat", "-safe", "0",
-                    "-i", concat_file,
-                    "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-                    "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
-                    output, "-y"
-                ]
+                # Optimization: use stream copy when all clips are already encoded
+                # with matching settings (no intro/outro slides that may differ)
+                has_slides = bool(intro_title or outro_title)
+                if has_slides or len(clip_files_for_concat) <= 1:
+                    # Re-encode when mixing slides with video or single clip
+                    cmd = [
+                        "ffmpeg", "-f", "concat", "-safe", "0",
+                        "-i", concat_file,
+                        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
+                        output, "-y"
+                    ]
+                else:
+                    # Stream copy — clips are already encoded at target quality
+                    # This skips the expensive second re-encode pass
+                    cmd = [
+                        "ffmpeg", "-f", "concat", "-safe", "0",
+                        "-i", concat_file,
+                        "-c", "copy",
+                        "-movflags", "+faststart",
+                        output, "-y"
+                    ]
+                    print(f"[simple_job] Using stream copy for concat (no re-encode)")
                 subprocess.run(cmd, capture_output=True)
 
         # ================================================================
@@ -5330,61 +5350,111 @@ async def download_mp4(req: Request):
 
     print(f"[download_mp4] Starting download for video: {vid} at resolution: {resolution}")
 
-    output = os.path.join(FILES_DIR, f"{vid}.mp4")
+    # Include resolution in filename so different qualities don't collide in cache
+    res_suffix = f"_{resolution}" if resolution and resolution != 'best' else ""
+    output = os.path.join(FILES_DIR, f"{vid}{res_suffix}.mp4")
 
-    # Check if already downloaded (including alternative extensions from previous runs)
+    # Check if already downloaded at this resolution
     if os.path.exists(output):
-        print(f"[download_mp4] Video already exists: {output}")
+        print(f"[download_mp4] Video already exists at requested quality: {output}")
         return {"file": f"/files/{os.path.basename(output)}", "cached": True}
 
-    # Also check for previously downloaded files with different extensions
+    # Also check for previously downloaded files with different extensions at this resolution
     existing = find_ytdlp_output(output)
     if existing:
         print(f"[download_mp4] Found existing video at: {existing}")
         return {"file": f"/files/{os.path.basename(existing)}", "cached": True}
 
-    # Build format string based on resolution
-    if not resolution or resolution == 'best':
-        fmt = "best[ext=mp4]/best"
+    # Build format string and sort preference based on resolution
+    # Use -S (sort) for reliable resolution selection — works better than -f filters
+    # across yt-dlp versions and handles DASH streams (1080p+ are separate video+audio)
+    h = re.sub(r'[^0-9]', '', str(resolution)) if resolution and resolution != 'best' else ''
+    if h:
+        fmt = f"bv*[height<={h}]+ba/b[height<={h}]/bv*+ba/b"
+        sort_args = ["-S", f"res:{h},ext:mp4"]
     else:
-        h = re.sub(r'[^0-9]', '', str(resolution))
-        fmt = f"best[ext=mp4][height<={h}]/best[ext=mp4]/best" if h else "best[ext=mp4]/best"
+        fmt = "bv*+ba/b"
+        sort_args = ["-S", "res,ext:mp4"]
 
-    # Download with yt-dlp
-    try:
-        cmd = [
-            YTDLP_BIN,
-            "-f", fmt,
-            "--merge-output-format", "mp4",
-            "--no-playlist",
-            "-o", output,
-            f"https://www.youtube.com/watch?v={vid}",
-        ]
-        print(f"[download_mp4] Running: {' '.join(cmd)}")
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        
-        if result.returncode != 0:
-            print(f"[download_mp4] yt-dlp error: {result.stderr}")
-            return {"error": f"Download failed: {result.stderr[:200]}"}
-        
-        # Handle yt-dlp potentially saving with different extension
-        actual_file = find_ytdlp_output(output)
-        if actual_file:
-            output = actual_file
-        
-        if os.path.exists(output):
-            file_size = os.path.getsize(output)
-            print(f"[download_mp4] Success! File size: {file_size / 1024 / 1024:.1f} MB")
-            return {"file": f"/files/{os.path.basename(output)}", "size": file_size}
-        else:
-            return {"error": "Download completed but file not found"}
-            
-    except subprocess.TimeoutExpired:
-        return {"error": "Download timed out after 10 minutes"}
-    except Exception as e:
-        print(f"[download_mp4] Exception: {e}")
-        return {"error": str(e)}
+    print(f"[download_mp4] Resolution: {resolution}, Format: {fmt}, Sort: {sort_args}")
+
+    # Download with yt-dlp — track progress via JOBS system
+    import uuid as _uuid
+    dl_job_id = f"dl_{_uuid.uuid4().hex[:8]}"
+    JOBS[dl_job_id] = {"status": "running", "percent": 0, "message": "Starting download...", "file": None}
+
+    def _run_download():
+        job = JOBS[dl_job_id]
+        try:
+            cmd = [
+                YTDLP_BIN,
+                "-f", fmt,
+                *sort_args,
+                "--merge-output-format", "mp4",
+                "--no-playlist",
+                "--newline",  # Progress on separate lines for parsing
+                "-o", output,
+                f"https://www.youtube.com/watch?v={vid}",
+            ]
+            print(f"[download_mp4] Running: {' '.join(cmd)}")
+
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in proc.stdout:
+                line = line.strip()
+                # Log format selection info
+                if '[info]' in line and ('format' in line.lower() or 'video' in line.lower()):
+                    print(f"[download_mp4] {line}")
+                if 'Downloading video' in line or 'Downloading f' in line:
+                    print(f"[download_mp4] {line}")
+                # Parse yt-dlp progress: [download]  45.2% of ~50MiB
+                if '[download]' in line and '%' in line:
+                    try:
+                        pct_str = line.split('%')[0].split()[-1]
+                        pct = float(pct_str)
+                        job["percent"] = min(int(pct), 95)
+                        job["message"] = f"Downloading... {int(pct)}%"
+                    except (ValueError, IndexError):
+                        pass
+                elif '[Merger]' in line or 'Merging' in line:
+                    job["percent"] = 96
+                    job["message"] = "Merging video and audio..."
+                elif 'has already been downloaded' in line:
+                    job["percent"] = 100
+                    job["message"] = "Already downloaded"
+            proc.wait(timeout=600)
+
+            if proc.returncode != 0:
+                job["status"] = "error"
+                job["message"] = "Download failed"
+                return
+
+            # Handle yt-dlp potentially saving with different extension
+            actual_file = find_ytdlp_output(output)
+            final = actual_file or output
+
+            if os.path.exists(final):
+                file_size = os.path.getsize(final)
+                print(f"[download_mp4] Success! File size: {file_size / 1024 / 1024:.1f} MB")
+                job["status"] = "done"
+                job["percent"] = 100
+                job["message"] = "Download complete"
+                job["file"] = f"/files/{os.path.basename(final)}"
+                job["size"] = file_size
+            else:
+                job["status"] = "error"
+                job["message"] = "Download completed but file not found"
+
+        except subprocess.TimeoutExpired:
+            job["status"] = "error"
+            job["message"] = "Download timed out after 10 minutes"
+        except Exception as e:
+            print(f"[download_mp4] Exception: {e}")
+            job["status"] = "error"
+            job["message"] = str(e)
+
+    import threading
+    threading.Thread(target=_run_download, daemon=True).start()
+    return {"jobId": dl_job_id, "message": "Download started"}
 
 
 def find_quote_timestamp(quote: str, transcript_cache: dict, video_id: str) -> tuple:
