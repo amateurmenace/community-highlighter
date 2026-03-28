@@ -74,6 +74,11 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
 ## Onboarding & First-Visit Experience
 
 - **Onboarding Wizard**: 3-step first-visit overlay introducing key features
+- **HowToGuide**: 4-step guide shown before video loads (hidden after):
+  1. Search a Meeting — search words across transcript, word cloud
+  2. Talk to a Meeting — AI agent answers questions with citations
+  3. Remix a Meeting — AI selects moments, video editor, export reels
+  4. Share Highlights — export clips, share reel links, download transcript
 - **First-clip tooltip**: When AI loads clips into timeline, first clip shows tip: "Click to edit, drag edges to trim, drag to reorder, click Customize Settings for effects"
 - Tracked via localStorage (`ch_onboarding_done`) — only shows once
 - Steps: (1) Paste a YouTube URL, (2) AI generates highlights, (3) Build and export reels
