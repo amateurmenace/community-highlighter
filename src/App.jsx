@@ -6708,8 +6708,8 @@ export default function App() {
   }, []);
 
 
-  const loadAll = async () => {
-    const vid = extractVideoId(url);
+  const loadAll = async (overrideVideoId) => {
+    const vid = overrideVideoId || extractVideoId(url);
     setVideoId(vid);
     if (!vid) {
       alert("Please enter a valid YouTube URL or video ID");
@@ -7106,7 +7106,15 @@ export default function App() {
         videoId,
         clips: clipBasket,
         format: format,
-        title: videoTitle || "Community Highlight Reel"
+        title: videoTitle || "Community Highlight Reel",
+        captions: reelCaptionsEnabled,
+        disableAllAdvanced: !reelCaptionsEnabled && !videoOptions.colorFilter && !videoOptions.transitions,
+        colorFilter: videoOptions.colorFilter || 'none',
+        transitions: videoOptions.transitionType === 'fade',
+        normalizeAudio: videoOptions.normalizeAudio !== false,
+        showHighlightLabels: videoOptions.showHighlightLabels !== false,
+        lowerThirds: videoOptions.lowerThirds || false,
+        resolution: videoOptions.resolution || '720p',
       });
       pollJobStatus(res.jobId);
     } catch (e) {
@@ -7940,7 +7948,7 @@ export default function App() {
                 if (chreel.options.colorFilter) setVideoOptions(prev => ({...prev, colorFilter: chreel.options.colorFilter}));
               }
               addToast(`Imported ${importedClips.length} clips from ${file.name} — loading video...`);
-              setTimeout(() => loadAll(), 500);
+              setTimeout(() => loadAll(chreel.videoId), 300);
             } catch (err) {
               addToast('Failed to read .chreel file: ' + err.message);
             }
@@ -8856,7 +8864,7 @@ export default function App() {
                             <div className="trim-handle trim-handle-left" onMouseDown={(e) => startTrim(e, idx, 'start')} title="⟵ Drag to extend or shorten the clip start time" />
 
                             <div className="timeline-clip-content">
-                              {(thumb?.url || videoId) && <img src={thumb?.url || `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`} className="timeline-clip-thumb" alt="" />}
+                              {videoId && <img src={thumb?.url || `https://img.youtube.com/vi/${videoId}/${Math.min(3, Math.floor(clip.start / ((clipBasket[clipBasket.length-1]?.end || 300) / 4)))}.jpg`} className="timeline-clip-thumb" alt="" onError={(e) => { e.target.src = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`; }} />}
                               <span className="timeline-clip-label">{clip.label || clip.highlight || `Clip ${idx + 1}`}</span>
                               <span className="timeline-clip-duration">{formatTime(clip.start)} – {formatTime(clip.end)} ({duration.toFixed(0)}s)</span>
                             </div>

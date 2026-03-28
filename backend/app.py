@@ -5583,42 +5583,67 @@ async def get_video_formats(video_id: str):
 
 @app.post("/api/clip_thumbnails")
 async def clip_thumbnails(req: Request):
-    """Generate thumbnails for clip timeline preview"""
+    """Generate thumbnails for clip timeline preview.
+    Works with cached full video OR downloads small segments for thumbnails."""
     data = await req.json()
     vid = data.get("videoId", "")
     clips = data.get("clips", [])
 
     video_file = os.path.join(FILES_DIR, f"{vid}.mp4")
+    has_full_video = os.path.exists(video_file)
     thumbnails = []
 
-    if not os.path.exists(video_file):
-        return {"thumbnails": [], "message": "Video not downloaded yet"}
-
-    for i, clip in enumerate(clips):
+    def _gen_thumb(i, clip):
         start = clip.get('start', 0)
         end = clip.get('end', start + 15)
         midpoint = (start + end) / 2
         thumb_name = f"thumb_{vid}_{i}_{int(start)}.jpg"
         thumb_path = os.path.join(FILES_DIR, thumb_name)
 
-        if not os.path.exists(thumb_path):
-            try:
+        if os.path.exists(thumb_path):
+            return {'index': i, 'url': f'/files/{thumb_name}', 'start': start, 'end': end,
+                    'duration': round(end - start, 1), 'highlight': clip.get('highlight', clip.get('label', f'Clip {i+1}'))}
+
+        try:
+            if has_full_video:
+                # Extract from cached full video
                 cmd = ["ffmpeg", "-ss", str(midpoint), "-i", video_file,
                        "-vframes", "1", "-s", "320x180", "-q:v", "5", thumb_path, "-y"]
                 subprocess.run(cmd, capture_output=True, timeout=10)
-            except Exception:
-                pass
+            else:
+                # Download a tiny segment just for the thumbnail
+                seg_file = os.path.join(FILES_DIR, f"thumbseg_{vid}_{i}.mp4")
+                seg_cmd = [
+                    YTDLP_BIN, "-f", "bv*[height<=360]+ba/b[height<=360]/bv*+ba/b",
+                    "-S", "res:360,ext:mp4",
+                    "--download-sections", f"*{max(0, midpoint-1)}-{midpoint+1}",
+                    "--no-playlist", "-o", seg_file,
+                    f"https://www.youtube.com/watch?v={vid}",
+                ]
+                subprocess.run(seg_cmd, capture_output=True, timeout=30)
+                actual = find_ytdlp_output(seg_file)
+                if actual:
+                    cmd = ["ffmpeg", "-i", actual, "-vframes", "1", "-s", "320x180", "-q:v", "5", thumb_path, "-y"]
+                    subprocess.run(cmd, capture_output=True, timeout=10)
+                    try: os.remove(actual)
+                    except: pass
+        except Exception as e:
+            print(f"[clip_thumbnails] Thumb {i} failed: {e}")
 
         if os.path.exists(thumb_path):
-            thumbnails.append({
-                'index': i,
-                'url': f'/files/{thumb_name}',
-                'start': start,
-                'end': end,
-                'duration': round(end - start, 1),
-                'highlight': clip.get('highlight', clip.get('label', f'Clip {i+1}'))
-            })
+            return {'index': i, 'url': f'/files/{thumb_name}', 'start': start, 'end': end,
+                    'duration': round(end - start, 1), 'highlight': clip.get('highlight', clip.get('label', f'Clip {i+1}'))}
+        return None
 
+    # Generate thumbnails in parallel (fast since they're tiny 360p segments)
+    with ThreadPoolExecutor(max_workers=min(4, len(clips))) as pool:
+        futures = [pool.submit(_gen_thumb, i, c) for i, c in enumerate(clips[:10])]
+        for fut in as_completed(futures):
+            result = fut.result()
+            if result:
+                thumbnails.append(result)
+
+    thumbnails.sort(key=lambda t: t['index'])
     return {"thumbnails": thumbnails}
 
 
