@@ -7261,6 +7261,7 @@ export default function App() {
         currentHighlights = generated;
       } catch (e) {
         console.error("Highlight generation error:", e);
+        addToast(`Could not generate highlights: ${e.message || 'Unknown error'}. Try again.`);
         setProcessStatus({ active: false, message: "", percent: 0 });
         setLoading(l => ({ ...l, reel: false }));
         return;

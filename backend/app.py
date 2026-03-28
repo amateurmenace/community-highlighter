@@ -391,13 +391,13 @@ _rate_render = RateLimiter(max_requests=5, window_seconds=60)     # Render endpo
 _rate_general = RateLimiter(max_requests=60, window_seconds=60)   # General endpoints
 
 def check_rate_limit(request, limiter=None):
-    """Check rate limit for cloud mode. Returns error response or None."""
+    """Check rate limit for cloud mode. Raises HTTPException(429) if exceeded."""
     if not CLOUD_MODE:
         return None
     limiter = limiter or _rate_general
     client_ip = request.client.host if request.client else "unknown"
     if not limiter.is_allowed(client_ip):
-        return {"error": "Rate limit exceeded. Please wait a moment and try again.", "retry_after": 60}
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait a moment and try again.")
     return None
 
 
@@ -1619,9 +1619,7 @@ async def wordfreq(req: Request):
 @app.post("/api/summary_ai")
 async def summary_ai(req: Request):
     """Smart map-reduce strategy for long transcripts - FIXED duplication"""
-    rate_err = check_rate_limit(req, _rate_ai)
-    if rate_err:
-        return rate_err
+    check_rate_limit(req, _rate_ai)
     data = await req.json()
     transcript = clean_text(data.get("transcript", ""))
     language = data.get("language", "en")
@@ -4903,9 +4901,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
 @app.post("/api/render_clips")
 async def render_clips(req: Request):
     """Render video clips in various formats with optional editing features"""
-    rate_err = check_rate_limit(req, _rate_render)
-    if rate_err:
-        return rate_err
+    check_rate_limit(req, _rate_render)
     if CLOUD_MODE:
         return {
             "error": "Video clip download is not available in cloud mode",
@@ -5039,9 +5035,7 @@ async def batch_queue(req: Request):
     Accepts: {urls: ["url1", "url2", ...], analyze: bool}
     Returns: {batchId, videoCount}
     """
-    rate_err = check_rate_limit(req, _rate_ai)
-    if rate_err:
-        return rate_err
+    check_rate_limit(req, _rate_ai)
 
     data = await req.json()
     urls = data.get("urls", [])
@@ -5779,9 +5773,7 @@ def find_quote_timestamp(quote: str, transcript_cache: dict, video_id: str) -> t
 
 @app.post("/api/highlight_reel")
 async def highlight_reel(req: Request):
-    rate_err = check_rate_limit(req, _rate_ai)
-    if rate_err:
-        return rate_err
+    check_rate_limit(req, _rate_ai)
     """Create highlight reel from quotes - finds actual timestamps in transcript"""
     if CLOUD_MODE:
         return {
@@ -6435,9 +6427,7 @@ async def start_live_monitoring(req: Request):
 @app.post("/api/assistant/chat")
 async def chat_with_meeting(req: Request):
     """v5.1 ENHANCED: Conversational AI assistant with full context"""
-    rate_err = check_rate_limit(req, _rate_ai)
-    if rate_err:
-        return rate_err
+    check_rate_limit(req, _rate_ai)
     data = await req.json()
     query = data.get("query", "").strip()
     meeting_id = data.get("meetingId")
