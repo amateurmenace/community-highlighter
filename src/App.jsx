@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 
 // v5.6: Desktop App Banner for cloud mode
 import { DesktopAppBanner, useCloudMode } from './DesktopAppBanner';
+// v7.3: Offline transcript caching (IndexedDB)
+import { cacheTranscript, getCachedTranscript } from './transcriptCache';
 import {
   apiTranscript, apiWordfreq, apiSummaryAI, apiTranslate,
   apiRenderJob, apiJobStatus, apiDownloadMp4, apiMetadata, apiHighlightReel,
@@ -6583,10 +6585,71 @@ export default function App() {
         updateClipBasket(prev => prev.map((c, i) => i === selectedClipIndex ? { ...c, end: Math.max(c.end - 2, c.start + 1) } : c));
         return;
       }
+
+      // J/K/L = playback control (standard NLE shortcuts)
+      // J = seek backward 5s, K = pause/play toggle, L = seek forward 5s
+      if (e.key === 'j' && !mod) {
+        e.preventDefault();
+        if (playerRef.current) {
+          try { playerRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [Math.max(0, (playerRef.current._currentTime || 0) - 5), true] }), '*'); } catch(err) {}
+        }
+        return;
+      }
+      if (e.key === 'l' && !mod) {
+        e.preventDefault();
+        if (playerRef.current) {
+          try { playerRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [(playerRef.current._currentTime || 0) + 5, true] }), '*'); } catch(err) {}
+        }
+        return;
+      }
+      if (e.key === 'k' && !mod) {
+        e.preventDefault();
+        if (playerRef.current) {
+          try {
+            // Toggle play/pause via YouTube iframe API postMessage
+            playerRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo' }), '*');
+          } catch(err) {}
+        }
+        return;
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [videoId, clipBasket, selectedClipIndex, showSettingsDrawer]);
+
+  // Drag-and-drop .chreel file import (desktop mode)
+  useEffect(() => {
+    if (isCloudMode) return;
+    const handleDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; };
+    const handleDrop = async (e) => {
+      e.preventDefault();
+      const file = Array.from(e.dataTransfer.files).find(f => f.name.endsWith('.chreel') || f.name.endsWith('.json'));
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const chreel = JSON.parse(text);
+        if (!chreel.videoId || !chreel.clips) { addToast('Invalid .chreel file'); return; }
+        setVideoId(chreel.videoId);
+        if (chreel.videoTitle) setVideoTitle(chreel.videoTitle);
+        const importedClips = chreel.clips.map((c, i) => ({
+          start: c.start, end: c.end,
+          label: c.label || c.highlight || `Clip ${i+1}`,
+          highlight: c.highlight || c.label || '',
+        }));
+        updateClipBasket(() => importedClips);
+        if (chreel.options) {
+          if (chreel.options.resolution) setVideoOptions(prev => ({...prev, resolution: chreel.options.resolution}));
+          if (chreel.options.colorFilter) setVideoOptions(prev => ({...prev, colorFilter: chreel.options.colorFilter}));
+        }
+        addToast(`Imported ${importedClips.length} clips from ${file.name}`);
+      } catch (err) {
+        addToast('Failed to read .chreel file: ' + err.message);
+      }
+    };
+    window.addEventListener('dragover', handleDragOver);
+    window.addEventListener('drop', handleDrop);
+    return () => { window.removeEventListener('dragover', handleDragOver); window.removeEventListener('drop', handleDrop); };
+  }, [isCloudMode]);
 
   // Dismiss floating clip button on outside click
   useEffect(() => {
@@ -6679,16 +6742,36 @@ export default function App() {
     let vttText = "";
     try {
       setLoading(l => ({ ...l, transcript: true }));
-      vttText = await apiTranscript(vid);
-
+      // Try IndexedDB cache first (for offline/PWA support)
+      const cached = await getCachedTranscript(vid);
+      if (cached && cached.transcript) {
+        // Reconstruct VTT from cached segments
+        vttText = cached.transcript.map(s => {
+          const st = s.start || 0, dur = s.duration || (s.end ? s.end - s.start : 5);
+          return `${st}\n${s.text || ''}`;
+        }).join('\n');
+        // Still fetch from API for freshness, but don't block
+        vttText = await apiTranscript(vid);
+        console.log('[transcriptCache] Using API transcript, will re-cache');
+      } else {
+        vttText = await apiTranscript(vid);
+      }
 
       setProcessStatus({ active: true, message: "Processing transcript...", percent: 30, isVideoDownload: false });
     } catch (e) {
-      setLoading(l => ({ ...l, transcript: false }));
-      setProcessStatus({ active: false, message: "", percent: 0 });
-      alert("Could not load captions. Check your video URL.");
-      setLoadingEntities(false);
-      return;
+      // If API fails, try using cached transcript for offline mode
+      const cached = await getCachedTranscript(vid);
+      if (cached && cached.transcript) {
+        vttText = cached.transcript.map(s => `${s.start || 0}\n${s.text || ''}`).join('\n');
+        setProcessStatus({ active: true, message: "Using cached transcript (offline)...", percent: 30, isVideoDownload: false });
+        console.log('[transcriptCache] Using offline cached transcript');
+      } else {
+        setLoading(l => ({ ...l, transcript: false }));
+        setProcessStatus({ active: false, message: "", percent: 0 });
+        alert("Could not load captions. Check your video URL.");
+        setLoadingEntities(false);
+        return;
+      }
     }
 
 
@@ -6704,6 +6787,9 @@ export default function App() {
     setFullText(all);
     setLoading(l => ({ ...l, transcript: false }));
     setProcessStatus({ active: true, message: "Generating word cloud...", percent: 50, isVideoDownload: false });
+
+    // Cache transcript in IndexedDB for offline access
+    cacheTranscript(vid, cc.map(c => ({ start: c.start, duration: c.end - c.start, text: c.text }))).catch(() => {});
 
     try {
       const meta = await apiMetadata(vid);
@@ -6924,61 +7010,68 @@ export default function App() {
       clearInterval(pollIntervalRef.current);
     }
 
-    pollIntervalRef.current = setInterval(async () => {
+    // Exponential backoff: start at 1s, increase to max 5s when idle, reset on progress changes
+    let pollInterval = 1000;
+    let lastPercent = 0;
+
+    const doPoll = async () => {
       try {
         const status = await apiJobStatus(jid);
-        
-        // Check if job is complete
         const isComplete = status.status === "done" || status.status === "error";
-        
+        const currentPercent = status.percent || 0;
+
         setJob({
           id: jid,
-          percent: isComplete ? 100 : (status.percent || 0),
+          percent: isComplete ? 100 : currentPercent,
           message: status.message || "",
           status: status.status || "running",
           zip: status.zip || status.file || null
         });
-        
-        // Also update the process status bar - but only if not in final cleanup phase
+
         if (!isComplete) {
           setProcessStatus(prev => ({
             ...prev,
-            percent: status.percent || prev.percent,
+            percent: currentPercent,
             message: status.message || prev.message
           }));
+          // Adaptive interval: fast when progress is changing, slow when stalled
+          if (currentPercent !== lastPercent) {
+            pollInterval = 1000;  // Reset to fast when progress moves
+          } else {
+            pollInterval = Math.min(pollInterval * 1.3, 5000);  // Back off to 5s max
+          }
+          lastPercent = currentPercent;
+          pollIntervalRef.current = setTimeout(doPoll, pollInterval);
         } else {
-          // Job is complete - show 100% immediately, then clear
           setProcessStatus(prev => ({
             ...prev,
             percent: 100,
             message: status.status === "done" ? "Complete! ✓" : "Error occurred"
           }));
-        }
-
-        if (isComplete) {
-          clearInterval(pollIntervalRef.current);
           pollIntervalRef.current = null;
           setLoading(l => ({ ...l, clips: false, reel: false }));
-          // Show celebration modal on success
           if (status.status === "done") {
             const fileUrl = status.zip || status.file || status.output;
             if (fileUrl) setShowCelebration({ file: fileUrl });
           }
-          // Clear the progress bar after a delay
           setTimeout(() => {
             setProcessStatus({ active: false, message: "", percent: 0, estimatedTime: null, isVideoDownload: false });
           }, status.status === "done" ? 2500 : 3500);
         }
       } catch (e) {
         console.error("Poll error:", e);
+        // On error, retry with backoff
+        pollInterval = Math.min(pollInterval * 2, 8000);
+        pollIntervalRef.current = setTimeout(doPoll, pollInterval);
       }
-    }, 1500);
+    };
+    pollIntervalRef.current = setTimeout(doPoll, pollInterval);
   };
 
   useEffect(() => {
     return () => {
       if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
+        clearTimeout(pollIntervalRef.current);
       }
     };
   }, []);
@@ -7923,6 +8016,65 @@ export default function App() {
           </section>
         )}
 
+        {/* Batch Processing — queue multiple videos */}
+        {!videoId && (
+          <section className="card section animate-fadeIn" style={{ marginTop: 16 }}>
+            <details>
+              <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: '1.05em' }}>
+                Batch Process Multiple Videos
+              </summary>
+              <div style={{ marginTop: 12 }}>
+                <p style={{ fontSize: '0.9em', color: '#666', marginBottom: 8 }}>
+                  Paste multiple YouTube URLs (one per line) to fetch transcripts in bulk.
+                </p>
+                <textarea
+                  id="batch-urls"
+                  rows={4}
+                  placeholder={"https://youtube.com/watch?v=abc123\nhttps://youtube.com/watch?v=def456\nhttps://youtube.com/watch?v=ghi789"}
+                  style={{ width: '100%', fontFamily: 'monospace', fontSize: '0.9em', padding: 8, borderRadius: 6, border: '1px solid #ddd', resize: 'vertical' }}
+                />
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                  <button className="btn btn-primary" onClick={async () => {
+                    const textarea = document.getElementById('batch-urls');
+                    const urls = textarea.value.split('\n').map(u => u.trim()).filter(u => u);
+                    if (urls.length === 0) { addToast('Enter at least one URL'); return; }
+                    if (urls.length > 20) { addToast('Maximum 20 URLs at once'); return; }
+                    addToast(`Queuing ${urls.length} videos for processing...`);
+                    try {
+                      const res = await fetch(`${BACKEND_URL}/api/batch/queue`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ urls, analyze: true })
+                      });
+                      const data = await res.json();
+                      if (data.error) { addToast(data.error); return; }
+                      addToast(`Batch started: ${data.videoCount} videos queued (ID: ${data.batchId})`);
+                      // Poll for completion
+                      const pollBatch = setInterval(async () => {
+                        try {
+                          const sr = await fetch(`${BACKEND_URL}/api/batch/${data.batchId}`);
+                          const sd = await sr.json();
+                          const done = sd.videos?.filter(v => v.status === 'done').length || 0;
+                          const total = sd.videos?.length || 0;
+                          if (sd.status === 'done') {
+                            clearInterval(pollBatch);
+                            const errors = sd.videos?.filter(v => v.status === 'error').length || 0;
+                            addToast(`Batch complete: ${done} succeeded, ${errors} failed`);
+                          }
+                        } catch(e) {}
+                      }, 3000);
+                    } catch (err) {
+                      addToast('Batch request failed: ' + err.message);
+                    }
+                  }}>
+                    Process Batch
+                  </button>
+                  <span style={{ fontSize: '0.85em', color: '#999' }}>Max 20 videos at once</span>
+                </div>
+              </div>
+            </details>
+          </section>
+        )}
+
         {/* UPDATED: AI Summary now has PERMANENT green highlight */}
         {summary.para && (
           <section className="card section summary-card animate-slideUp" style={{ marginTop: 16 }}>
@@ -8406,6 +8558,42 @@ export default function App() {
                       title={clipBasket.length === 0 ? 'Add clips to the timeline first, then export as video' : `Export ${clipBasket.length} clips as MP4 video`}>
                       <span className="toolbar-export-icon">📦</span>
                       <span className="toolbar-export-label">{clipBasket.length > 0 ? `Export ${clipBasket.length} Clip${clipBasket.length !== 1 ? 's' : ''} as Video` : 'Export as Video'}</span>
+                    </button>
+                    <button className="toolbar-import-btn" onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = '.chreel,.json';
+                      input.onchange = async (ev) => {
+                        const file = ev.target.files[0];
+                        if (!file) return;
+                        try {
+                          const text = await file.text();
+                          const chreel = JSON.parse(text);
+                          if (!chreel.videoId || !chreel.clips) { addToast('Invalid .chreel file'); return; }
+                          // Load the video first
+                          setVideoId(chreel.videoId);
+                          if (chreel.videoTitle) setVideoTitle(chreel.videoTitle);
+                          // Populate timeline with clips
+                          const importedClips = chreel.clips.map((c, i) => ({
+                            start: c.start, end: c.end,
+                            label: c.label || c.highlight || `Clip ${i+1}`,
+                            highlight: c.highlight || c.label || '',
+                          }));
+                          updateClipBasket(() => importedClips);
+                          // Apply options if present
+                          if (chreel.options) {
+                            if (chreel.options.resolution) setVideoOptions(prev => ({...prev, resolution: chreel.options.resolution}));
+                            if (chreel.options.colorFilter) setVideoOptions(prev => ({...prev, colorFilter: chreel.options.colorFilter}));
+                          }
+                          addToast(`Imported ${importedClips.length} clips from .chreel file`);
+                        } catch (err) {
+                          addToast('Failed to read .chreel file: ' + err.message);
+                        }
+                      };
+                      input.click();
+                    }} title="Import a .chreel file to load a reel plan">
+                      <span>📂</span>
+                      <span>Import .chreel</span>
                     </button>
                   </>
                 )}

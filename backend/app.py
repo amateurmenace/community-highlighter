@@ -1,5 +1,6 @@
 import os, sys, json, uuid, tempfile, shutil, subprocess, threading, re, html, asyncio
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
 from datetime import datetime
 from urllib.parse import quote, unquote
@@ -333,6 +334,71 @@ JOBS = {}
 STORED_TRANSCRIPTS = {}
 CONVERSATION_HISTORY = {}  # v5.0: Conversation memory
 MEETING_CACHE = {}  # v5.0: Meeting summaries cache  # Cache for transcripts
+
+# ============================================================================
+# HARDWARE ENCODER DETECTION
+# ============================================================================
+
+def detect_hw_encoder():
+    """Detect available hardware encoder. Returns encoder name and args, or libx264 fallback."""
+    import platform
+    system = platform.system()
+    try:
+        result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, timeout=10)
+        encoders = result.stdout if result.returncode == 0 else ""
+    except Exception:
+        encoders = ""
+
+    if system == 'Darwin' and 'h264_videotoolbox' in encoders:
+        # VideoToolbox: quality-based mode, ~3-5x faster than libx264
+        print("[hw_accel] Detected VideoToolbox (macOS hardware encoder)")
+        return 'h264_videotoolbox', ['-q:v', '65']  # quality 0-100, 65 ≈ CRF 20
+
+    if 'h264_nvenc' in encoders:
+        # NVENC: constant quality mode
+        print("[hw_accel] Detected NVENC (NVIDIA hardware encoder)")
+        return 'h264_nvenc', ['-preset', 'p4', '-cq', '20']
+
+    print("[hw_accel] Using libx264 (software encoder)")
+    return 'libx264', ['-preset', 'veryfast', '-crf', '20']
+
+HW_ENCODER, HW_ENCODER_ARGS = detect_hw_encoder()
+
+# ============================================================================
+# RATE LIMITER (for cloud mode)
+# ============================================================================
+
+class RateLimiter:
+    """Simple sliding-window rate limiter."""
+    def __init__(self, max_requests=30, window_seconds=60):
+        self.max_requests = max_requests
+        self.window = window_seconds
+        self._requests = defaultdict(list)
+        self._lock = threading.Lock()
+
+    def is_allowed(self, key: str) -> bool:
+        now = time.time()
+        with self._lock:
+            self._requests[key] = [t for t in self._requests[key] if now - t < self.window]
+            if len(self._requests[key]) >= self.max_requests:
+                return False
+            self._requests[key].append(now)
+            return True
+
+# Rate limiters for different endpoint categories
+_rate_ai = RateLimiter(max_requests=10, window_seconds=60)       # AI endpoints (expensive)
+_rate_render = RateLimiter(max_requests=5, window_seconds=60)     # Render endpoints
+_rate_general = RateLimiter(max_requests=60, window_seconds=60)   # General endpoints
+
+def check_rate_limit(request, limiter=None):
+    """Check rate limit for cloud mode. Returns error response or None."""
+    if not CLOUD_MODE:
+        return None
+    limiter = limiter or _rate_general
+    client_ip = request.client.host if request.client else "unknown"
+    if not limiter.is_allowed(client_ip):
+        return {"error": "Rate limit exceeded. Please wait a moment and try again.", "retry_after": 60}
+    return None
 
 
 # ============================================================================
@@ -1553,6 +1619,9 @@ async def wordfreq(req: Request):
 @app.post("/api/summary_ai")
 async def summary_ai(req: Request):
     """Smart map-reduce strategy for long transcripts - FIXED duplication"""
+    rate_err = check_rate_limit(req, _rate_ai)
+    if rate_err:
+        return rate_err
     data = await req.json()
     transcript = clean_text(data.get("transcript", ""))
     language = data.get("language", "en")
@@ -3832,8 +3901,13 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
     resolution = opts.get('resolution', '720p')
     do_lower_thirds = opts.get('lowerThirds', False)
 
-    # Get hardware encoder - use libx264 for reliability
-    hw_encoder = 'libx264'  # Always use software encoder for reliability
+    # Hardware encoder: use detected HW encoder if user opted in, else libx264
+    if use_hw_accel and HW_ENCODER != 'libx264':
+        hw_encoder = HW_ENCODER
+        hw_encoder_args = list(HW_ENCODER_ARGS)
+    else:
+        hw_encoder = 'libx264'
+        hw_encoder_args = ['-preset', 'veryfast', '-crf', '20']
     print(f"[simple_job] Using encoder: {hw_encoder}")
 
     work = tempfile.mkdtemp()
@@ -4166,10 +4240,26 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
             
             # Strategy: Always use segment downloads for clip rendering
             # Much faster than downloading full videos — only grabs what's needed
-            # Merge overlapping segments (clips within 30s of each other) for efficiency
+            # Merge overlapping/adjacent segments (within 30s) for fewer downloads
             use_segment_download = True
             job["message"] = "Preparing to download needed clips..."
             print(f"[simple_job] Using segment download strategy ({len(clips)} clips, {total_clip_duration:.0f}s needed from {video_duration/60:.1f} min video)")
+
+            # Merge adjacent segments: group clips within 30s of each other into single downloads
+            # This reduces the number of yt-dlp invocations significantly
+            sorted_clip_indices = sorted(range(len(clips)), key=lambda i: clips[i].get("start", 0))
+            merged_groups = []  # Each group: {"start": min_start, "end": max_end, "clip_indices": [i, ...]}
+            for idx in sorted_clip_indices:
+                c_start = clips[idx].get("start", 0)
+                c_end = clips[idx].get("end", c_start + 10)
+                if merged_groups and c_start - merged_groups[-1]["end"] < 30:
+                    # Merge with previous group
+                    merged_groups[-1]["end"] = max(merged_groups[-1]["end"], c_end)
+                    merged_groups[-1]["clip_indices"].append(idx)
+                else:
+                    merged_groups.append({"start": c_start, "end": c_end, "clip_indices": [idx]})
+
+            print(f"[simple_job] Merged {len(clips)} clips into {len(merged_groups)} download groups")
         
         # Prepare color filter if specified
         color_filter_str = create_color_filter(color_filter) if color_filter and color_filter != 'none' else None
@@ -4223,11 +4313,44 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                 print(f"[segment_download] Error: {e}")
                 return None, 0
         
+        # ================================================================
+        # PARALLEL PRE-DOWNLOAD: Download all segments concurrently
+        # ================================================================
+        pre_downloaded = {}  # clip_index -> (file_path, padding)
         if use_segment_download:
-            print(f"[simple_job] Using segment-based processing for long video")
+            print(f"[simple_job] Pre-downloading segments in parallel...")
+            job["message"] = f"Downloading {len(merged_groups)} segment group(s)..."
+
+            def _download_group(group):
+                """Download a merged segment group, return {clip_idx: (path, padding)}."""
+                group_file = os.path.join(work, f"group_{group['start']:.0f}_{group['end']:.0f}.mp4")
+                path, padding = download_segment(vid, group["start"], group["end"], group_file, padding=2)
+                result = {}
+                if path:
+                    for ci in group["clip_indices"]:
+                        # Each clip uses the same downloaded file but with offset
+                        clip_start = clips[ci].get("start", 0)
+                        clip_padding = clip_start - (group["start"] - padding)
+                        result[ci] = (path, max(0, clip_padding))
+                return result
+
+            with ThreadPoolExecutor(max_workers=min(3, len(merged_groups))) as dl_pool:
+                futures = [dl_pool.submit(_download_group, g) for g in merged_groups]
+                done_count = 0
+                for fut in as_completed(futures):
+                    try:
+                        group_result = fut.result()
+                        pre_downloaded.update(group_result)
+                    except Exception as e:
+                        print(f"[pre-download] Group download failed: {e}")
+                    done_count += 1
+                    job["percent"] = 10 + int(20 * done_count / len(merged_groups))
+                    job["message"] = f"Downloaded {done_count}/{len(merged_groups)} segments"
+
+            print(f"[simple_job] Pre-downloaded {len(pre_downloaded)}/{len(clips)} clip segments")
         else:
             print(f"[simple_job] Video ready: {video_file}")
-            
+
         job["percent"] = 30
         job["message"] = f"Processing {len(clips)} clips..."
 
@@ -4248,14 +4371,20 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     clip_video_width = video_width
                     clip_video_height = video_height
                     
-                    if use_segment_download:
+                    if use_segment_download and i in pre_downloaded:
+                        current_video, start = pre_downloaded[i]
+                        seg_info = get_video_info(current_video)
+                        clip_video_width = seg_info['width']
+                        clip_video_height = seg_info['height']
+                        print(f"[individual] Using pre-downloaded segment {i+1}: {clip_video_width}x{clip_video_height}")
+                    elif use_segment_download:
+                        # Fallback: download individually if pre-download missed this clip
                         job["message"] = f"Downloading clip {i+1} of {len(clips)}..."
                         segment_file = os.path.join(work, f"ind_segment_{i}.mp4")
                         segment_result, segment_padding = download_segment(vid, orig_start, orig_end, segment_file)
                         if segment_result:
                             current_video = segment_result
                             start = segment_padding
-                            # Get actual video dimensions from downloaded segment
                             seg_info = get_video_info(segment_result)
                             clip_video_width = seg_info['width']
                             clip_video_height = seg_info['height']
@@ -4326,7 +4455,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             "-ss", str(trim_start),
                             "-t", str(duration),
                             "-vf", ",".join(vf_filters),
-                            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                            "-c:v", hw_encoder, *hw_encoder_args,
                         ]
                     else:
                         cmd = [
@@ -4335,7 +4464,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                             "-i", current_video,
                             "-ss", str(trim_start),
                             "-t", str(duration),
-                            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                            "-c:v", hw_encoder, *hw_encoder_args,
                         ]
                     if af_args:
                         cmd.extend(["-af", ",".join(af_args)])
@@ -4369,17 +4498,20 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     # For segment downloads, get just this clip's segment
                     current_video = video_file
                     start = orig_start
-                    if use_segment_download:
+                    if use_segment_download and i in pre_downloaded:
+                        current_video, start = pre_downloaded[i]
+                        print(f"[social] Using pre-downloaded segment {i+1}")
+                    elif use_segment_download:
                         job["message"] = f"Downloading clip {i+1} of {len(selected_clips)}..."
                         segment_file = os.path.join(work, f"social_segment_{i}.mp4")
                         segment_result, segment_padding = download_segment(vid, orig_start, orig_end, segment_file)
                         if segment_result:
                             current_video = segment_result
-                            start = segment_padding  # Start at the padding offset
+                            start = segment_padding
                         else:
                             print(f"[social] Failed to download segment {i+1}, skipping")
                             continue
-                    
+
                     # For social reels, output is always 1080x1920 (9:16 vertical)
                     social_width, social_height = 1080, 1920
 
@@ -4450,8 +4582,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                         "-ss", str(trim_start),
                         "-t", str(duration),
                         "-filter_complex", filter_complex,
-                        "-c:v", "libx264", "-preset", "veryfast",
-                        "-crf", "20",
+                        "-c:v", hw_encoder, *hw_encoder_args,
                         "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                         clip_file, "-y"
                     ]
@@ -4487,35 +4618,38 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                 concat_file = os.path.join(work, "concat.txt")
                 clip_files_for_concat = []
                 running_time = 0
-                
-                for i, clip in enumerate(clips[:10]):
-                    job["percent"] = 30 + int(50 * i / len(clips[:10]))
+                clips_to_process = clips[:10]
+
+                # Phase 1: Build all ffmpeg encode commands (sequential — filter files written to disk)
+                encode_tasks = []  # [(clip_index, cmd, clip_file)]
+                skipped_clips = []
+                for i, clip in enumerate(clips_to_process):
                     start = clip.get("start", 0)
                     end = clip.get("end", start + 10)
                     duration = end - start
                     highlight_text = clip.get("highlight", "")
-                    
-                    # For segment downloads, get just this clip's segment
+
+                    # Resolve video source
                     current_video = video_file
-                    segment_padding = 0
-                    if use_segment_download:
-                        job["message"] = f"Downloading clip {i+1} of {len(clips[:10])}..."
+                    if use_segment_download and i in pre_downloaded:
+                        current_video, start = pre_downloaded[i]
+                    elif use_segment_download:
                         segment_file = os.path.join(work, f"segment_{i}.mp4")
                         segment_result, segment_padding = download_segment(vid, start, end, segment_file)
                         if segment_result:
                             current_video = segment_result
-                            # Adjust start time since segment starts at (start - padding)
-                            start = segment_padding  # Start at the padding offset
+                            start = segment_padding
                         else:
                             print(f"[combined] Failed to download segment {i+1}, skipping")
+                            skipped_clips.append(i)
                             continue
-                    
+
+                    clip_file = os.path.join(work, f"temp_{i}.mp4")
+                    seek_time = max(0, start - 1)
+                    trim_start = start - seek_time
+
                     if captions_enabled and highlight_text:
-                        # Need to re-encode to add highlight label text and subtitles
-                        clip_file = os.path.join(work, f"temp_{i}.mp4")
                         vf_filters = []
-                        
-                        # Add highlight text at top (the AI-generated summary label)
                         highlight_filter = create_text_overlay_filter(
                             highlight_text, work, f"combined_highlight_{i}",
                             video_width=video_width, video_height=video_height,
@@ -4524,9 +4658,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                         )
                         if highlight_filter:
                             vf_filters.append(highlight_filter)
-                            print(f"[combined] Adding highlight label: {highlight_text[:80]}...")
-                        
-                        # Add timed subtitles that follow speaker timing
+
                         orig_start = clip.get("start", 0)
                         orig_end = clip.get("end", orig_start + 10)
                         if transcript_data:
@@ -4538,85 +4670,105 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                                 )
                                 if subtitle_filter:
                                     vf_filters.append(subtitle_filter)
-                                    print(f"[combined] Adding {len(clip_transcript)} subtitle segments")
-                        
-                        # Add color filter if specified
+
                         if color_filter_str:
                             vf_filters.append(color_filter_str)
 
-                        # Add lower third speaker label
                         if do_lower_thirds and clip.get("speaker"):
                             lt_filters = create_lower_third_filter(
                                 name=clip["speaker"],
                                 title=clip.get("highlight", "")[:60],
-                                video_width=video_width,
-                                video_height=video_height,
+                                video_width=video_width, video_height=video_height,
                                 duration=min(5, duration),
                             )
                             vf_filters.extend(lt_filters)
 
-                        # Add fade in for first clip, fade out for last
                         if use_transitions:
                             if i == 0:
                                 vf_filters.append(f"fade=t=in:st=0:d={transition_duration}")
-                            if i == len(clips[:10]) - 1:
+                            if i == len(clips_to_process) - 1:
                                 vf_filters.append(f"fade=t=out:st={duration - transition_duration}:d={transition_duration}")
-                        
-                        # Use input seeking (-ss before -i) for fast seek, then output seeking for accuracy
-                        # This ensures proper audio sync
-                        seek_time = max(0, start - 1)  # Seek 1 second before for keyframe accuracy
-                        trim_start = start - seek_time  # Fine-tune trim after seek
-                        
+
                         if vf_filters:
-                            vf_string = ",".join(vf_filters)
-                            print(f"[combined] Filter string: {vf_string[:200]}...")
                             cmd = [
-                                "ffmpeg",
-                                "-ss", str(seek_time),  # Input seeking (fast)
-                                "-i", current_video,
-                                "-ss", str(trim_start),  # Output seeking (accurate)
-                                "-t", str(duration),
-                                "-vf", vf_string,
-                                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                                "ffmpeg", "-ss", str(seek_time), "-i", current_video,
+                                "-ss", str(trim_start), "-t", str(duration),
+                                "-vf", ",".join(vf_filters),
+                                "-c:v", hw_encoder, *hw_encoder_args,
                                 "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
-                                "-async", "1",  # Audio sync
-                                clip_file, "-y"
+                                "-async", "1", clip_file, "-y"
                             ]
-                            print(f"[combined] Processing clip {i+1}: {clip.get('start', 0):.1f}s - {clip.get('end', 0):.1f}s with highlight label")
                         else:
                             cmd = [
-                                "ffmpeg",
-                                "-ss", str(seek_time),
-                                "-i", current_video,
-                                "-ss", str(trim_start),
-                                "-t", str(duration),
-                                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                                "ffmpeg", "-ss", str(seek_time), "-i", current_video,
+                                "-ss", str(trim_start), "-t", str(duration),
+                                "-c:v", hw_encoder, *hw_encoder_args,
                                 "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
-                                "-async", "1",
-                                clip_file, "-y"
+                                "-async", "1", clip_file, "-y"
                             ]
-                        result = subprocess.run(cmd, capture_output=True, text=True)
-                        if result.returncode != 0:
-                            print(f"[combined] FFmpeg error: {result.stderr[:500]}")
                     else:
-                        # Re-encode without filters — use faster preset since concat will stream copy
-                        clip_file = os.path.join(work, f"temp_{i}.mp4")
-                        seek_time = max(0, start - 1)
-                        trim_start = start - seek_time
                         cmd = [
-                            "ffmpeg",
-                            "-ss", str(seek_time),
-                            "-i", current_video,
-                            "-ss", str(trim_start),
-                            "-t", str(duration),
-                            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                            "ffmpeg", "-ss", str(seek_time), "-i", current_video,
+                            "-ss", str(trim_start), "-t", str(duration),
+                            "-c:v", hw_encoder, *hw_encoder_args,
                             "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                             clip_file, "-y"
                         ]
-                        subprocess.run(cmd, capture_output=True)
 
-                    if os.path.exists(clip_file):
-                        clip_files_for_concat.append(clip_file)
+                    encode_tasks.append((i, cmd, clip_file, duration))
+
+                # Phase 2: Execute ffmpeg encodes in parallel (2-3 workers)
+                encode_workers = min(3, max(1, (os.cpu_count() or 4) // 2))
+                encode_results = {}  # i -> clip_file
+                encode_errors = []
+
+                def _encode_clip(task):
+                    idx, cmd, out_file, dur = task
+                    try:
+                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                        if result.returncode != 0:
+                            return idx, out_file, False, result.stderr[:300]
+                        return idx, out_file, os.path.exists(out_file), ""
+                    except subprocess.TimeoutExpired:
+                        return idx, out_file, False, "timeout"
+                    except Exception as e:
+                        return idx, out_file, False, str(e)
+
+                if len(encode_tasks) > 1:
+                    job["message"] = f"Encoding {len(encode_tasks)} clips ({encode_workers} parallel)..."
+                    print(f"[combined] Parallel encoding: {len(encode_tasks)} clips with {encode_workers} workers")
+                    with ThreadPoolExecutor(max_workers=encode_workers) as enc_pool:
+                        futures = {enc_pool.submit(_encode_clip, t): t[0] for t in encode_tasks}
+                        done_count = 0
+                        for fut in as_completed(futures):
+                            idx, out_file, success, err = fut.result()
+                            done_count += 1
+                            if success:
+                                encode_results[idx] = out_file
+                            else:
+                                encode_errors.append((idx, err))
+                                print(f"[combined] Clip {idx+1} encode failed: {err[:200]}")
+                            job["percent"] = 30 + int(50 * done_count / len(encode_tasks))
+                            job["message"] = f"Encoded clip {done_count}/{len(encode_tasks)}"
+                else:
+                    # Single clip — just run it directly
+                    for task in encode_tasks:
+                        idx, cmd, out_file, dur = task
+                        job["message"] = f"Encoding clip..."
+                        result = subprocess.run(cmd, capture_output=True, text=True)
+                        if result.returncode == 0 and os.path.exists(out_file):
+                            encode_results[idx] = out_file
+                        else:
+                            print(f"[combined] Clip encode failed: {result.stderr[:300]}")
+                    job["percent"] = 80
+
+                if encode_errors:
+                    print(f"[combined] {len(encode_errors)} clip(s) failed, continuing with {len(encode_results)} successful")
+
+                # Collect clip files in original order
+                for i in range(len(clips_to_process)):
+                    if i in encode_results and os.path.exists(encode_results[i]):
+                        clip_files_for_concat.append(encode_results[i])
 
                 # Add intro/outro slides if provided
                 if intro_title and clip_files_for_concat:
@@ -4751,6 +4903,9 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
 @app.post("/api/render_clips")
 async def render_clips(req: Request):
     """Render video clips in various formats with optional editing features"""
+    rate_err = check_rate_limit(req, _rate_render)
+    if rate_err:
+        return rate_err
     if CLOUD_MODE:
         return {
             "error": "Video clip download is not available in cloud mode",
@@ -4824,6 +4979,131 @@ async def render_clips(req: Request):
         daemon=True
     ).start()
     return {"jobId": job_id, "format": format_type, "clipCount": len(clips)}
+
+
+# ============================================================================
+# .chreel Import Endpoint (Desktop)
+# ============================================================================
+
+@app.post("/api/import_chreel")
+async def import_chreel(req: Request):
+    """Import a .chreel file and return parsed reel data for the frontend.
+    The .chreel format: {version, videoId, videoTitle, clips: [{start, end, label, highlight}], options: {...}}
+    """
+    data = await req.json()
+    chreel = data.get("chreel")
+    if not chreel or not isinstance(chreel, dict):
+        return {"error": "Invalid .chreel data"}
+
+    version = chreel.get("version", 1)
+    video_id = chreel.get("videoId", "")
+    video_title = chreel.get("videoTitle", "")
+    clips = chreel.get("clips", [])
+    options = chreel.get("options", {})
+
+    if not video_id:
+        return {"error": "No videoId in .chreel file"}
+    if not clips:
+        return {"error": "No clips in .chreel file"}
+
+    # Validate clips
+    validated_clips = []
+    for c in clips:
+        if isinstance(c, dict) and "start" in c and "end" in c:
+            validated_clips.append({
+                "start": float(c["start"]),
+                "end": float(c["end"]),
+                "label": str(c.get("label", "")),
+                "highlight": str(c.get("highlight", "")),
+            })
+
+    print(f"[import_chreel] Imported: video={video_id}, {len(validated_clips)} clips, title={video_title}")
+    return {
+        "videoId": video_id,
+        "videoTitle": video_title,
+        "clips": validated_clips,
+        "options": options,
+        "version": version,
+    }
+
+
+# ============================================================================
+# Batch Processing — Queue multiple videos for analysis
+# ============================================================================
+
+BATCH_JOBS = {}  # batch_id -> {status, videos: [{videoId, status, error}]}
+
+@app.post("/api/batch/queue")
+async def batch_queue(req: Request):
+    """Queue multiple YouTube URLs for transcript + analysis.
+    Accepts: {urls: ["url1", "url2", ...], analyze: bool}
+    Returns: {batchId, videoCount}
+    """
+    rate_err = check_rate_limit(req, _rate_ai)
+    if rate_err:
+        return rate_err
+
+    data = await req.json()
+    urls = data.get("urls", [])
+    do_analyze = data.get("analyze", True)
+
+    if not urls or len(urls) > 20:
+        return {"error": "Provide 1-20 YouTube URLs"}
+
+    # Extract video IDs
+    video_ids = []
+    for url in urls:
+        vid = extract_video_id(str(url))
+        if vid:
+            video_ids.append(vid)
+
+    if not video_ids:
+        return {"error": "No valid YouTube URLs found"}
+
+    batch_id = str(uuid.uuid4())[:12]
+    BATCH_JOBS[batch_id] = {
+        "status": "running",
+        "videos": [{"videoId": v, "status": "queued", "error": None} for v in video_ids],
+        "analyze": do_analyze,
+    }
+
+    def _run_batch(bid, vids, analyze):
+        batch = BATCH_JOBS[bid]
+        for i, vid in enumerate(vids):
+            entry = batch["videos"][i]
+            entry["status"] = "processing"
+            try:
+                # Fetch transcript
+                transcript = None
+                try:
+                    transcript = YouTubeTranscriptApi.get_transcript(vid)
+                except Exception:
+                    pass
+
+                if transcript:
+                    STORED_TRANSCRIPTS[vid] = transcript
+                    entry["transcriptLength"] = len(transcript)
+                    entry["status"] = "done"
+                else:
+                    entry["status"] = "error"
+                    entry["error"] = "Could not fetch transcript"
+            except Exception as e:
+                entry["status"] = "error"
+                entry["error"] = str(e)[:100]
+
+        batch["status"] = "done"
+
+    threading.Thread(target=_run_batch, args=(batch_id, video_ids, do_analyze), daemon=True).start()
+    return {"batchId": batch_id, "videoCount": len(video_ids)}
+
+
+@app.get("/api/batch/{batch_id}")
+async def batch_status(batch_id: str):
+    """Check batch processing status."""
+    batch = BATCH_JOBS.get(batch_id)
+    if not batch:
+        return {"error": "Batch not found"}
+    return batch
 
 
 # ============================================================================
@@ -5499,6 +5779,9 @@ def find_quote_timestamp(quote: str, transcript_cache: dict, video_id: str) -> t
 
 @app.post("/api/highlight_reel")
 async def highlight_reel(req: Request):
+    rate_err = check_rate_limit(req, _rate_ai)
+    if rate_err:
+        return rate_err
     """Create highlight reel from quotes - finds actual timestamps in transcript"""
     if CLOUD_MODE:
         return {
@@ -6152,6 +6435,9 @@ async def start_live_monitoring(req: Request):
 @app.post("/api/assistant/chat")
 async def chat_with_meeting(req: Request):
     """v5.1 ENHANCED: Conversational AI assistant with full context"""
+    rate_err = check_rate_limit(req, _rate_ai)
+    if rate_err:
+        return rate_err
     data = await req.json()
     query = data.get("query", "").strip()
     meeting_id = data.get("meetingId")

@@ -8159,4 +8159,88 @@ header.scrolled {
     width: 100%;
     max-width: 100vw;
   }
+
+  /* Toolbar button overflow fix — wrap on mobile instead of horizontal scroll */
+  .unified-toolbar {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .toolbar-export-btn,
+  .toolbar-share-btn,
+  .toolbar-handoff-btn,
+  .toolbar-import-btn,
+  .toolbar-download-btn {
+    font-size: 12px;
+    padding: 6px 10px;
+    min-width: auto;
+    flex: 0 1 auto;
+  }
+
+  /* Hide long button labels on small screens, show icons only */
+  .toolbar-export-label,
+  .toolbar-share-btn > span:last-child,
+  .toolbar-handoff-btn > span:last-child,
+  .toolbar-import-btn > span:last-child {
+    display: none;
+  }
+
+  /* Section dividers: tighter on mobile */
+  .section-divider {
+    margin: 24px 0 16px;
+    font-size: 1em;
+  }
+
+  /* Search zone grid: force single column */
+  .search-zone-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Clip inspector: full width */
+  .clip-inspector {
+    padding: 10px;
+  }
+
+  /* URL input: full width */
+  .url-input {
+    min-width: 0 !important;
+    width: 100%;
+  }
+
+  /* Batch textarea */
+  #batch-urls {
+    font-size: 13px;
+  }
+
+  /* Timeline zoom controls: smaller */
+  .zoom-controls {
+    gap: 2px;
+    font-size: 11px;
+  }
+}
+
+/* Extra small screens (< 480px) */
+@media (max-width: 480px) {
+  .editing-workspace iframe {
+    height: 200px;
+  }
+
+  .unified-toolbar {
+    padding: 4px 6px;
+    gap: 3px;
+  }
+
+  .toolbar-action-btn {
+    padding: 3px 6px;
+    font-size: 10px;
+  }
+
+  .hero-reel-btn {
+    font-size: 14px;
+    padding: 10px 16px;
+  }
+
+  .card.section {
+    padding: 12px;
+  }
 }

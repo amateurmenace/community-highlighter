@@ -40,6 +40,18 @@ export default defineConfig({
             handler: 'NetworkOnly',
           },
           {
+            // Transcript endpoint: cache longer for offline support
+            urlPattern: /\/api\/transcript/i,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'transcript-cache',
+              expiration: {
+                maxEntries: 30,
+                maxAgeSeconds: 7 * 24 * 3600,  // 7 days
+              },
+            },
+          },
+          {
             urlPattern: /\/api\/.*/i,
             handler: 'NetworkFirst',
             options: {

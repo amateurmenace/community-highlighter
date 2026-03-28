@@ -50,7 +50,7 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
    - **Hero AI Reel Button** — full-width green gradient CTA "Make AI Highlight Reel" (loads top 5 of 10 highlights)
    - **Collapsible Reel Styles** — "🎬 Choose Reel Style" toggle reveals 6 cards with descriptions
    - **Compact Toolbar** — adapts to environment:
-     - **Desktop**: Export button (green), Download Full Video (orange) with resolution picker
+     - **Desktop**: Export button (green), Import .chreel (blue), Download Full Video (orange) with resolution picker
      - **Cloud**: Share Reel Link (blue), Render in Desktop App (green, downloads `.chreel`)
      - **Both**: clip count, zoom, Chapter Titles ON/OFF, Shuffle/Regenerate/Clear, "⚙️ Customize Settings"
    - **Timeline Editor** — dark-themed NLE track with drag-to-reorder, trim handles, loading animation, tooltips
@@ -100,7 +100,10 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
 - Manual trigger: `POST /api/cache/cleanup` with optional `{"max_age_hours": N}`
 
 ### Clip Rendering (`POST /api/render_clips`, `POST /api/highlight_reel`)
-- **Encoder**: `libx264 -preset fast -crf 20` — consistent high quality across all encodes
+- **Encoder**: Hardware-accelerated when available (VideoToolbox on macOS, NVENC on NVIDIA GPUs), falls back to `libx264 -preset veryfast -crf 20`
+- **Parallel extraction**: Segment downloads use ThreadPoolExecutor(3), clip encoding uses ThreadPoolExecutor(2-3 based on CPU count)
+- **Segment merging**: Adjacent clips within 30s are merged into single download groups, reducing yt-dlp invocations
+- **Error recovery**: Failed clips are skipped and logged — partial renders succeed with remaining clips
 - **Audio**: `aac -ar 44100 -b:a 192k` — explicit bitrate on all encodes
 - **Audio normalization**: EBU R128 `loudnorm` (I=-16, TP=-1.5, LRA=11) enabled by default
 - **Font**: Bundled DejaVu Sans Bold (`backend/fonts/`) for reliable cross-platform text overlays
@@ -124,13 +127,13 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
 - Fallback: clips at regular intervals if no timestamps matched
 
 ### Remaining Opportunities
-- ~~Render pipeline double-encoding~~ **FIXED**: Concat now uses `-c copy` (stream copy) when no intro/outro slides — skips the expensive second re-encode pass
+- ~~Render pipeline double-encoding~~ **FIXED**: Concat now uses `-c copy` (stream copy) when no intro/outro slides
 - ~~Slow encoding preset~~ **FIXED**: Changed from `-preset fast` to `-preset veryfast` for all clip extraction
-- **Sequential clip processing**: All clips processed one at a time — parallelizing extraction (2-4 threads) would save 30-50%
-- **Per-clip segment downloads**: Each clip triggers a separate yt-dlp download — merging adjacent segments would reduce network overhead
-- Hardware acceleration (detected but not used — libx264 for reliability)
-- Shrink PyInstaller bundle by excluding unused ML deps (torch/scipy/sklearn)
-- Exponential backoff for job polling (currently fixed 1.5s interval)
+- ~~Sequential clip processing~~ **FIXED**: Clip downloads (3 workers) and encoding (2-3 workers) now run in parallel via ThreadPoolExecutor
+- ~~Per-clip segment downloads~~ **FIXED**: Adjacent clips within 30s merged into single download groups
+- ~~Hardware acceleration unused~~ **FIXED**: Auto-detects VideoToolbox (macOS) / NVENC (NVIDIA), falls back to libx264
+- ~~Large PyInstaller bundle~~ **FIXED**: Excludes torch/scipy/sklearn/matplotlib/tkinter/jupyter (~500MB savings)
+- ~~Fixed polling interval~~ **FIXED**: Adaptive backoff (1s → 5s) with reset on progress changes
 
 ## Civic Meeting Finder
 
@@ -139,18 +142,23 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
 - **Civic Scoring**: Results scored by civic keyword density + channel/title matching for the queried municipality
 - **Tiered Sorting**: High civic relevance (3+ keywords) → medium (1-2) → low (0), then by date within tiers
 
-## API Endpoints (69 total, Key Categories)
+## API Endpoints (73 total, Key Categories)
 
 ### Video/Clips
 - `POST /api/download_mp4` — Download full YouTube video
-- `POST /api/render_clips` — Render clips from selections
+- `POST /api/render_clips` — Render clips from selections (rate limited)
 - `POST /api/render_multi_video_clips` — Multi-video export
-- `POST /api/highlight_reel` — AI-generated highlight reel
+- `POST /api/highlight_reel` — AI-generated highlight reel (rate limited)
+- `POST /api/import_chreel` — Import .chreel file, returns parsed reel data
 - `GET /api/video_formats/{video_id}` — List available resolutions
 - `POST /api/clip_thumbnails` — Generate timeline preview thumbnails
 - `GET /api/job_status` — Poll render job progress
 - `GET /api/video_capabilities` — Available editing features
 - `POST /api/cache/cleanup` — Manual cache cleanup
+
+### Batch Processing
+- `POST /api/batch/queue` — Queue multiple YouTube URLs for transcript fetching (max 20)
+- `GET /api/batch/{batch_id}` — Check batch processing status
 
 ### YouTube Search & Status
 - `GET /api/youtube-search` — Civic meeting search (YouTube API with yt-dlp fallback)
@@ -188,14 +196,27 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
 - Download history: persisted in localStorage (`ch_downloads`), max 20 entries
 - Onboarding: first-visit wizard tracked via localStorage (`ch_onboarding_done`)
 - Toast notifications: auto-dismiss after 4s, fixed bottom-right
+- Job polling: adaptive backoff (1s → 5s), resets on progress changes, uses `setTimeout` chain instead of `setInterval`
+- Keyboard shortcuts: Ctrl+Z/Y (undo/redo), Delete/Backspace, Arrow keys (nudge), S (split), Space (preview), I/O (in/out), J/K/L (seek/pause playback)
+- .chreel import: drag-and-drop on page + "Import .chreel" button (desktop mode)
+- Batch processing: collapsible multi-URL textarea on landing page, polls `/api/batch/{id}` for status
 
 ## PWA Support
 
 - **Plugin**: `vite-plugin-pwa` with `generateSW` mode and `autoUpdate` registration
 - **Manifest**: `Community Highlighter`, theme color `#1E7F63`, standalone display
 - **Service Worker**: Workbox precaches static assets, network-first for `/api/*`, network-only for YouTube
+- **Transcript caching**: Workbox caches `/api/transcript` responses for 7 days; IndexedDB (`transcriptCache.js`) stores parsed cue arrays for fully offline transcript browsing
 - **iOS**: Apple touch icon, mobile-web-app-capable meta tags
 - **Install**: Browser-native install prompt (Chrome/Edge/Safari)
+
+## Rate Limiting (Cloud Mode)
+
+- **AI endpoints** (summary_ai, highlight_reel, assistant/chat): 10 req/min per IP
+- **Render endpoints** (render_clips): 5 req/min per IP
+- **General endpoints**: 60 req/min per IP
+- Sliding-window implementation in `RateLimiter` class, only active when `CLOUD_MODE=true`
+- Returns `{"error": "Rate limit exceeded...", "retry_after": 60}` on limit
 
 ## Build & Distribution
 
