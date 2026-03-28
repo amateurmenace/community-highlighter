@@ -6775,6 +6775,9 @@ export default function App() {
       return;
     }
 
+    // Scroll to top so user sees the progress bar and loading state
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
     setVtt("");
     setCues([]);
     setSents([]);
@@ -7805,9 +7808,9 @@ export default function App() {
         )}
 
         <section className="card section animate-fadeIn">
-          <HowToGuide onOpenAssistant={() => { setShowAssistant(true); setForceAssistantOpen(prev => prev + 1); }} />
+          {!videoId && <HowToGuide onOpenAssistant={() => { setShowAssistant(true); setForceAssistantOpen(prev => prev + 1); }} />}
 
-          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: '20px' }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: videoId ? '0' : '20px' }}>
             <input
               className="input url-input"
               placeholder="To Get Started, Paste a Youtube URL Here."
