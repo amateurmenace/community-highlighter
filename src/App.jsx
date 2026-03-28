@@ -7899,6 +7899,94 @@ export default function App() {
           </div>
         </section>
 
+        {/* .chreel Import Zone — desktop landing page */}
+        {!videoId && !isCloudMode && (
+          <section className="card section animate-fadeIn" style={{
+            marginTop: 16,
+            background: 'linear-gradient(135deg, #0f1419 0%, #1a2332 100%)',
+            color: 'white',
+            border: '2px dashed #334155',
+            borderRadius: '16px',
+            padding: '24px 28px',
+            textAlign: 'center',
+            cursor: 'pointer',
+            transition: 'border-color 0.2s, background 0.2s',
+          }}
+          onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = '#22c55e'; e.currentTarget.style.background = 'linear-gradient(135deg, #0f1419 0%, #0d2818 100%)'; }}
+          onDragLeave={(e) => { e.currentTarget.style.borderColor = '#334155'; e.currentTarget.style.background = 'linear-gradient(135deg, #0f1419 0%, #1a2332 100%)'; }}
+          onDrop={async (e) => {
+            e.preventDefault();
+            e.currentTarget.style.borderColor = '#334155';
+            e.currentTarget.style.background = 'linear-gradient(135deg, #0f1419 0%, #1a2332 100%)';
+            const file = Array.from(e.dataTransfer.files).find(f => f.name.endsWith('.chreel') || f.name.endsWith('.json'));
+            if (!file) { addToast('Drop a .chreel file to import'); return; }
+            try {
+              const text = await file.text();
+              const chreel = JSON.parse(text);
+              if (!chreel.videoId || !chreel.clips) { addToast('Invalid .chreel file'); return; }
+              setUrl(`https://www.youtube.com/watch?v=${chreel.videoId}`);
+              setVideoId(chreel.videoId);
+              if (chreel.videoTitle) setVideoTitle(chreel.videoTitle);
+              const importedClips = chreel.clips.map((c, i) => ({
+                start: c.start, end: c.end,
+                label: c.label || c.highlight || `Clip ${i+1}`,
+                highlight: c.highlight || c.label || '',
+              }));
+              updateClipBasket(() => importedClips);
+              if (chreel.options) {
+                if (chreel.options.resolution) setVideoOptions(prev => ({...prev, resolution: chreel.options.resolution}));
+                if (chreel.options.colorFilter) setVideoOptions(prev => ({...prev, colorFilter: chreel.options.colorFilter}));
+              }
+              addToast(`Imported ${importedClips.length} clips from ${file.name} — loading video...`);
+              setTimeout(() => loadAll(), 500);
+            } catch (err) {
+              addToast('Failed to read .chreel file: ' + err.message);
+            }
+          }}
+          onClick={() => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.chreel,.json';
+            input.onchange = async (ev) => {
+              const file = ev.target.files[0];
+              if (!file) return;
+              try {
+                const text = await file.text();
+                const chreel = JSON.parse(text);
+                if (!chreel.videoId || !chreel.clips) { addToast('Invalid .chreel file'); return; }
+                setUrl(`https://www.youtube.com/watch?v=${chreel.videoId}`);
+                setVideoId(chreel.videoId);
+                if (chreel.videoTitle) setVideoTitle(chreel.videoTitle);
+                const importedClips = chreel.clips.map((c, i) => ({
+                  start: c.start, end: c.end,
+                  label: c.label || c.highlight || `Clip ${i+1}`,
+                  highlight: c.highlight || c.label || '',
+                }));
+                updateClipBasket(() => importedClips);
+                if (chreel.options) {
+                  if (chreel.options.resolution) setVideoOptions(prev => ({...prev, resolution: chreel.options.resolution}));
+                  if (chreel.options.colorFilter) setVideoOptions(prev => ({...prev, colorFilter: chreel.options.colorFilter}));
+                }
+                addToast(`Imported ${importedClips.length} clips from ${file.name} — loading video...`);
+                setTimeout(() => loadAll(), 500);
+              } catch (err) {
+                addToast('Failed to read .chreel file: ' + err.message);
+              }
+            };
+            input.click();
+          }}>
+            <div style={{ fontSize: '32px', marginBottom: 8 }}>📂</div>
+            <h3 style={{ margin: '0 0 6px 0', fontSize: '16px', fontWeight: 700, color: '#e2e8f0' }}>
+              Import .chreel Reel Plan
+            </h3>
+            <p style={{ margin: 0, fontSize: '13px', color: '#94a3b8', lineHeight: 1.5 }}>
+              Drop a .chreel file here, or click to browse.
+              <br />
+              <span style={{ color: '#64748b', fontSize: '11px' }}>Exported from the cloud app's "Render in Desktop App" button</span>
+            </p>
+          </section>
+        )}
+
         {/* Desktop App Download Banner - Show on landing page when in cloud mode */}
         {!videoId && isCloudMode && (
           <section className="card section animate-fadeIn" style={{
