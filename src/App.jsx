@@ -7276,11 +7276,13 @@ export default function App() {
       for (const h of currentHighlights) {
         const match = findQuoteTimestamp(h.quote || h.highlight, sents);
         if (match) {
+          // Use AI highlight summary as chapter title — never raw transcript text
+          const label = (h.highlight || h.summary || '').slice(0, 80) || `${h.speaker || 'Highlight'}: ${h.category || 'moment'}`;
           clips.push({
             start: Math.max(0, match.start - pad),
             end: match.end + pad,
-            label: (h.highlight || '').slice(0, 80),
-            highlight: (h.highlight || '').slice(0, 80),
+            label,
+            highlight: label,
             text: h.quote || '',
           });
         }
