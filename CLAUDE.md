@@ -57,16 +57,17 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
    - **Clip Inspector** — dark-themed panel when clip selected
    - **Job Status** — progress bar during render
 3. **Bottom Panel** — AI Summary, Key Highlights, Transcript Tools (Translate/Download/View Full Transcript)
-4. **Meeting Analyzer Button** — large animated toggle button with decorative divider lines:
-   - "📊 Open Meeting Analyzer ▼" — dark themed, pulsing icon, hover glow
-   - Reveals ALL data visualizations: Scorecard, Entities, Participation, Topics, Timeline, Disagreements, Dynamics, Cross-References, Subscriptions, Issue Tracker
-   - Hidden by default to reduce page length
+4. **Meeting Analyzer Section** — separated by "📊 Meeting Analyzer" section divider:
+   - ALL data visualizations always visible: Scorecard, Entities, Participation, Topics, Timeline, Disagreements, Dynamics, Cross-References, Subscriptions, Issue Tracker
+   - Three named section dividers separate the page: "🔍 Video Searcher", "🎬 Video Highlighter", "📊 Meeting Analyzer"
 5. **Settings Drawer** — slides from right edge (400px), triggered by "⚙️ Customize Settings":
    - Quality: Resolution, Speed, Audio Normalize
    - Effects: Captions, Color Filter, Transitions, Background Music
    - Branding: Intro/Outro Title/Subtitle/CTA, Chapter Titles, Watermark, Speaker Labels
    - Full Video Download with resolution picker (desktop only)
 9. **Meeting Analytics** — pushed below the fold (entities, decisions, topics, participation)
+10. **Share Panel** — integrated in insights panel and bottom panel
+11. **Download History** — header badge with recent downloads dropdown, toast notifications
 10. **Share Panel** — integrated in insights panel and bottom panel
 11. **Download History** — header badge with recent downloads dropdown, toast notifications
 

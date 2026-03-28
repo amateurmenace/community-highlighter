@@ -8194,8 +8194,18 @@ export default function App() {
            ================================================================ */}
         {videoId && (
           <>
+            {/* Section 1: Video Searcher */}
+            <div className="section-divider">
+              <div className="section-divider-line" />
+              <div className="section-divider-title">
+                <span className="section-divider-icon">🔍</span>
+                Video Searcher
+              </div>
+              <div className="section-divider-line" />
+            </div>
+
             {/* ================================================================
-               SEARCH & DISCOVER ZONE — above editor
+               SEARCH & DISCOVER ZONE
                ================================================================ */}
             <div className="search-zone">
               {/* Search Bar */}
@@ -8344,7 +8354,7 @@ export default function App() {
                     <iframe
                       ref={searchPlayerRef}
                       title="search-preview-player"
-                      style={{ width: '100%', height: '240px', borderRadius: '10px', border: 'none' }}
+                      style={{ width: '100%', height: '300px', borderRadius: '10px', border: 'none' }}
                       src={`https://www.youtube.com/embed/${videoId}?autoplay=0&mute=0&playsinline=1&enablejsapi=1`}
                       allow="autoplay; encrypted-media; picture-in-picture"
                       allowFullScreen
@@ -8384,6 +8394,16 @@ export default function App() {
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* Section 2: Video Highlighter */}
+            <div className="section-divider">
+              <div className="section-divider-line" />
+              <div className="section-divider-title">
+                <span className="section-divider-icon">🎬</span>
+                Video Highlighter
+              </div>
+              <div className="section-divider-line" />
             </div>
 
             {/* ================================================================
@@ -9831,18 +9851,16 @@ export default function App() {
 
         {fullText && sents.length > 0 && (
           <>
-            {/* Meeting Analyzer — big animated toggle button */}
-            <div className="meeting-analyzer-divider">
-              <div className="meeting-analyzer-line" />
-              <button className={`meeting-analyzer-btn ${showAnalytics ? 'meeting-analyzer-btn-open' : ''}`} onClick={() => setShowAnalytics(!showAnalytics)}>
-                <span className="meeting-analyzer-icon">📊</span>
-                <span className="meeting-analyzer-label">{showAnalytics ? 'Hide Meeting Analytics' : 'Open Meeting Analyzer'}</span>
-                <span className="meeting-analyzer-arrow">{showAnalytics ? '▲' : '▼'}</span>
-              </button>
-              <div className="meeting-analyzer-line" />
+            {/* Section 3: Video Analyzer */}
+            <div className="section-divider">
+              <div className="section-divider-line" />
+              <div className="section-divider-title">
+                <span className="section-divider-icon">📊</span>
+                Meeting Analyzer
+              </div>
+              <div className="section-divider-line" />
             </div>
 
-            {showAnalytics && (
             <section id="analytics-section" className="full-width-viz card section animate-slideUp" style={{ marginTop: 0 }}>
             <h2 className="section-title">
               Meeting Analytics
@@ -9949,7 +9967,6 @@ export default function App() {
 
             </div>
           </section>
-          )}
           </>
         )}
 
