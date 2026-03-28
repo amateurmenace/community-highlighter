@@ -4299,6 +4299,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                 "--merge-output-format", "mp4",
                 "--download-sections", section_spec,
                 "--force-keyframes-at-cuts",
+                "--concurrent-fragments", "4",
                 "--no-playlist",
                 "-o", output_path,
                 f"https://www.youtube.com/watch?v={vid}",
@@ -5680,6 +5681,7 @@ async def download_mp4(req: Request):
                 "-f", fmt,
                 *sort_args,
                 "--merge-output-format", "mp4",
+                "--concurrent-fragments", "4",
                 "--no-playlist",
                 "--newline",  # Progress on separate lines for parsing
                 "-o", output,

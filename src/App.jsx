@@ -8624,104 +8624,122 @@ export default function App() {
               )}
 
               {/* Compact Toolbar — timeline controls */}
-              <div className="unified-toolbar">
-                <div className="unified-toolbar-left">
-                  <span className="toolbar-clip-count">
-                    {clipBasket.length} clip{clipBasket.length !== 1 ? 's' : ''} · {formatTime(clipBasket.reduce((sum, c) => sum + (c.end - c.start), 0))}
-                  </span>
-                  <div className="toolbar-divider" />
-                  <div className="toolbar-zoom">
-                    <button onClick={() => setTimelineZoom(z => Math.max(0.5, z - 0.25))}>-</button>
-                    <span>{Math.round(timelineZoom * 100)}%</span>
-                    <button onClick={() => setTimelineZoom(z => Math.min(4, z + 0.25))}>+</button>
+              <div className="unified-toolbar" style={{ flexDirection: 'column', gap: 6 }}>
+                {/* Row 1: Primary actions */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: '100%' }}>
+                  <div className="unified-toolbar-left">
+                    <span className="toolbar-clip-count">
+                      {clipBasket.length} clip{clipBasket.length !== 1 ? 's' : ''} · {formatTime(clipBasket.reduce((sum, c) => sum + (c.end - c.start), 0))}
+                    </span>
+                    <div className="toolbar-divider" />
+                    <div className="toolbar-zoom">
+                      <button onClick={() => setTimelineZoom(z => Math.max(0.5, z - 0.25))}>-</button>
+                      <span>{Math.round(timelineZoom * 100)}%</span>
+                      <button onClick={() => setTimelineZoom(z => Math.min(4, z + 0.25))}>+</button>
+                    </div>
                   </div>
-                </div>
 
-                {/* Export / Share — adapts to cloud vs desktop */}
-                {isCloudMode ? (
-                  <>
-                    <button className="toolbar-share-btn" disabled={clipBasket.length === 0} onClick={() => {
-                      if (clipBasket.length === 0) return;
-                      const clipsParam = clipBasket.map(c => `${Math.round(c.start)}-${Math.round(c.end)}`).join(',');
-                      const titlesParam = clipBasket.map(c => (c.label || '').slice(0, 50)).join('|');
-                      const shareUrl = `${window.location.origin}/?v=${videoId}&clips=${clipsParam}&titles=${encodeURIComponent(titlesParam)}`;
-                      navigator.clipboard.writeText(shareUrl).then(() => addToast('🔗 Reel link copied to clipboard!')).catch(() => {
-                        prompt('Copy this reel link:', shareUrl);
-                      });
-                    }} title="Copy a shareable link with your clip selections embedded">
-                      <span>🔗</span>
-                      <span>Share Reel Link</span>
-                    </button>
-                    <button className="toolbar-handoff-btn" disabled={clipBasket.length === 0} onClick={() => {
-                      if (clipBasket.length === 0) return;
-                      const reelData = {
-                        version: 1,
-                        videoId,
-                        videoTitle,
-                        clips: clipBasket.map(c => ({ start: c.start, end: c.end, label: c.label || '', highlight: c.highlight || '' })),
-                        options: { resolution: videoOptions.resolution, captions: reelCaptionsEnabled, colorFilter: videoOptions.colorFilter, showHighlightLabels: videoOptions.showHighlightLabels, transitions: videoOptions.transitionType }
-                      };
-                      const blob = new Blob([JSON.stringify(reelData, null, 2)], { type: 'application/json' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `${(videoTitle || videoId).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40)}.chreel`;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                      addToast('💻 Reel plan downloaded — open in the desktop app to render as video');
-                    }} title="Download reel plan file to render in the desktop app">
-                      <span>💻</span>
-                      <span>Render in Desktop App</span>
-                    </button>
-                  </>
-                ) : (
-                  <>
+                  <div style={{ flex: 1 }} />
+
+                  {/* Export / Share — adapts to cloud vs desktop */}
+                  {isCloudMode ? (
+                    <>
+                      <button className="toolbar-share-btn" disabled={clipBasket.length === 0} onClick={() => {
+                        if (clipBasket.length === 0) return;
+                        const clipsParam = clipBasket.map(c => `${Math.round(c.start)}-${Math.round(c.end)}`).join(',');
+                        const titlesParam = clipBasket.map(c => (c.label || '').slice(0, 50)).join('|');
+                        const shareUrl = `${window.location.origin}/?v=${videoId}&clips=${clipsParam}&titles=${encodeURIComponent(titlesParam)}`;
+                        navigator.clipboard.writeText(shareUrl).then(() => addToast('🔗 Reel link copied to clipboard!')).catch(() => {
+                          prompt('Copy this reel link:', shareUrl);
+                        });
+                      }} title="Copy a shareable link with your clip selections embedded">
+                        <span>🔗</span>
+                        <span>Share Reel Link</span>
+                      </button>
+                      <button className="toolbar-handoff-btn" disabled={clipBasket.length === 0} onClick={() => {
+                        if (clipBasket.length === 0) return;
+                        const reelData = {
+                          version: 1,
+                          videoId,
+                          videoTitle,
+                          clips: clipBasket.map(c => ({ start: c.start, end: c.end, label: c.label || '', highlight: c.highlight || '' })),
+                          options: { resolution: videoOptions.resolution, captions: reelCaptionsEnabled, colorFilter: videoOptions.colorFilter, showHighlightLabels: videoOptions.showHighlightLabels, transitions: videoOptions.transitionType }
+                        };
+                        const blob = new Blob([JSON.stringify(reelData, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `${(videoTitle || videoId).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40)}.chreel`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        addToast('💻 Reel plan downloaded — open in the desktop app to render as video');
+                      }} title="Download reel plan file to render in the desktop app">
+                        <span>💻</span>
+                        <span>Render in Desktop App</span>
+                      </button>
+                    </>
+                  ) : (
                     <button className="toolbar-export-btn" onClick={() => setShowExportModal(true)} disabled={clipBasket.length === 0}
                       title={clipBasket.length === 0 ? 'Add clips to the timeline first, then export as video' : `Export ${clipBasket.length} clips as MP4 video`}>
                       <span className="toolbar-export-icon">📦</span>
                       <span className="toolbar-export-label">{clipBasket.length > 0 ? `Export ${clipBasket.length} Clip${clipBasket.length !== 1 ? 's' : ''} as Video` : 'Export as Video'}</span>
                     </button>
-                    <button className="toolbar-import-btn" onClick={() => {
-                      const input = document.createElement('input');
-                      input.type = 'file';
-                      input.accept = '.chreel,.json';
-                      input.onchange = async (ev) => {
-                        const file = ev.target.files[0];
-                        if (!file) return;
-                        try {
-                          const text = await file.text();
-                          const chreel = JSON.parse(text);
-                          if (!chreel.videoId || !chreel.clips) { addToast('Invalid .chreel file'); return; }
-                          // Load the video first
-                          setVideoId(chreel.videoId);
-                          if (chreel.videoTitle) setVideoTitle(chreel.videoTitle);
-                          // Populate timeline with clips
-                          const importedClips = chreel.clips.map((c, i) => ({
-                            start: c.start, end: c.end,
-                            label: c.label || c.highlight || `Clip ${i+1}`,
-                            highlight: c.highlight || c.label || '',
-                          }));
-                          updateClipBasket(() => importedClips);
-                          // Apply options if present
-                          if (chreel.options) {
-                            if (chreel.options.resolution) setVideoOptions(prev => ({...prev, resolution: chreel.options.resolution}));
-                            if (chreel.options.colorFilter) setVideoOptions(prev => ({...prev, colorFilter: chreel.options.colorFilter}));
-                          }
-                          addToast(`Imported ${importedClips.length} clips from .chreel file`);
-                        } catch (err) {
-                          addToast('Failed to read .chreel file: ' + err.message);
-                        }
-                      };
-                      input.click();
-                    }} title="Import a .chreel file to load a reel plan">
-                      <span>📂</span>
-                      <span>Import .chreel</span>
-                    </button>
-                  </>
-                )}
+                  )}
 
-                {/* Download Full Video — desktop only */}
-                {!isCloudMode && (<><button className="toolbar-download-btn" disabled={downloadJob?.status === 'running'} onClick={async () => {
+                  <button className="toolbar-settings-btn" onClick={() => setShowSettingsDrawer(true)} title="Customize resolution, effects, captions, branding, transitions, and download full video">
+                    <span>⚙️</span>
+                    <span>Settings</span>
+                  </button>
+                </div>
+
+                {/* Row 2: Secondary controls — only when clips exist */}
+                {clipBasket.length > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', width: '100%', borderTop: '1px solid #1e293b', paddingTop: 6 }}>
+                    {highlightsWithQuotes.length > 0 && (
+                      <>
+                        <button className="toolbar-action-btn" style={{ fontSize: '11px' }} title="Shuffle clips" onClick={() => {
+                          const shuffled = [...highlightsWithQuotes].sort(() => Math.random() - 0.5).slice(0, 5);
+                          const clips = shuffled.map(h => { const ts = findQuoteTimestamp(h.quote, sents, videoOptions.clipPadding || 4); return ts ? { start: ts.start, end: ts.end, label: h.highlight, highlight: h.highlight, speaker: h.speaker } : null; }).filter(Boolean);
+                          if (clips.length > 0) updateClipBasket(clips);
+                        }}>🔀 Shuffle</button>
+                        <button className="toolbar-action-btn" style={{ fontSize: '11px' }} title="Regenerate highlights" onClick={() => { generateHighlightsWithQuotes(true).then(() => buildReel('combined')); }} disabled={loading.reel}>🔄 Regenerate</button>
+                      </>
+                    )}
+                    <button className="toolbar-action-btn" style={{ fontSize: '11px' }} onClick={clearBasket} title="Clear all clips">🗑️ Clear</button>
+                    <button className={`toolbar-action-btn ${videoOptions.showHighlightLabels !== false ? '' : ''}`} style={{ fontSize: '11px', color: videoOptions.showHighlightLabels !== false ? '#4ade80' : '#94a3b8' }}
+                      onClick={() => setVideoOptions(v => ({ ...v, showHighlightLabels: !(v.showHighlightLabels !== false) }))}>
+                      🏷️ Titles {videoOptions.showHighlightLabels !== false ? 'ON' : 'OFF'}
+                    </button>
+
+                    {/* Desktop-only secondary: Download + Import */}
+                    {!isCloudMode && (
+                      <>
+                        <div style={{ flex: 1 }} />
+                        <button className="toolbar-action-btn" style={{ fontSize: '11px' }} onClick={() => {
+                          const input = document.createElement('input');
+                          input.type = 'file'; input.accept = '.chreel,.json';
+                          input.onchange = async (ev) => {
+                            const file = ev.target.files[0]; if (!file) return;
+                            try {
+                              const chreel = JSON.parse(await file.text());
+                              if (!chreel.videoId || !chreel.clips) { addToast('Invalid .chreel'); return; }
+                              setVideoId(chreel.videoId);
+                              if (chreel.videoTitle) setVideoTitle(chreel.videoTitle);
+                              updateClipBasket(() => chreel.clips.map((c, i) => ({ start: c.start, end: c.end, label: c.label || c.highlight || `Clip ${i+1}`, highlight: c.highlight || c.label || '' })));
+                              addToast(`Imported ${chreel.clips.length} clips`);
+                            } catch (err) { addToast('Failed: ' + err.message); }
+                          };
+                          input.click();
+                        }} title="Import .chreel file">📂 Import</button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Download Full Video toolbar — desktop only, separate row */}
+              {!isCloudMode && (<div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: '#111820', borderRadius: 6, margin: '0 12px' }}>
+                <button className="toolbar-download-btn" style={{ flex: 'none' }} disabled={downloadJob?.status === 'running'} onClick={async () => {
                   if (downloadJob?.status === 'running') return;
                   setDownloadJob({ status: 'running', percent: 0, message: 'Starting download...' });
                   try {
@@ -8764,41 +8782,8 @@ export default function App() {
                   )) : (
                     <><option value="best">Best</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option></>
                   )}
-                </select></>)}
-
-                {highlightsWithQuotes.length > 0 && clipBasket.length > 0 && (
-                  <>
-                    <button className="toolbar-action-btn" title="Randomly pick different highlights from the AI analysis" onClick={() => {
-                      const shuffled = [...highlightsWithQuotes].sort(() => Math.random() - 0.5);
-                      const subset = shuffled.slice(0, Math.min(5, shuffled.length));
-                      const clips = subset.map((h) => {
-                        const ts = findQuoteTimestamp(h.quote, sents, videoOptions.clipPadding || 4);
-                        return ts ? { start: ts.start, end: ts.end, label: h.highlight, highlight: h.highlight, speaker: h.speaker } : null;
-                      }).filter(Boolean);
-                      if (clips.length > 0) updateClipBasket(clips);
-                    }}>🔀 Shuffle Clips</button>
-                    <button className="toolbar-action-btn" title="Re-analyze the transcript and generate fresh AI highlights" onClick={() => { generateHighlightsWithQuotes(true).then(() => buildReel('combined')); }} disabled={loading.reel}>🔄 Regenerate</button>
-                  </>
-                )}
-
-                {clipBasket.length > 0 && (
-                  <button className="toolbar-action-btn" onClick={clearBasket} title="Remove all clips from the timeline">🗑️ Clear All</button>
-                )}
-
-                {/* Chapter Titles toggle */}
-                <button className={`toolbar-chapter-btn ${videoOptions.showHighlightLabels !== false ? 'toolbar-chapter-on' : ''}`}
-                  onClick={() => setVideoOptions(v => ({ ...v, showHighlightLabels: !(v.showHighlightLabels !== false) }))}
-                  title={videoOptions.showHighlightLabels !== false ? 'Chapter titles will appear on exported clips — click to disable' : 'Enable chapter titles on exported clips'}>
-                  <span>🏷️</span>
-                  <span>Chapter Titles {videoOptions.showHighlightLabels !== false ? 'ON' : 'OFF'}</span>
-                </button>
-
-                {/* Settings — prominent with label */}
-                <button className="toolbar-settings-btn" onClick={() => setShowSettingsDrawer(true)} title="Customize resolution, effects, captions, branding, transitions, and download full video">
-                  <span>⚙️</span>
-                  <span>Customize Settings</span>
-                </button>
-              </div>
+                </select>
+              </div>)}
 
               {/* Timeline — directly under toolbar */}
               <div className="timeline-editor-wrapper">
@@ -8869,7 +8854,7 @@ export default function App() {
                             <div className="trim-handle trim-handle-left" onMouseDown={(e) => startTrim(e, idx, 'start')} title="⟵ Drag to extend or shorten the clip start time" />
 
                             <div className="timeline-clip-content">
-                              {thumb && <img src={thumb.url} className="timeline-clip-thumb" alt="" />}
+                              {(thumb?.url || videoId) && <img src={thumb?.url || `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`} className="timeline-clip-thumb" alt="" />}
                               <span className="timeline-clip-label">{clip.label || clip.highlight || `Clip ${idx + 1}`}</span>
                               <span className="timeline-clip-duration">{formatTime(clip.start)} – {formatTime(clip.end)} ({duration.toFixed(0)}s)</span>
                             </div>
