@@ -6400,6 +6400,7 @@ export default function App() {
   const [selectedClipIndex, setSelectedClipIndex] = useState(null);
   const [floatingClipBtn, setFloatingClipBtn] = useState(null); // {x, y} for floating "Create Clip" button
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(true);
+  const [showFullTranscript, setShowFullTranscript] = useState(false); // Full transcript overlay on word cloud
   const [transitionPickerIdx, setTransitionPickerIdx] = useState(null); // which clip transition to edit
   const desktopTranscriptRef = useRef(null);
 
@@ -8287,14 +8288,38 @@ export default function App() {
 
               {/* Two-column: Word Cloud / Search Results (left) + Small Video (right) */}
               <div className="search-zone-grid">
-                {/* LEFT: Word Cloud or Search Results */}
+                {/* LEFT: Word Cloud / Search Results / Full Transcript */}
                 <div className="search-zone-left">
-                  {expanded.open ? (
+                  {showFullTranscript ? (
+                    /* Full Transcript Overlay — covers word cloud area */
+                    <div className="desktop-search-results-area" style={{ position: 'relative' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                        <div style={{ fontWeight: 700, fontSize: '13px', color: '#166534' }}>📝 Full Transcript</div>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          <span style={{ fontSize: '10px', color: '#94a3b8' }}>Select text to create clips</span>
+                          <button className="btn btn-ghost" style={{ fontSize: '11px', padding: '4px 12px' }} onClick={() => setShowFullTranscript(false)}>← Word Cloud</button>
+                        </div>
+                      </div>
+                      <div className="desktop-transcript-panel" ref={desktopTranscriptRef} onMouseUp={handleDesktopTranscriptMouseUp} style={{ maxHeight: '400px' }}>
+                        {sents.map((s, idx) => {
+                          const isFocus = expanded.open && idx === expanded.focusIdx;
+                          return (
+                            <span key={idx} id={`sent-${idx}`} className={`sent ${isFocus ? 'hit' : ''}`} data-idx={idx} data-start={s.start} data-end={s.end}
+                              style={isFocus ? { background: 'rgba(34,197,94,0.2)', borderRadius: '4px', padding: '2px 4px' } : undefined}
+                            >
+                              {s.text}{' '}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : expanded.open ? (
+                    /* Transcript Context — focused on a specific sentence */
                     <div className="desktop-search-results-area">
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
                         <div style={{ fontWeight: 700, fontSize: '13px', color: '#166534' }}>📝 Transcript Context</div>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button className="btn btn-primary" style={{ fontSize: '11px', padding: '4px 12px' }} onClick={createClipFromSelection}>✂️ Save Selection</button>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          <span style={{ fontSize: '10px', color: '#94a3b8' }}>Select text to create clips</span>
                           <button className="btn btn-ghost" style={{ fontSize: '11px', padding: '4px 12px' }} onClick={() => setExpanded({ open: false, focusIdx: null })}>← Back</button>
                         </div>
                       </div>
@@ -8306,12 +8331,6 @@ export default function App() {
                               style={isFocus ? { background: 'rgba(34,197,94,0.2)', borderRadius: '4px', padding: '2px 4px' } : undefined}
                             >
                               {s.text}{' '}
-                              <button className="sent-add-btn" onClick={(e) => {
-                                e.stopPropagation();
-                                const clip = { start: Math.max(0, s.start - (videoOptions.clipPadding || 4)), end: (s.end || s.start + 15) + (videoOptions.clipPadding || 4), label: s.text.slice(0, 60), highlight: s.text.slice(0, 60), text: s.text };
-                                updateClipBasket(prev => [...prev, clip]);
-                                addToast('✂️ Clip added to timeline!');
-                              }} title="Add this sentence as a clip">+</button>
                             </span>
                           );
                         })}
@@ -8338,7 +8357,6 @@ export default function App() {
                               const clip = { start: Math.max(0, m.start - (videoOptions.clipPadding || 4)), end: m.start + (m.duration || 10) + (videoOptions.clipPadding || 4), label: m.text.slice(0, 60), highlight: m.text, text: m.text };
                               updateClipBasket(prev => [...prev, clip]);
                               addToast('✂️ Clip added to timeline!');
-                              setTimeout(() => { const track = document.querySelector('.timeline-track'); if (track) { track.classList.add('timeline-flash'); setTimeout(() => track.classList.remove('timeline-flash'), 1500); } }, 100);
                             }}>+ Timeline</button>
                             <button className="search-result-btn search-result-btn-context" onClick={() => {
                               setExpanded({ open: true, focusIdx: m.idx || i });
@@ -8358,11 +8376,8 @@ export default function App() {
                         {words.length > 0 ? words.map((w, i) => {
                           const maxCount = words[0].count;
                           const minCount = words[words.length - 1].count || 1;
-                          // Logarithmic scale for much more size variation
                           const logRatio = Math.log(w.count) / Math.log(maxCount);
-                          // Rank-based sizing: distribute sizes evenly by position
                           const rankRatio = 1 - (i / words.length);
-                          // Blend log scale with rank for best visual spread
                           const ratio = logRatio * 0.6 + rankRatio * 0.4;
                           const sizeClass = ratio > 0.85 ? 'wc-mega' : ratio > 0.7 ? 'wc-xl' : ratio > 0.55 ? 'wc-large' : ratio > 0.4 ? 'wc-medium' : ratio > 0.25 ? 'wc-small' : 'wc-tiny';
                           const colors = ['#4ade80', '#22c55e', '#34d399', '#2dd4bf', '#6ee7b7', '#a7f3d0', '#86efac', '#bbf7d0'];
@@ -8379,6 +8394,18 @@ export default function App() {
                           <span style={{ color: '#475569', fontSize: '14px' }}>Load a video to see key terms</span>
                         )}
                       </div>
+                      {/* View Full Transcript button — overlays word cloud when clicked */}
+                      {sents.length > 0 && (
+                        <button onClick={() => setShowFullTranscript(true)} style={{
+                          display: 'block', width: '100%', marginTop: 12, padding: '10px 16px',
+                          background: '#166534', color: '#fff', border: 'none', borderRadius: 8,
+                          fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+                          transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = '#15803d'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = '#166534'}
+                        >📝 View Full Transcript</button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -9014,7 +9041,7 @@ export default function App() {
                     const blob = new Blob([vtt || fullText], { type: vtt ? 'text/vtt' : 'text/plain' });
                     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `transcript-${videoId}.${vtt ? 'vtt' : 'txt'}`; a.click(); URL.revokeObjectURL(url);
                   }}>⬇️ Download Transcript</button>
-                  <button className="search-result-btn" onClick={() => setExpanded({ open: true, focusIdx: 0 })}>📖 View Full Transcript</button>
+                  <button className="search-result-btn" onClick={() => { setShowFullTranscript(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>📖 View Full Transcript</button>
                 </div>
               </div>
 
