@@ -837,9 +837,13 @@ def call_openai_api(
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt},
                     ],
-                    "max_tokens": max_tokens,
                     "temperature": temperature,
                 }
+                # gpt-5.1+ uses max_completion_tokens; older models use max_tokens
+                if current_model.startswith("gpt-5"):
+                    data["max_completion_tokens"] = max_tokens
+                else:
+                    data["max_tokens"] = max_tokens
 
                 if response_format == "json_object":
                     data["response_format"] = {"type": "json_object"}
@@ -1620,6 +1624,17 @@ async def wordfreq(req: Request):
 async def summary_ai(req: Request):
     """Smart map-reduce strategy for long transcripts - FIXED duplication"""
     check_rate_limit(req, _rate_ai)
+    try:
+        return await _summary_ai_impl(req)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"[summary_ai] UNHANDLED ERROR: {e}")
+        raise HTTPException(status_code=500, detail=f"AI analysis failed: {str(e)[:200]}")
+
+async def _summary_ai_impl(req: Request):
     data = await req.json()
     transcript = clean_text(data.get("transcript", ""))
     language = data.get("language", "en")

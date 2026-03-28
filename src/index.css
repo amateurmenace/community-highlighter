@@ -7852,13 +7852,15 @@ header.scrolled {
 .word-cloud-hero-words {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 12px;
+  gap: 4px 10px;
   align-items: baseline;
   justify-content: center;
   flex: 1;
   align-content: center;
   position: relative;
   z-index: 1;
+  line-height: 1.1;
+  overflow: hidden;
 }
 
 .wc-word {
@@ -7873,12 +7875,12 @@ header.scrolled {
 }
 
 /* Size tiers */
-.wc-mega { font-size: 56px; font-weight: 800; }
-.wc-xl { font-size: 42px; font-weight: 700; }
-.wc-large { font-size: 32px; font-weight: 700; }
-.wc-medium { font-size: 22px; font-weight: 600; }
-.wc-small { font-size: 16px; font-weight: 500; }
-.wc-tiny { font-size: 12px; font-weight: 400; }
+.wc-mega { font-size: 72px; font-weight: 900; letter-spacing: -1px; }
+.wc-xl { font-size: 52px; font-weight: 800; }
+.wc-large { font-size: 36px; font-weight: 700; }
+.wc-medium { font-size: 24px; font-weight: 600; }
+.wc-small { font-size: 16px; font-weight: 500; opacity: 0.85; }
+.wc-tiny { font-size: 11px; font-weight: 400; opacity: 0.7; }
 
 /* Glow animation for top words */
 @keyframes wordGlow {
@@ -8135,9 +8137,9 @@ header.scrolled {
     padding: 20px;
   }
 
-  .wc-mega { font-size: 36px; }
-  .wc-xl { font-size: 28px; }
-  .wc-large { font-size: 22px; }
+  .wc-mega { font-size: 48px; }
+  .wc-xl { font-size: 34px; }
+  .wc-large { font-size: 24px; }
 
   .unified-toolbar {
     gap: 4px;

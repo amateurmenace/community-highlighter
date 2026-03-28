@@ -6804,7 +6804,7 @@ export default function App() {
       const wf = await apiWordfreq({ transcript: all });
       const filtered = (wf.words || [])
         .filter(w => !civicStopwords.has(w.text.toLowerCase()) && w.text.length > 3)
-        .slice(0, 50); // NEW: 50 words
+        .slice(0, 80); // More words for denser, more impactful word cloud
       setWords(filtered);
 
       const maxT = (cc[cc.length - 1]?.end || 0);
@@ -8357,9 +8357,15 @@ export default function App() {
                       <div className="word-cloud-hero-words">
                         {words.length > 0 ? words.map((w, i) => {
                           const maxCount = words[0].count;
-                          const ratio = w.count / maxCount;
-                          const sizeClass = ratio > 0.8 ? 'wc-mega' : ratio > 0.6 ? 'wc-xl' : ratio > 0.4 ? 'wc-large' : ratio > 0.25 ? 'wc-medium' : ratio > 0.1 ? 'wc-small' : 'wc-tiny';
-                          const colors = ['#4ade80', '#34d399', '#2dd4bf', '#a7f3d0', '#6ee7b7', '#86efac'];
+                          const minCount = words[words.length - 1].count || 1;
+                          // Logarithmic scale for much more size variation
+                          const logRatio = Math.log(w.count) / Math.log(maxCount);
+                          // Rank-based sizing: distribute sizes evenly by position
+                          const rankRatio = 1 - (i / words.length);
+                          // Blend log scale with rank for best visual spread
+                          const ratio = logRatio * 0.6 + rankRatio * 0.4;
+                          const sizeClass = ratio > 0.85 ? 'wc-mega' : ratio > 0.7 ? 'wc-xl' : ratio > 0.55 ? 'wc-large' : ratio > 0.4 ? 'wc-medium' : ratio > 0.25 ? 'wc-small' : 'wc-tiny';
+                          const colors = ['#4ade80', '#22c55e', '#34d399', '#2dd4bf', '#6ee7b7', '#a7f3d0', '#86efac', '#bbf7d0'];
                           const colorIdx = Math.min(Math.floor((1 - ratio) * colors.length), colors.length - 1);
                           const isGlow = i < 3;
                           return (
@@ -8523,7 +8529,7 @@ export default function App() {
                       if (clipBasket.length === 0) return;
                       const clipsParam = clipBasket.map(c => `${Math.round(c.start)}-${Math.round(c.end)}`).join(',');
                       const titlesParam = clipBasket.map(c => (c.label || '').slice(0, 50)).join('|');
-                      const shareUrl = `${window.location.origin}?v=${videoId}&clips=${clipsParam}&titles=${encodeURIComponent(titlesParam)}`;
+                      const shareUrl = `${window.location.origin}/?v=${videoId}&clips=${clipsParam}&titles=${encodeURIComponent(titlesParam)}`;
                       navigator.clipboard.writeText(shareUrl).then(() => addToast('🔗 Reel link copied to clipboard!')).catch(() => {
                         prompt('Copy this reel link:', shareUrl);
                       });
