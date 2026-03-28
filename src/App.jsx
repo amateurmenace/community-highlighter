@@ -8885,6 +8885,68 @@ export default function App() {
                   )}
                 </div>
               )}
+
+              {/* Highlights Panel — always visible under timeline for adding clips */}
+              {highlightsWithQuotes.length > 0 && (
+                <div style={{ padding: '12px 16px', borderTop: '1px solid #1e293b' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      ⭐ AI Highlights ({highlightsWithQuotes.length})
+                    </span>
+                    <span style={{ fontSize: '10px', color: '#64748b' }}>click + to add to timeline</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: '240px', overflowY: 'auto' }}>
+                    {highlightsWithQuotes.slice(0, 10).map((h, i) => {
+                      const ts = findQuoteTimestamp(h.quote || h.highlight, sents, videoOptions.clipPadding || 4);
+                      const alreadyInTimeline = ts && clipBasket.some(c => Math.abs(c.start - (ts.start - (videoOptions.clipPadding || 4))) < 2);
+                      return (
+                        <div key={i} style={{
+                          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
+                          background: alreadyInTimeline ? '#0d2818' : '#141b24', borderRadius: 6,
+                          cursor: 'pointer', transition: 'background 0.15s',
+                          border: alreadyInTimeline ? '1px solid #166534' : '1px solid transparent',
+                        }}
+                        onMouseEnter={(e) => { if (!alreadyInTimeline) e.currentTarget.style.background = '#1a2332'; }}
+                        onMouseLeave={(e) => { if (!alreadyInTimeline) e.currentTarget.style.background = '#141b24'; }}
+                        onClick={() => {
+                          if (playerRef.current && ts) {
+                            playerRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(ts.start)}&autoplay=1&enablejsapi=1`;
+                          }
+                        }}>
+                          <span style={{
+                            width: 20, height: 20, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: '10px', fontWeight: 700, flexShrink: 0,
+                            background: alreadyInTimeline ? '#166534' : '#1e293b', color: alreadyInTimeline ? '#4ade80' : '#94a3b8',
+                          }}>{i + 1}</span>
+                          <span style={{ flex: 1, fontSize: '12px', color: '#cbd5e1', lineHeight: 1.4 }}>{h.highlight}</span>
+                          {alreadyInTimeline ? (
+                            <span style={{ fontSize: '10px', color: '#4ade80', fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 }}>✓ In timeline</span>
+                          ) : (
+                            <button onClick={(e) => {
+                              e.stopPropagation();
+                              if (ts) {
+                                updateClipBasket(prev => [...prev, {
+                                  start: Math.max(0, ts.start - (videoOptions.clipPadding || 4)),
+                                  end: ts.end + (videoOptions.clipPadding || 4),
+                                  label: h.highlight, highlight: h.highlight, speaker: h.speaker
+                                }]);
+                                addToast(`✂️ Highlight ${i + 1} added to timeline!`);
+                              }
+                            }} style={{
+                              background: '#166534', color: '#4ade80', border: 'none', borderRadius: 4,
+                              padding: '3px 10px', fontSize: '11px', fontWeight: 600, cursor: 'pointer',
+                              whiteSpace: 'nowrap', flexShrink: 0, transition: 'background 0.15s',
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = '#15803d'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = '#166534'}
+                            title="Add this highlight to the editing timeline">+ Add</button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Floating "Create Clip" button — appears on text selection */}
