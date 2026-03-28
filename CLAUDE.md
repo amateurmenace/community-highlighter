@@ -42,18 +42,20 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
    - **Search Bar** — full-width, large input (15px), 🔬 Investigate, 🌐 Translate, ⬇️ Download, language selector (8 languages)
    - **Search Sparkline** — timeline distribution bar (50 bins) when searching
    - **Two-column grid**:
-     - **Left**: Word Cloud Hero (420px min-height, dark blueprint bg, ALL words, top 3 glow) OR Search Result Cards (when searching)
+     - **Left**: Word Cloud Hero (420px min-height, dark blueprint bg, 80 words logarithmic sizing, top 3 glow) OR Full Transcript overlay OR Search Result Cards (when searching). "View Full Transcript" button overlays word cloud with scrollable transcript (text selection creates clips)
      - **Right**: Small preview video (240px YouTube embed, `searchPlayerRef`) + Jargon Translator + compact Highlights list
    - Search result "▶ Watch" seeks the small preview player; timeline clips seek the big editor player
 2. **Dark Editing Workspace** (`#0f1419` background) — video + toolbar + timeline as one connected unit:
    - **Video Player** — full-width, 520px height, embedded YouTube iframe (`playerRef`)
    - **Hero AI Reel Button** — full-width green gradient CTA "Make AI Highlight Reel" (loads top 5 of 10 highlights)
    - **Collapsible Reel Styles** — "🎬 Choose Reel Style" toggle reveals 6 cards with descriptions
-   - **Compact Toolbar** — adapts to environment:
-     - **Desktop**: Export button (green), Import .chreel (blue), Download Full Video (orange) with resolution picker
+   - **Compact Toolbar** — two-row layout adapts to environment:
+     - **Row 1 (primary)**: clip count + zoom | Export/Share button | Settings
+     - **Row 2 (secondary, when clips exist)**: Shuffle | Regenerate | Clear | Titles ON/OFF | Import .chreel (desktop)
+     - **Download Full Video** — own compact row below toolbar (desktop only)
      - **Cloud**: Share Reel Link (blue), Render in Desktop App (green, downloads `.chreel`)
-     - **Both**: clip count, zoom, Chapter Titles ON/OFF, Shuffle/Regenerate/Clear, "⚙️ Customize Settings"
-   - **Timeline Editor** — dark-themed NLE track with drag-to-reorder, trim handles, loading animation, tooltips
+   - **Timeline Editor** — dark-themed NLE track with drag-to-reorder, trim handles, loading animation, tooltips, YouTube thumbnail fallback
+   - **Highlights Panel** — always-visible panel under timeline showing all 10 AI highlights with "✓ In timeline" / "+ Add" status
    - **Clip Inspector** — dark-themed panel when clip selected
    - **Job Status** — progress bar during render
 3. **Bottom Panel** — AI Summary, Key Highlights, Transcript Tools (Translate/Download/View Full Transcript)
@@ -80,6 +82,8 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
   3. Remix a Meeting — AI selects moments, video editor, export reels
   4. Share Highlights — export clips, share reel links, download transcript
 - **First-clip tooltip**: When AI loads clips into timeline, first clip shows tip: "Click to edit, drag edges to trim, drag to reorder, click Customize Settings for effects"
+- **.chreel Import Zone** (desktop only): Dark drag-and-drop zone on landing page for importing cloud-exported reel plans
+- **Batch Processing** (landing page): Collapsible multi-URL textarea for queuing up to 20 videos
 - Tracked via localStorage (`ch_onboarding_done`) — only shows once
 - Steps: (1) Paste a YouTube URL, (2) AI generates highlights, (3) Build and export reels
 
@@ -304,6 +308,6 @@ gh workflow run build-windows.yml -f version=v7.2.0
 
 ## Version
 
-Current: 7.2.0
+Current: 7.3.1
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)
