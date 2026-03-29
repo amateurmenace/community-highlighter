@@ -632,7 +632,10 @@ def synthesize_full_meeting(all_key_points, model="gpt-5.1", strategy="concise",
 
     if strategy == "highlights_with_quotes":
         # Check for reel style override from optimized_prompts
-        from backend.optimized_prompts import get_reel_style_prompt_override
+        try:
+            from backend.optimized_prompts import get_reel_style_prompt_override
+        except ImportError:
+            from optimized_prompts import get_reel_style_prompt_override
         reel_style_emphasis = get_reel_style_prompt_override(reel_style) if reel_style else None
 
         base_instructions = """You are an expert at creating compelling, newsworthy highlights from civic meetings.
@@ -1629,10 +1632,13 @@ async def summary_ai(req: Request):
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"[summary_ai] UNHANDLED ERROR: {e}")
-        raise HTTPException(status_code=500, detail=f"AI analysis failed: {str(e)[:200]}")
+        print(f"[summary_ai] UNHANDLED ERROR: {type(e).__name__}: {e}")
+        try:
+            import traceback
+            traceback.print_exc()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"AI analysis failed: {type(e).__name__}: {str(e)[:200]}")
 
 async def _summary_ai_impl(req: Request):
     data = await req.json()
@@ -4969,7 +4975,7 @@ async def render_clips(req: Request):
                 # Try to fetch
                 try:
                     from youtube_transcript_api import YouTubeTranscriptApi
-                    transcript_data = YouTubeTranscriptApi.get_transcript(vid)
+                    transcript_data = ytt_api.fetch(vid).to_raw_data()
                     TRANSCRIPT_CACHE[cache_key] = transcript_data
                     print(f"[render_clips] Fetched transcript: {len(transcript_data)} segments")
                 except Exception as e:
