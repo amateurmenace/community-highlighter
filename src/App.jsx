@@ -6743,33 +6743,29 @@ export default function App() {
     let vttText = "";
     try {
       setLoading(l => ({ ...l, transcript: true }));
-      // Try IndexedDB cache first (for offline/PWA support)
-      const cached = await getCachedTranscript(vid);
-      if (cached && cached.transcript) {
-        // Reconstruct VTT from cached segments
-        vttText = cached.transcript.map(s => {
-          const st = s.start || 0, dur = s.duration || (s.end ? s.end - s.start : 5);
-          return `${st}\n${s.text || ''}`;
-        }).join('\n');
-        // Still fetch from API for freshness, but don't block
-        vttText = await apiTranscript(vid);
-        console.log('[transcriptCache] Using API transcript, will re-cache');
-      } else {
-        vttText = await apiTranscript(vid);
-      }
+      console.log(`[loadAll] Fetching transcript for ${vid}...`);
+      vttText = await apiTranscript(vid);
+      console.log(`[loadAll] Transcript received: ${vttText.length} chars`);
 
       setProcessStatus({ active: true, message: "Processing transcript...", percent: 30, isVideoDownload: false });
     } catch (e) {
-      // If API fails, try using cached transcript for offline mode
-      const cached = await getCachedTranscript(vid);
-      if (cached && cached.transcript) {
-        vttText = cached.transcript.map(s => `${s.start || 0}\n${s.text || ''}`).join('\n');
-        setProcessStatus({ active: true, message: "Using cached transcript (offline)...", percent: 30, isVideoDownload: false });
-        console.log('[transcriptCache] Using offline cached transcript');
-      } else {
+      console.error(`[loadAll] Transcript fetch failed: ${e.message}`);
+      // Try IndexedDB cache as offline fallback
+      try {
+        const cached = await getCachedTranscript(vid);
+        if (cached && cached.transcript && cached.transcript.length > 0) {
+          vttText = cached.transcript.map(s => `${s.start || 0}\n${s.text || ''}`).join('\n');
+          setProcessStatus({ active: true, message: "Using cached transcript (offline)...", percent: 30, isVideoDownload: false });
+          console.log('[loadAll] Using offline cached transcript');
+        }
+      } catch (cacheErr) {
+        console.warn('[loadAll] Cache fallback also failed:', cacheErr);
+      }
+
+      if (!vttText) {
         setLoading(l => ({ ...l, transcript: false }));
         setProcessStatus({ active: false, message: "", percent: 0 });
-        alert("Could not load captions. Check your video URL.");
+        addToast(`Could not load captions: ${e.message || 'Unknown error'}`);
         setLoadingEntities(false);
         return;
       }
