@@ -6709,7 +6709,8 @@ export default function App() {
 
 
   const loadAll = async (overrideVideoId) => {
-    const vid = overrideVideoId || extractVideoId(url);
+    // Guard: if called from onClick, the event object gets passed — ignore it
+    const vid = (typeof overrideVideoId === 'string' && overrideVideoId) ? overrideVideoId : extractVideoId(url);
     setVideoId(vid);
     if (!vid) {
       alert("Please enter a valid YouTube URL or video ID");
