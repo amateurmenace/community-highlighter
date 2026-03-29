@@ -308,6 +308,6 @@ gh workflow run build-windows.yml -f version=v7.2.0
 
 ## Version
 
-Current: 7.3.2
+Current: 7.3.3
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)
