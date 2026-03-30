@@ -6914,7 +6914,7 @@ export default function App() {
   const [expanded, setExpanded] = useState({ open: false, focusIdx: null });
   const [clipBasket, setClipBasket] = useState([]);
   const [lang, setLang] = useState("en");
-  const [aiModel, setAiModel] = useState("gpt-5.1");
+  const [aiModel, setAiModel] = useState("gpt-4o");
   const [processStatus, setProcessStatus] = useState({ active: false, message: "", percent: 0, estimatedTime: null, isVideoDownload: false });
   const [translation, setTranslation] = useState({ text: "", lang: "", show: false });
   const [translateLang, setTranslateLang] = useState("Spanish");
@@ -8528,10 +8528,10 @@ export default function App() {
                   onChange={e => setAiModel(e.target.value)}
                   className="select-input"
                 >
-                  <option value="gpt-5.1">GPT-5.1 (Best Quality)</option>
-                  <option value="gpt-5.1-chat-latest">GPT-5.1 Instant (Faster)</option>
-                  <option value="gpt-4o">GPT-4o (Fallback)</option>
-                  <option value="gpt-4o-mini">GPT-4o Mini (Budget)</option>
+                  <option value="gpt-4o">GPT-4o (Recommended)</option>
+                  <option value="gpt-4o-mini">GPT-4o Mini (Faster)</option>
+                  <option value="gpt-5.1">GPT-5.1 (Deep Analysis)</option>
+                  <option value="gpt-5.1-chat-latest">GPT-5.1 Instant</option>
                 </select>
               </>
             )}

@@ -525,7 +525,7 @@ def clean_text(text):
 
 
 # FIXED: Balanced chunking strategy - eliminates excessive chunks
-def chunk_transcript_with_overlap(transcript, model="gpt-5.1", strategy="balanced"):
+def chunk_transcript_with_overlap(transcript, model="gpt-4o", strategy="balanced"):
     """
     SIMPLIFIED CHUNKING - Max 3-4 chunks to avoid rate limiting
     Fast and reliable approach
@@ -556,7 +556,7 @@ def chunk_transcript_with_overlap(transcript, model="gpt-5.1", strategy="balance
         ], True
 
 
-def extract_key_points_from_chunk(chunk, chunk_num, total_chunks, model="gpt-5.1"):
+def extract_key_points_from_chunk(chunk, chunk_num, total_chunks, model="gpt-4o"):
     """Extract key points from a single chunk with minimal delay"""
     if not OPENAI_API_KEY:
         return None
@@ -607,7 +607,7 @@ Respond in this JSON format:
     return result
 
 
-def synthesize_full_meeting(all_key_points, model="gpt-5.1", strategy="concise", reel_style=None):
+def synthesize_full_meeting(all_key_points, model="gpt-4o", strategy="concise", reel_style=None):
     """Synthesize all extracted key points into final summary"""
     if not OPENAI_API_KEY or not all_key_points:
         return None
@@ -795,7 +795,7 @@ CRITICAL: Always begin with "At this meeting," and write in complete, flowing pa
 def call_openai_api(
     prompt,
     max_tokens=400,
-    model="gpt-5.1",
+    model="gpt-4o",
     temperature=0.3,
     system_prompt=None,
     response_format=None,
@@ -1827,8 +1827,8 @@ async def _summary_ai_impl(req: Request):
     # Validate and normalize model name - ensure we use a valid OpenAI model
     valid_models = ["gpt-5.1", "gpt-5.1-chat-latest", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
     if model not in valid_models:
-        print(f"[summary_ai] Invalid model '{model}', defaulting to gpt-5.1")
-        model = "gpt-5.1"
+        print(f"[summary_ai] Invalid model '{model}', defaulting to gpt-4o")
+        model = "gpt-4o"
 
     if not transcript:
         raise HTTPException(400, "No transcript provided")
@@ -2120,7 +2120,7 @@ async def get_metadata(req: Request):
         return {"title": "", "description": "", "duration": 0}
 
 
-async def get_ai_entities_improved(transcript, model="gpt-5.1"):
+async def get_ai_entities_improved(transcript, model="gpt-4o"):
     """v5.2: STRICT entity extraction - full names, places, organizations only"""
     if not OPENAI_API_KEY:
         print("[!] No OpenAI key, using fallback")
@@ -7957,7 +7957,7 @@ Respond in this JSON format:
 }}"""
 
         response = client.chat.completions.create(
-            model="gpt-5.1",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": "You are a helpful civic education assistant that explains government terms in plain, detailed language with real examples. Never give generic responses."},
                 {"role": "user", "content": prompt}
