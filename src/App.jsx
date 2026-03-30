@@ -568,6 +568,11 @@ function AboutPage({ onClose }) {
               Because stable releases of yt-dlp can become outdated within weeks, our desktop app <strong style={{ color: '#e2e8f0' }}>automatically updates yt-dlp to the latest nightly build</strong> from GitHub's master branch on every launch. This means the app installs the newest code — sometimes committed just hours ago — ensuring video downloads keep working even as YouTube continuously evolves its defenses. If the nightly fails to install, it falls back to the latest stable release. Users can also manually trigger updates from the Settings panel.
             </p>
 
+            <h3 style={{ color: '#e2e8f0', fontSize: '20px', fontWeight: 800, marginBottom: '12px' }}>Residential Proxies</h3>
+            <p style={{ marginBottom: '24px' }}>
+              Even with the latest yt-dlp, YouTube sometimes blocks requests based on IP reputation — particularly from data center and cloud IP ranges. To mitigate this, Community Highlighter supports routing transcript fetching and video downloads through <strong style={{ color: '#e2e8f0' }}>residential proxy servers</strong>. These proxies use IP addresses assigned to real internet service providers, making requests appear to originate from ordinary household connections rather than cloud infrastructure. This significantly improves reliability for both transcript extraction and video downloading, especially when YouTube's rate limiting or geo-restrictions would otherwise block access. Proxy support is configured via environment variables and is entirely optional — the app works without it, but proxy routing provides a valuable fallback when direct requests fail.
+            </p>
+
             <h3 style={{ color: '#e2e8f0', fontSize: '20px', fontWeight: 800, marginBottom: '12px' }}>Cloud and Desktop: Navigating the Tension</h3>
             <p style={{ marginBottom: '16px' }}>
               YouTube specifically blocks video downloads from cloud server IP addresses — the very servers that host web applications like this one. This creates a fundamental tension: the cloud provides the best user experience (instant access, no installation, works on any device), but the desktop is required for the core video download and rendering functionality.
@@ -6825,6 +6830,7 @@ export default function App() {
   const [extendedAnalytics, setExtendedAnalytics] = useState(null);
   const [actions, setActions] = useState({ reel: "", sum: "", dl: "", tr: "" });
   const [summary, setSummary] = useState({ para: "", bullets: [] });
+  const [summaryError, setSummaryError] = useState(false);
   const [highlightsWithQuotes, setHighlightsWithQuotes] = useState([]);
   const [reelCaptionsEnabled, setReelCaptionsEnabled] = useState(false);
   
@@ -7277,10 +7283,17 @@ export default function App() {
       setProcessStatus({ active: true, message: "Analyzing transcript...", percent: 40, isVideoDownload: false });
       apiWordfreq(all).then(data => setWords(data.freq || [])).catch(() => {});
       apiSummaryAI(videoId, all, 'highlights_with_quotes').then(data => {
-        setSummary({ para: data.summary || '', bullets: data.bullets || [] });
+        const text = data.summary || '';
+        if (!text || text.length < 20) {
+          setSummary({ para: '', bullets: [] });
+          setSummaryError(true);
+        } else {
+          setSummary({ para: text, bullets: data.bullets || [] });
+          setSummaryError(false);
+        }
         if (data.highlights_with_quotes) setHighlightsWithQuotes(data.highlights_with_quotes);
         setProcessStatus({ active: false, message: "", percent: 0 });
-      }).catch(() => setProcessStatus({ active: false, message: "", percent: 0 }));
+      }).catch(() => { setSummaryError(true); setProcessStatus({ active: false, message: "", percent: 0 }); });
     } catch (e) {
       addToast(`Transcript upload failed: ${e.message}`);
       setProcessStatus({ active: false, message: "", percent: 0 });
@@ -7405,15 +7418,27 @@ export default function App() {
           language: lang === "es" ? "es" : "en",
           model: aiModel,
           strategy: "concise",
-          video_id: vid  // ⚙️ NEW: For caching
+          video_id: vid
         });
 
-        let summaryText = "";
-        if (res.summarySentences) {
-          summaryText = res.summarySentences;
-          summaryText = summaryText.replace(/^(Here's a concise 3-sentence summary:|Here is your summary:)\s*/i, '');
+        if (res.strategy === 'error' || res.error) {
+          console.warn("AI summary returned error:", res.error);
+          setSummary({ para: "", bullets: [] });
+          setSummaryError(true);
+        } else {
+          let summaryText = "";
+          if (res.summarySentences) {
+            summaryText = res.summarySentences;
+            summaryText = summaryText.replace(/^(Here's a concise 3-sentence summary:|Here is your summary:)\s*/i, '');
+          }
+          if (!summaryText || summaryText.length < 20) {
+            setSummary({ para: "", bullets: [] });
+            setSummaryError(true);
+          } else {
+            setSummary({ para: summaryText, bullets: [] });
+            setSummaryError(false);
+          }
         }
-        setSummary({ para: summaryText, bullets: [] });
       }
 
       setProcessStatus({ active: true, message: "Complete!", percent: 100, isVideoDownload: false });
@@ -7421,9 +7446,8 @@ export default function App() {
 
     } catch (e) {
       console.error("Summary API error:", e);
-      const sentences = all.split('.').filter(s => s.trim().length > 30);
-      const fallbackSummary = sentences.slice(0, 3).join('. ') + '.';
-      setSummary({ para: fallbackSummary, bullets: [] });
+      setSummary({ para: "", bullets: [] });
+      setSummaryError(true);
       setProcessStatus({ active: false, message: "", percent: 0, isVideoDownload: false });
     }
 
@@ -8786,6 +8810,26 @@ export default function App() {
               Meeting Highlighter
             </div>
           </div>
+        )}
+
+        {/* AI Summary — error state */}
+        {summaryError && !summary.para && videoId && (
+          <section className="card section animate-slideUp" style={{ marginTop: 16, padding: '20px 24px', background: '#fffbeb', border: '2px solid #f59e0b' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: '#92400e', marginBottom: 4 }}>AI Summary could not be generated</div>
+                <div style={{ fontSize: 13, color: '#78350f' }}>The AI was unable to produce a reliable summary for this meeting. This can happen with very long or unusually formatted transcripts.</div>
+              </div>
+              <button
+                className="btn btn-primary"
+                onClick={() => { setSummaryError(false); generateHighlightsWithQuotes(true); }}
+                disabled={loading.summary}
+                style={{ whiteSpace: 'nowrap' }}
+              >
+                {loading.summary ? 'Generating...' : 'Try Again'}
+              </button>
+            </div>
+          </section>
         )}
 
         {/* AI Summary */}

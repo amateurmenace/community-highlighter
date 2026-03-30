@@ -157,6 +157,15 @@ When a shared reel link is opened with `?mode=play`, the app renders a cinematic
 - **Music ducking**: `sidechaincompress` filter auto-lowers background music during speech
 - **Progress tracking**: `run_ffmpeg_with_progress()` provides real-time per-clip percentage updates via `-progress pipe:1`
 
+### Map-Reduce AI Pipeline
+- Long transcripts (>40K chars) are split into 2-4 chunks
+- Each chunk: key point extraction via GPT with JSON response format (decisions, discussions, action items, quotes)
+- Chunk prompt truncated to 30K chars max for reliable extraction
+- 3-second delay between chunks to avoid rate limiting
+- Results synthesized into unified summary or highlights
+- If all chunks fail: returns error state (no fallback dummy text)
+- Word frequency: 150+ stopwords including civic meeting title words (council, board, committee, etc.)
+
 ### Quote-to-Timestamp Matching
 - `find_quote_timestamp()`: Matches first 8 words of AI-generated quote against transcript segments
 - Configurable padding (default 4s before/after)
@@ -348,6 +357,6 @@ gh workflow run build-windows.yml -f version=v7.2.0
 
 ## Version
 
-Current: 7.4.0
+Current: 7.4.1
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)

@@ -533,23 +533,20 @@ def chunk_transcript_with_overlap(transcript, model="gpt-5.1", strategy="balance
     transcript_length = len(transcript)
     print(f" Transcript length: {transcript_length:,} characters")
 
-    # SIMPLE APPROACH: Never more than 4 chunks
-    if transcript_length <= 50000:  # Short (<15 min)
+    # SIMPLE APPROACH: Never more than 4 chunks, each max ~40K chars
+    if transcript_length <= 40000:  # Short - fits in one call
         return [transcript], False
-    elif transcript_length <= 150000:  # Medium (15-45 min)
-        # Split into 2 chunks
+    elif transcript_length <= 80000:  # Medium
         mid = transcript_length // 2
         return [transcript[:mid], transcript[mid:]], True
-    elif transcript_length <= 300000:  # Long (45-90 min)
-        # Split into 3 chunks
+    elif transcript_length <= 160000:  # Long
         third = transcript_length // 3
         return [
             transcript[:third],
             transcript[third : third * 2],
             transcript[third * 2 :],
         ], True
-    else:  # Very long (90+ min)
-        # Split into 4 chunks max
+    else:  # Very long
         quarter = transcript_length // 4
         return [
             transcript[:quarter],
@@ -564,9 +561,9 @@ def extract_key_points_from_chunk(chunk, chunk_num, total_chunks, model="gpt-5.1
     if not OPENAI_API_KEY:
         return None
 
-    # Minimal delay between chunks (since we have max 4 chunks)
+    # Delay between chunks to avoid rate limiting
     if chunk_num > 1:
-        time.sleep(1)  # Just 1 second delay between chunks
+        time.sleep(3)
 
     system_prompt = """You are an expert analyst specializing in civic and government meetings. 
 Your task is to extract the most important information from this segment of a meeting transcript."""
@@ -582,7 +579,7 @@ Extract the following from THIS SEGMENT:
 Be specific. Include names, dates, and concrete details.
 
 SEGMENT {chunk_num}/{total_chunks}:
-{chunk[:50000]}  
+{chunk[:30000]}
 
 Respond in this JSON format:
 {{
@@ -594,13 +591,18 @@ Respond in this JSON format:
 
     result = call_openai_api(
         prompt=user_prompt,
-        max_tokens=1500,
+        max_tokens=2500,
         model=model,
         temperature=0.2,
         system_prompt=system_prompt,
         response_format="json_object",
         retry_on_rate_limit=True,
     )
+
+    if result is None:
+        print(f"   Chunk {chunk_num} extraction returned None - AI call failed")
+    else:
+        print(f"   Chunk {chunk_num} extraction OK: {len(result)} chars")
 
     return result
 
@@ -1772,6 +1774,16 @@ async def wordfreq(req: Request):
         # Meeting-specific filler (not policy content)
         "speaker", "colleagues", "colleague", "members", "member",
         "majority", "leader", "intro", "introduction",
+        # Civic meeting title words (said frequently but not meaningful content)
+        "select", "board", "selectboard", "committee", "council",
+        "city", "town", "village", "county", "borough",
+        "meeting", "session", "hearing", "agenda",
+        "planning", "zoning", "school", "finance", "budget",
+        "commission", "authority", "department", "office",
+        "public", "regular", "special", "annual", "monthly", "weekly",
+        "minutes", "motion", "second", "vote", "aye", "nay",
+        "resolution", "ordinance", "amendment", "warrant",
+        "stated", "live", "watch", "recording", "video",
     }
 
     stop_words.update(civic_stopwords)
@@ -1837,16 +1849,10 @@ async def _summary_ai_impl(req: Request):
 
         if not all_key_points:
             print("Ãƒâ€šÃ‚Â  Key point extraction failed, using fallback")
-            if strategy == "highlights_with_quotes":
-                return {
-                    "summarySentences": json.dumps(
-                        generate_fallback_highlights(transcript)
-                    ),
-                    "strategy": "fallback",
-                }
             return {
-                "summarySentences": generate_fallback_summary(transcript),
-                "strategy": "fallback",
+                "summarySentences": "",
+                "strategy": "error",
+                "error": "AI could not extract key points from this transcript. Try refreshing.",
             }
 
         print(f"[summary_ai] Synthesizing final {strategy}...")
@@ -1980,14 +1986,10 @@ Write a comprehensive 2-3 paragraph summary."""
                 return {"summarySentences": ai_result, "strategy": strategy}
 
     print("[summary_ai] All AI methods failed, using improved fallback")
-    if strategy == "highlights_with_quotes":
-        return {
-            "summarySentences": json.dumps(generate_fallback_highlights(transcript)),
-            "strategy": "fallback",
-        }
     return {
-        "summarySentences": generate_fallback_summary(transcript),
-        "strategy": "fallback",
+        "summarySentences": "",
+        "strategy": "error",
+        "error": "AI summary generation failed. Try refreshing or using a different AI model.",
     }
 
 
