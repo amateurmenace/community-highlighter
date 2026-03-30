@@ -26,7 +26,7 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 
 1. Paste YouTube URL → Load Video
 2. Transcript auto-extracted (YouTubeTranscriptApi → YouTube Data API → yt-dlp fallback chain)
-3. AI generates summary + 10 key highlights with direct quotes (GPT-4o/GPT-5.1, map-reduce for long transcripts)
+3. AI generates summary + 10 key highlights with direct quotes (GPT-4o default, GPT-5.1 optional for deep analysis; map-reduce for long transcripts)
 4. **Hero "Make AI Highlight Reel" button** — prominent green CTA directly below video, one-click with sensible defaults
 5. User selects reel style from collapsible "Choose Reel Style" panel: Decisions, Comments, Controversial, Budget, Actions, Social (with descriptions)
 6. **Top 5 of 10 AI highlights auto-load into dark timeline editor** — user can add remaining 5 from the Highlights panel (shows "✓ In timeline" / "+ Add" per highlight)
@@ -158,6 +158,8 @@ When a shared reel link is opened with `?mode=play`, the app renders a cinematic
 - **Progress tracking**: `run_ffmpeg_with_progress()` provides real-time per-clip percentage updates via `-progress pipe:1`
 
 ### Map-Reduce AI Pipeline
+- **Default model**: GPT-4o — fast, concise executive summaries. GPT-5.1 available in dropdown for deep analysis but is ~10x slower and more verbose.
+- **Model selector**: Dropdown in settings with GPT-4o (Recommended), GPT-4o Mini (Faster), GPT-5.1 (Deep Analysis), GPT-5.1 Instant
 - Long transcripts (>40K chars) are split into 2-4 chunks
 - Each chunk: key point extraction via GPT with JSON response format (decisions, discussions, action items, quotes)
 - Chunk prompt truncated to 30K chars max for reliable extraction
@@ -357,6 +359,6 @@ gh workflow run build-windows.yml -f version=v7.2.0
 
 ## Version
 
-Current: 7.4.1
+Current: 7.4.2
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)
