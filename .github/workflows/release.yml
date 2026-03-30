@@ -1,0 +1,103 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v7.1.0)'
+        required: true
+        default: 'v7.1.0'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install ffmpeg
+        run: choco install ffmpeg -y
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Install Node dependencies and build frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Windows executable
+        run: pyinstaller CommunityHighlighter-Windows.spec --clean --noconfirm
+
+      - name: Create ZIP
+        run: Compress-Archive -Path dist\CommunityHighlighter -DestinationPath CommunityHighlighter-${{ github.event.inputs.version }}-Windows.zip
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: CommunityHighlighter-${{ github.event.inputs.version }}-Windows.zip
+
+  create-release:
+    needs: [build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: Community Highlighter ${{ github.event.inputs.version }}
+          body: |
+            ## Community Highlighter ${{ github.event.inputs.version }}
+
+            AI-powered civic meeting analyzer with video editing capabilities.
+
+            ### Downloads
+            - **macOS**: Download the `.dmg` file below (signed & notarized)
+            - **Windows**: Download the `.zip` file below, extract, and run `CommunityHighlighter.exe`
+
+            ### Prerequisites
+            - **ffmpeg** must be installed
+              - macOS: `brew install ffmpeg`
+              - Windows: `winget install ffmpeg`
+            - **OpenAI API key** — create `~/.community-highlighter/.env` with `OPENAI_API_KEY=your-key`
+
+            ### What's New
+            - Video-editor-first UI with professional timeline
+            - Drag-to-reorder clips, trim handles, waveform visualization
+            - AI highlight reels load into timeline for editing before export
+            - Blur-fill vertical format (9:16) for social media
+            - Caption pills with semi-transparent backgrounds
+            - Audio normalization (EBU R128) enabled by default
+            - Intro/outro animated title cards
+            - Background music mixing with speech ducking
+            - Real-time render progress tracking
+
+            ### Cloud Version
+            Try without installing: https://community-highlighter.onrender.com/
+            (Video download/editing features require the desktop app)
+          files: |
+            CommunityHighlighter-*.zip
+          draft: false
+          prerelease: false

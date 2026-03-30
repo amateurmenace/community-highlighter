@@ -15,6 +15,9 @@ from fastapi import (
     HTTPException,
     WebSocket,
     WebSocketDisconnect,
+    UploadFile,
+    File,
+    Form,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -740,15 +743,17 @@ MAJOR DISCUSSIONS:
 ACTION ITEMS:
 {chr(10).join(f" {a}" for a in combined_actions[:15])}
 
-Write a 3-5 sentence executive summary that:
+Write a 5-7 sentence executive summary that:
 1. MUST start with "At this meeting," - do not use any other opening
 2. Covers key topics discussed and decisions made
-3. Mentions important action items and next steps
-4. Uses conversational, flowing language (no bullet points)
-5. Is written for residents/stakeholders
+3. Includes specific names of people, organizations, dollar amounts, and dates mentioned
+4. Mentions important action items and next steps
+5. Notes any significant public comments or community concerns raised
+6. Uses conversational, flowing language (no bullet points)
+7. Is written for residents/stakeholders who want a thorough understanding
 
 CRITICAL: Always begin with "At this meeting," and write in complete paragraphs."""
-            max_tokens = 500
+            max_tokens = 700
         else:
             user_prompt = f"""Based on the key information extracted from a civic meeting, write a comprehensive executive summary.
 
@@ -1171,6 +1176,72 @@ async def health_check():
     }
 
 
+@app.get("/api/ytdlp/status")
+async def ytdlp_status():
+    """Get current yt-dlp version"""
+    try:
+        result = subprocess.run(
+            [YT_DLP_PATH or 'yt-dlp', '--version'],
+            capture_output=True, text=True, timeout=10
+        )
+        version = result.stdout.strip() if result.returncode == 0 else "unknown"
+    except Exception:
+        version = "not installed"
+    return {"version": version, "path": YT_DLP_PATH or "yt-dlp"}
+
+
+@app.post("/api/ytdlp/update")
+async def ytdlp_update():
+    """Update yt-dlp to the latest nightly build from GitHub.
+    YouTube frequently blocks older versions, so this is critical for video downloads."""
+    if CLOUD_MODE:
+        raise HTTPException(status_code=403, detail="yt-dlp updates are only available in desktop mode")
+
+    import asyncio
+
+    # Get current version
+    old_version = "unknown"
+    try:
+        result = subprocess.run([YT_DLP_PATH or 'yt-dlp', '--version'], capture_output=True, text=True, timeout=10)
+        old_version = result.stdout.strip()
+    except Exception:
+        pass
+
+    # Run update in executor to not block
+    loop = asyncio.get_event_loop()
+    def _do_update():
+        try:
+            result = subprocess.run(
+                [sys.executable, '-m', 'pip', 'install', '-U',
+                 'https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz'],
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode == 0:
+                # Get new version
+                ver_result = subprocess.run([YT_DLP_PATH or 'yt-dlp', '--version'], capture_output=True, text=True, timeout=10)
+                new_version = ver_result.stdout.strip() if ver_result.returncode == 0 else "unknown"
+                return {"success": True, "old_version": old_version, "new_version": new_version}
+            else:
+                return {"success": False, "error": result.stderr[:300], "old_version": old_version}
+        except subprocess.TimeoutExpired:
+            return {"success": False, "error": "Update timed out (120s)", "old_version": old_version}
+        except Exception as e:
+            return {"success": False, "error": str(e), "old_version": old_version}
+
+    result = await loop.run_in_executor(None, _do_update)
+    return result
+
+
+@app.post("/api/dev/toggle-cloud")
+async def dev_toggle_cloud():
+    """Toggle CLOUD_MODE at runtime for development testing.
+    Only works on localhost (dev server)."""
+    global CLOUD_MODE
+    CLOUD_MODE = not CLOUD_MODE
+    print(f"[DEV] CLOUD_MODE toggled to: {CLOUD_MODE}")
+    return {"cloud_mode": CLOUD_MODE}
+
+
 @app.get("/api/system/status")
 async def system_status():
     """Detailed system status including desktop download information"""
@@ -1538,6 +1609,85 @@ async def get_transcript(req: Request):
     )
 
 
+@app.post("/api/transcript/upload")
+async def upload_transcript(video_id: str = Form(...), file: UploadFile = File(...)):
+    """Upload a transcript file (.vtt, .srt, .txt) for a video that doesn't have captions.
+    Parses the file and stores it in STORED_TRANSCRIPTS so the app works normally."""
+    import re
+
+    if not video_id or len(video_id) != 11:
+        raise HTTPException(status_code=400, detail="Invalid video ID")
+
+    content = await file.read()
+    text = content.decode("utf-8", errors="replace")
+    filename = (file.filename or "").lower()
+
+    transcript_data = []
+
+    if filename.endswith(".vtt"):
+        # Parse VTT
+        transcript_data = parse_vtt_to_transcript(text)
+    elif filename.endswith(".srt"):
+        # Parse SRT: "index\n00:00:01,000 --> 00:00:05,000\nText\n\n"
+        blocks = re.split(r'\n\s*\n', text.strip())
+        for block in blocks:
+            lines = block.strip().split('\n')
+            if len(lines) < 2:
+                continue
+            # Find the timestamp line
+            ts_line = None
+            text_lines = []
+            for line in lines:
+                if '-->' in line:
+                    ts_line = line
+                elif ts_line is not None:
+                    text_lines.append(line)
+            if ts_line and text_lines:
+                # Parse SRT timestamps: 00:00:01,000 --> 00:00:05,000
+                ts_match = re.match(
+                    r'(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})',
+                    ts_line.strip()
+                )
+                if ts_match:
+                    g = ts_match.groups()
+                    start = int(g[0]) * 3600 + int(g[1]) * 60 + int(g[2]) + int(g[3]) / 1000
+                    end = int(g[4]) * 3600 + int(g[5]) * 60 + int(g[6]) + int(g[7]) / 1000
+                    segment_text = ' '.join(text_lines).strip()
+                    if segment_text:
+                        transcript_data.append({
+                            "text": segment_text,
+                            "start": start,
+                            "duration": end - start
+                        })
+    elif filename.endswith(".txt"):
+        # Plain text: split into ~10-second segments by word count
+        words = text.split()
+        words_per_segment = 25  # ~10 seconds of speech
+        segment_duration = 10.0
+        for i in range(0, len(words), words_per_segment):
+            chunk = ' '.join(words[i:i + words_per_segment])
+            if chunk.strip():
+                start = (i // words_per_segment) * segment_duration
+                transcript_data.append({
+                    "text": chunk.strip(),
+                    "start": start,
+                    "duration": segment_duration
+                })
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file format. Use .vtt, .srt, or .txt")
+
+    if not transcript_data:
+        raise HTTPException(status_code=400, detail="Could not parse any transcript segments from the uploaded file")
+
+    # Store for AI assistant and other features
+    STORED_TRANSCRIPTS[video_id] = transcript_data
+    print(f"[OK] STORED {len(transcript_data)} segments from uploaded file ({file.filename}) for {video_id}")
+
+    # Return VTT format
+    vtt = to_vtt(transcript_data)
+    return Response(content=vtt, media_type="text/vtt")
+
+
 @app.get("/api/debug/cache")
 async def debug_cache():
     """Check what's in the transcript cache"""
@@ -1580,35 +1730,48 @@ async def wordfreq(req: Request):
             stop_words = set()
 
     civic_stopwords = {
-        "the",
-        "and",
-        "for",
-        "with",
-        "that",
-        "this",
-        "from",
-        "into",
-        "your",
-        "about",
-        "have",
-        "will",
-        "they",
-        "them",
-        "were",
-        "has",
-        "had",
-        "not",
-        "but",
-        "are",
-        "our",
-        "you",
-        "its",
-        "it's",
-        "we're",
-        "there",
-        "here",
-        "been",
-        "was",
+        # Basic grammar words
+        "the", "and", "for", "with", "that", "this", "from", "into", "your", "about",
+        "have", "will", "they", "them", "were", "has", "had", "not", "but", "are",
+        "our", "you", "its", "it's", "we're", "there", "here", "been", "was", "who",
+        "what", "when", "where", "how", "why", "which", "than", "then", "both",
+        "each", "other", "more", "some", "any", "all", "most", "own", "same",
+        "such", "only", "over", "after", "before", "between", "through", "under",
+        # Politeness & speech acts (dominate civic meeting transcripts)
+        "thank", "thanks", "thanking", "thanked", "please", "okay", "yes", "yeah",
+        "right", "sure", "well", "just", "like", "really", "actually", "absolutely",
+        "certainly", "definitely", "exactly", "great", "good", "nice", "wonderful",
+        # Common filler verbs in speech
+        "going", "think", "know", "want", "need", "believe", "feel", "mean",
+        "understand", "hope", "talking", "saying", "looking", "coming", "making",
+        "getting", "doing", "being", "having", "using", "working", "trying",
+        "asking", "speaking", "hearing", "moving", "calling", "bringing",
+        # Modal/auxiliary verbs
+        "would", "could", "should", "shall", "might", "also", "very", "much",
+        "can", "may", "must", "does", "did",
+        # Generic nouns/pronouns in speech
+        "thing", "things", "something", "anything", "everything", "someone",
+        "everyone", "people", "person", "way", "ways", "time", "times",
+        "today", "tonight", "year", "years", "day", "days", "week", "weeks",
+        "month", "months", "number", "part", "point", "fact", "case", "end",
+        "work", "place", "state", "area", "issue", "issues", "matter",
+        # Common speech fillers & generic words
+        "gonna", "gotta", "kinda", "sorta", "kind", "sort", "lot", "lots", "bit",
+        "many", "every", "even", "still", "already", "always", "never", "often",
+        "first", "last", "next", "new", "long", "different", "important",
+        "able", "enough", "ago", "away", "around", "across",
+        # Generic action verbs
+        "look", "come", "came", "back", "make", "made", "take", "took",
+        "get", "got", "say", "said", "tell", "told", "let", "put",
+        "give", "gave", "see", "saw", "one", "two", "three", "keep",
+        "call", "called", "ask", "asked", "move", "moved", "bring", "brought",
+        "set", "start", "started", "continue", "continued", "support",
+        "present", "presented", "pass", "passed",
+        # Titles used in address (not meaningful as standalone words)
+        "mr", "mrs", "ms", "dr",
+        # Meeting-specific filler (not policy content)
+        "speaker", "colleagues", "colleague", "members", "member",
+        "majority", "leader", "intro", "introduction",
     }
 
     stop_words.update(civic_stopwords)
@@ -2199,39 +2362,51 @@ async def _ytdlp_search(q: str, maxResults: int = 20):
 
 
 @app.get("/api/youtube-search")
-async def youtube_search(q: str, type: str = "video", maxResults: int = 10, order: str = "date"):
+async def youtube_search(q: str, type: str = "video", maxResults: int = 10, order: str = "date",
+                         days: int = 90, meetingType: str = "all"):
     """Search YouTube for videos (used by Civic Meeting Finder).
-    Runs multiple parallel queries across different meeting types for comprehensive results.
+    Supports: municipality names, YouTube @handles, channel URLs.
+    Filters: days (7/30/90/365/0=all), meetingType (all/council/board/planning/hearing/school).
     Falls back to yt-dlp search if no YouTube API key is configured."""
+    import re
     api_key = os.environ.get("YOUTUBE_API_KEY", "") or YOUTUBE_API_KEY
     if not api_key:
-        # Fallback: use yt-dlp search (no API key required)
         print(f"[YouTube] No API key — using yt-dlp search for: {q}")
         return await _ytdlp_search(q, maxResults)
 
     try:
-        # Calculate publishedAfter: last 90 days for recency
         from datetime import datetime, timedelta
-        published_after = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%dT00:00:00Z")
+        published_after = None
+        if days > 0:
+            published_after = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%dT00:00:00Z")
 
-        # Multiple targeted queries to cast a wide net across meeting types
-        search_queries = [
-            f'"{q}" city council meeting',
-            f'"{q}" town meeting OR selectboard OR select board',
-            f'"{q}" board meeting OR committee meeting',
-            f'"{q}" planning board OR zoning board OR school committee',
-            f'"{q}" public hearing OR town hall OR municipal',
-        ]
+        # Detect YouTube channel handle or URL
+        channel_id = None
+        handle_match = re.match(r'^(?:https?://(?:www\.)?youtube\.com/)?@([\w.-]+)$', q.strip())
+        channel_url_match = re.match(r'https?://(?:www\.)?youtube\.com/channel/(UC[\w-]+)', q.strip())
 
-        print(f"[YouTube] Comprehensive search for: {q} ({len(search_queries)} queries, after {published_after[:10]})")
+        if handle_match or channel_url_match:
+            if handle_match:
+                handle = handle_match.group(1)
+                print(f"[YouTube] Detected channel handle: @{handle}")
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(
+                        "https://www.googleapis.com/youtube/v3/search",
+                        params={"part": "snippet", "q": f"@{handle}", "type": "channel", "maxResults": 1, "key": api_key},
+                        timeout=15.0
+                    )
+                if resp.status_code == 200:
+                    ch_items = resp.json().get("items", [])
+                    if ch_items:
+                        channel_id = ch_items[0].get("id", {}).get("channelId", "")
+                        print(f"[YouTube] Resolved @{handle} -> channel ID: {channel_id}")
+            else:
+                channel_id = channel_url_match.group(1)
+                print(f"[YouTube] Detected channel URL, ID: {channel_id}")
 
-        all_items = []
-        seen_ids = set()
-
-        # Run all queries (use asyncio for parallel execution)
         import asyncio
 
-        async def run_query(query, max_per_query):
+        async def run_query(query, max_per_query, extra_params=None):
             params = {
                 "part": "snippet",
                 "q": query,
@@ -2241,10 +2416,12 @@ async def youtube_search(q: str, type: str = "video", maxResults: int = 10, orde
                 "key": api_key,
                 "relevanceLanguage": "en",
                 "regionCode": "US",
-                "publishedAfter": published_after,
             }
+            if published_after:
+                params["publishedAfter"] = published_after
+            if extra_params:
+                params.update(extra_params)
             try:
-                # Use httpx async client
                 async with httpx.AsyncClient() as client:
                     resp = await client.get(
                         "https://www.googleapis.com/youtube/v3/search",
@@ -2260,8 +2437,43 @@ async def youtube_search(q: str, type: str = "video", maxResults: int = 10, orde
                 print(f"[YouTube] Query error: {e}")
                 return []
 
-        # Run queries in parallel, 10 results each
-        results = await asyncio.gather(*[run_query(q_str, 10) for q_str in search_queries])
+        all_items = []
+        seen_ids = set()
+
+        # Meeting type query mappings
+        MEETING_TYPE_QUERIES = {
+            "council": ['"{q}" city council meeting', '"{q}" council session'],
+            "board": ['"{q}" board meeting OR committee meeting', '"{q}" selectboard OR select board'],
+            "planning": ['"{q}" planning board OR zoning board', '"{q}" zoning hearing OR land use'],
+            "hearing": ['"{q}" public hearing OR town hall', '"{q}" public comment OR testimony'],
+            "school": ['"{q}" school committee OR school board', '"{q}" education board'],
+        }
+
+        if channel_id:
+            search_queries = [
+                ("", {"channelId": channel_id, "order": "date"}),
+                ("meeting", {"channelId": channel_id, "order": "date"}),
+            ]
+            print(f"[YouTube] Channel search for: {channel_id}")
+            results = await asyncio.gather(*[run_query(sq[0], 25, sq[1]) for sq in search_queries])
+        elif meetingType != "all" and meetingType in MEETING_TYPE_QUERIES:
+            # Filtered by meeting type
+            search_queries = [(tpl.replace("{q}", q), None) for tpl in MEETING_TYPE_QUERIES[meetingType]]
+            print(f"[YouTube] Filtered search ({meetingType}) for: {q}")
+            results = await asyncio.gather(*[run_query(sq[0], 25, sq[1]) for sq in search_queries])
+        else:
+            # Full multi-query strategy
+            search_queries = [
+                (f'"{q}" city council meeting', None),
+                (f'"{q}" town meeting OR selectboard OR select board', None),
+                (f'"{q}" board meeting OR committee meeting', None),
+                (f'"{q}" planning board OR zoning board OR school committee', None),
+                (f'"{q}" public hearing OR town hall OR municipal', None),
+                (f'"{q}" official', None),
+            ]
+            day_label = f"after {published_after[:10]}" if published_after else "all time"
+            print(f"[YouTube] Comprehensive search for: {q} ({len(search_queries)} queries, {day_label})")
+            results = await asyncio.gather(*[run_query(sq[0], 10, sq[1]) for sq in search_queries])
 
         for batch in results:
             for item in batch:
@@ -2270,13 +2482,12 @@ async def youtube_search(q: str, type: str = "video", maxResults: int = 10, orde
                     seen_ids.add(video_id)
                     all_items.append(item)
 
-        # Sort by publish date (newest first)
-        all_items.sort(key=lambda x: x.get("snippet", {}).get("publishedAt", ""), reverse=True)
-
-        # Cap at maxResults
+        # Sort by publish date (newest first) unless relevance requested
+        if order == "date":
+            all_items.sort(key=lambda x: x.get("snippet", {}).get("publishedAt", ""), reverse=True)
         all_items = all_items[:min(maxResults, 50)]
 
-        print(f"[YouTube] Found {len(all_items)} unique results across {len(search_queries)} queries")
+        print(f"[YouTube] Found {len(all_items)} unique results")
         return {"items": all_items}
 
     except Exception as e:
@@ -2284,6 +2495,80 @@ async def youtube_search(q: str, type: str = "video", maxResults: int = 10, orde
         import traceback
         traceback.print_exc()
         return {"items": [], "error": str(e)}
+
+
+@app.get("/api/youtube-channel-videos")
+async def youtube_channel_videos(channel: str, maxResults: int = 50):
+    """Get latest videos from a YouTube channel by @handle or URL.
+    Returns all recent videos without civic filtering."""
+    import re
+    api_key = os.environ.get("YOUTUBE_API_KEY", "") or YOUTUBE_API_KEY
+    if not api_key:
+        return {"items": [], "error": "YouTube API key not configured", "channel_name": ""}
+
+    try:
+        # Resolve channel identifier to channel ID
+        channel = channel.strip()
+        channel_id = None
+        channel_name = ""
+
+        # Direct channel ID
+        if channel.startswith("UC") and len(channel) == 24:
+            channel_id = channel
+        else:
+            # Extract @handle from URL or raw input
+            handle = None
+            url_match = re.match(r'https?://(?:www\.)?youtube\.com/@([\w.-]+)', channel)
+            handle_match = re.match(r'^@?([\w.-]+)$', channel)
+            if url_match:
+                handle = url_match.group(1)
+            elif handle_match and not ' ' in channel:
+                handle = handle_match.group(1)
+
+            if handle:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(
+                        "https://www.googleapis.com/youtube/v3/search",
+                        params={"part": "snippet", "q": f"@{handle}", "type": "channel", "maxResults": 1, "key": api_key},
+                        timeout=15.0
+                    )
+                if resp.status_code == 200:
+                    ch_items = resp.json().get("items", [])
+                    if ch_items:
+                        channel_id = ch_items[0].get("id", {}).get("channelId", "")
+                        channel_name = ch_items[0].get("snippet", {}).get("channelTitle", "")
+
+        if not channel_id:
+            return {"items": [], "error": f"Could not find channel: {channel}", "channel_name": ""}
+
+        # Get latest videos from channel
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://www.googleapis.com/youtube/v3/search",
+                params={
+                    "part": "snippet",
+                    "channelId": channel_id,
+                    "type": "video",
+                    "maxResults": min(maxResults, 50),
+                    "order": "date",
+                    "key": api_key,
+                },
+                timeout=15.0
+            )
+
+        if resp.status_code != 200:
+            return {"items": [], "error": f"YouTube API error: {resp.status_code}", "channel_name": channel_name}
+
+        items = resp.json().get("items", [])
+        if not channel_name and items:
+            channel_name = items[0].get("snippet", {}).get("channelTitle", "")
+
+        print(f"[YouTube] Channel {channel_name}: found {len(items)} videos")
+        return {"items": items, "channel_name": channel_name, "channel_id": channel_id}
+
+    except Exception as e:
+        print(f"[YouTube] Channel videos error: {e}")
+        return {"items": [], "error": str(e), "channel_name": ""}
 
 
 @app.get("/api/youtube-playlist")

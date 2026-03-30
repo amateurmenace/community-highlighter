@@ -4,8 +4,8 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 
 ## Architecture
 
-- **Frontend**: React 19 + Vite + vite-plugin-pwa, built to `dist/`. Monolithic `src/App.jsx` (~9400 lines) with 25+ inline sub-components
-- **Backend**: FastAPI (`backend/app.py`, ~304KB monolith), served by Uvicorn on port 8000. 69 API endpoints
+- **Frontend**: React 19 + Vite + vite-plugin-pwa, built to `dist/`. Monolithic `src/App.jsx` (~11500 lines) with 35+ inline sub-components (includes ReelPlayer, AboutPage, TranscriptUploadPrompt)
+- **Backend**: FastAPI (`backend/app.py`, ~330KB monolith), served by Uvicorn on port 8000. 80+ API endpoints
 - **Desktop packaging**: PyInstaller bundles into macOS `.app` (signed+notarized) and Windows `.exe`
 - **Cloud deployment**: Render (https://community-highlighter.onrender.com/) — full video editor with Share Reel Link + Desktop Handoff (.chreel); video download/render disabled in cloud mode
 - **GitHub**: https://github.com/amateurmenace/community-highlighter
@@ -58,20 +58,19 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
    - **Highlights Panel** — always-visible panel under timeline showing all 10 AI highlights with "✓ In timeline" / "+ Add" status
    - **Clip Inspector** — dark-themed panel when clip selected
    - **Job Status** — progress bar during render
-3. **Bottom Panel** — AI Summary, Key Highlights, Transcript Tools (Translate/Download/View Full Transcript)
+3. **Bottom Panel** — AI Summary, Key Highlights
 4. **Meeting Analyzer Section** — separated by "📊 Meeting Analyzer" section divider:
-   - ALL data visualizations always visible: Scorecard, Entities, Participation, Topics, Timeline, Disagreements, Dynamics, Cross-References, Subscriptions, Issue Tracker
-   - Three named section dividers separate the page: "🔍 Video Searcher", "🎬 Video Highlighter", "📊 Meeting Analyzer"
+   - ALL data visualizations always visible: Entities, Participation, Topics, Timeline, Disagreements, Dynamics, Cross-References, Subscriptions, Issue Tracker
+   - Three named section dividers separate the page: "🔍 Meeting Highlighter", "🎬 Highlight Video Editor", "📊 Meeting Analyzer"
+   - Section titles are large (38px), bold (900 weight), left-aligned with line above
 5. **Settings Drawer** — slides from right edge (400px), triggered by "⚙️ Customize Settings":
    - Quality: Resolution, Speed, Audio Normalize
    - Effects: Captions, Color Filter, Transitions, Background Music
    - Branding: Intro/Outro Title/Subtitle/CTA, Chapter Titles, Watermark, Speaker Labels
    - Full Video Download with resolution picker (desktop only)
 9. **Meeting Analytics** — pushed below the fold (entities, decisions, topics, participation)
-10. **Share Panel** — integrated in insights panel and bottom panel
-11. **Download History** — header badge with recent downloads dropdown, toast notifications
-10. **Share Panel** — integrated in insights panel and bottom panel
-11. **Download History** — header badge with recent downloads dropdown, toast notifications
+10. **Share Reel Link** — available on both desktop and cloud, copies URL with `mode=play` for cinematic Reel Player
+11. **About Page** — full Philosophy + Technology page, accessible via `?page=about` permanent link, About button in header and footer
 
 ## Onboarding & First-Visit Experience
 
@@ -86,6 +85,40 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
 - **Batch Processing** (landing page): Collapsible multi-URL textarea for queuing up to 20 videos
 - Tracked via localStorage (`ch_onboarding_done`) — only shows once
 - Steps: (1) Paste a YouTube URL, (2) AI generates highlights, (3) Build and export reels
+
+## Reel Player Mode
+
+When a shared reel link is opened with `?mode=play`, the app renders a cinematic `ReelPlayer` component instead of the full editor:
+- Sequential clip playback via YouTube iframe src changes with CSS fade transitions (0.5s)
+- Title overlays as CSS-animated lower thirds during each clip
+- Segmented progress bar showing position across all clips (clickable segments)
+- Play/pause, skip forward/back, clip counter ("2 / 5")
+- End card with Replay, Open in Editor, Download Desktop App CTAs
+- "Powered by Community Highlighter" branding
+- Zero server cost — entirely client-side iframe orchestration
+
+## Transcript Upload
+
+- **Backend**: `POST /api/transcript/upload` accepts multipart form with `video_id` + file
+- Supports `.vtt` (WebVTT), `.srt` (SubRip), `.txt` (plain text — auto-segmented into ~10s chunks)
+- Stores in `STORED_TRANSCRIPTS[video_id]` and returns VTT format
+- **Frontend**: When transcript fetch fails, shows `TranscriptUploadPrompt` card with file input
+- On successful upload, continues with normal analysis flow (word frequency, AI summary, etc.)
+
+## About Page
+
+- Full-page overlay accessible via About button in header, footer link, or `?page=about` URL parameter
+- **Philosophy section**: The Problem / Our Approach two-column layout, "Features and Why They Exist" (10 feature cards with "Barrier removed:" callouts)
+- **Technology section**: YouTube downloading challenges + yt-dlp, Cloud vs Desktop design, Reel Player trick, AI pipeline (map-reduce, quote-to-timestamp), video rendering pipeline
+- **Credits**: Brookline Interactive Group (Producer), NeighborhoodAI (Advisor), Stephen Walter (Designer + Developer)
+- Licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+
+## Cloud/Desktop Dev Toggle
+
+- `POST /api/dev/toggle-cloud` toggles `CLOUD_MODE` at runtime on the backend
+- Frontend uses `localStorage('dev_cloud_override')` for instant switching without backend dependency
+- Toggle button visible only on localhost, positioned left of language selector in header
+- `useCloudMode()` hook checks localStorage override first, falls back to `/api/health`
 
 ## Video Processing Pipeline
 
@@ -165,7 +198,8 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
 - `GET /api/batch/{batch_id}` — Check batch processing status
 
 ### YouTube Search & Status
-- `GET /api/youtube-search` — Civic meeting search (YouTube API with yt-dlp fallback)
+- `GET /api/youtube-search` — Civic meeting search with `days`, `meetingType` filters and channel detection (YouTube API with yt-dlp fallback)
+- `GET /api/youtube-channel-videos` — Get latest videos from a YouTube channel by @handle or URL
 - `GET /api/youtube-status` — Check if YouTube API key is configured
 - `GET /api/youtube-playlist` — Get videos from a YouTube playlist
 
@@ -177,8 +211,14 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
 
 ### Transcript
 - `POST /api/transcript` — Fetch with 3-layer fallback
+- `POST /api/transcript/upload` — Upload .vtt/.srt/.txt transcript file for videos without captions
 - `POST /api/translate` — Translate transcript
-- `POST /api/wordfreq` — Word frequency analysis
+- `POST /api/wordfreq` — Word frequency analysis (with extensive civic stopword filtering)
+
+### System/Dev
+- `GET /api/ytdlp/status` — Check current yt-dlp version
+- `POST /api/ytdlp/update` — Update yt-dlp to latest nightly (desktop only)
+- `POST /api/dev/toggle-cloud` — Toggle CLOUD_MODE at runtime (dev only)
 
 ### Knowledge Base
 - `POST /api/knowledge/add_meeting`, `search`, `find_related` — ChromaDB-backed cross-meeting search
@@ -299,8 +339,8 @@ gh workflow run build-windows.yml -f version=v7.2.0
 - All nested binaries (.dylib, .so) must be signed with entitlements AND `--timestamp` for notarization
 - PyInstaller specs must EXCLUDE `backend/venv/`, `.venv/`, `dist/`, `build/`, `cache/` — bundling these causes notarization failure (unsigned nested binaries) and massive app size
 - macOS code signing: `find` for `.so`/`.dylib` must use `sort -u` and `[ -f "$f" ]` guards to avoid duplicate/symlink errors
-- `backend/app.py` is a ~304KB monolith — changes require care
-- `src/App.jsx` is ~9400 lines — also monolithic, 25+ inline components
+- `backend/app.py` is a ~330KB monolith — changes require care
+- `src/App.jsx` is ~11500 lines — also monolithic, 35+ inline components
 - PyInstaller bundles torch/scipy/sklearn (huge) — could exclude unused ML deps to shrink app further
 - yt-dlp download timeout (10 min) can fail on long videos
 - YouTube API key is optional — transcript fetching and civic meeting search fall back to yt-dlp without it
@@ -308,6 +348,6 @@ gh workflow run build-windows.yml -f version=v7.2.0
 
 ## Version
 
-Current: 7.3.3
+Current: 7.4.0
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)

@@ -14,8 +14,21 @@ export function useCloudMode() {
   const [isCloudMode, setIsCloudMode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [features, setFeatures] = useState({});
-  
+
   useEffect(() => {
+    // Dev override via localStorage (works without backend)
+    const devOverride = localStorage.getItem('dev_cloud_override');
+    if (devOverride !== null) {
+      const overrideValue = devOverride === 'true';
+      setIsCloudMode(overrideValue);
+      setLoading(false);
+      // Still fetch health for features, but don't override mode
+      fetch('/api/health')
+        .then(res => res.json())
+        .then(data => setFeatures(data.features || {}))
+        .catch(() => {});
+      return;
+    }
     fetch('/api/health')
       .then(res => res.json())
       .then(data => {
@@ -28,7 +41,7 @@ export function useCloudMode() {
         setLoading(false);
       });
   }, []);
-  
+
   return { isCloudMode, loading, features };
 }
 
@@ -91,7 +104,7 @@ export function DesktopAppBanner({ onDismiss }) {
         textAlign: 'center',
       }}>
         <div style={{ fontSize: '13px', color: '#666', lineHeight: '1.5' }}>
-          Want to create video clips and highlight reels? Download the desktop app for full video editing features.
+          YouTube blocks video downloads from cloud-hosted servers like ours. The desktop app downloads directly from your computer — no restrictions, full quality, and your videos stay private.
         </div>
         <button 
           onClick={handleDownload}
@@ -141,12 +154,15 @@ export function DesktopAppInlinePrompt({ feature = 'this feature' }) {
       marginBottom: '16px',
       textAlign: 'center',
     }}>
-      <div style={{ fontSize: '32px', marginBottom: '8px' }}>VIDEO</div>
+      <div style={{ fontSize: '28px', marginBottom: '8px' }}>&#128187;</div>
       <div style={{ fontWeight: '700', color: '#1e7f63', marginBottom: '4px' }}>
-        Desktop App Required
+        Desktop App Required for {feature}
       </div>
-      <div style={{ color: '#4a4a4a', fontSize: '14px', marginBottom: '12px' }}>
-        {feature} requires the desktop app because YouTube blocks video downloads from cloud servers.
+      <div style={{ color: '#4a4a4a', fontSize: '13px', marginBottom: '8px', lineHeight: '1.5' }}>
+        YouTube actively blocks video downloads from cloud server IP addresses. The desktop app runs on your computer, so downloads work without restrictions and your videos stay private on your machine.
+      </div>
+      <div style={{ color: '#6b7280', fontSize: '12px', marginBottom: '12px', lineHeight: '1.4' }}>
+        You can still use the web app to analyze transcripts, search meetings, build clip timelines, and share interactive reel links.
       </div>
       <button 
         onClick={() => window.open(downloadUrl, '_blank')}

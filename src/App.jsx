@@ -277,6 +277,401 @@ function useDebounce(value, delay = 220) {
   return v;
 }
 
+// Reel Player — cinematic playback mode for shared reel links (?mode=play)
+function ReelPlayer({ videoId, clips, onOpenEditor }) {
+  const [currentClip, setCurrentClip] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isFading, setIsFading] = useState(false);
+  const [showEndCard, setShowEndCard] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const iframeRef = useRef(null);
+  const timerRef = useRef(null);
+  const progressRef = useRef(null);
+  const startTimeRef = useRef(null);
+
+  const totalDuration = clips.reduce((sum, c) => sum + (c.end - c.start), 0);
+
+  const playClip = useCallback((idx) => {
+    if (idx >= clips.length) {
+      setIsPlaying(false);
+      setShowEndCard(true);
+      if (progressRef.current) cancelAnimationFrame(progressRef.current);
+      return;
+    }
+    const clip = clips[idx];
+    setCurrentClip(idx);
+    setShowEndCard(false);
+
+    // Fade in
+    setIsFading(true);
+    setTimeout(() => {
+      if (iframeRef.current) {
+        iframeRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(clip.start)}&autoplay=1&controls=0&modestbranding=1&rel=0&showinfo=0&enablejsapi=1`;
+      }
+      setTimeout(() => setIsFading(false), 300);
+    }, 500);
+
+    const duration = (clip.end - clip.start) * 1000;
+    startTimeRef.current = Date.now();
+
+    // Update progress during playback
+    const updateProgress = () => {
+      const elapsed = Date.now() - startTimeRef.current;
+      const clipProgress = Math.min(elapsed / duration, 1);
+      // Calculate total progress
+      const priorDuration = clips.slice(0, idx).reduce((s, c) => s + (c.end - c.start), 0);
+      const currentElapsed = clipProgress * (clip.end - clip.start);
+      setProgress((priorDuration + currentElapsed) / totalDuration);
+      if (clipProgress < 1 && isPlaying) {
+        progressRef.current = requestAnimationFrame(updateProgress);
+      }
+    };
+    progressRef.current = requestAnimationFrame(updateProgress);
+
+    // Schedule next clip
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      playClip(idx + 1);
+    }, duration);
+  }, [clips, videoId, totalDuration, isPlaying]);
+
+  const handlePlay = () => {
+    setIsPlaying(true);
+    setShowEndCard(false);
+    setProgress(0);
+    playClip(0);
+  };
+
+  const handlePause = () => {
+    setIsPlaying(false);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (progressRef.current) cancelAnimationFrame(progressRef.current);
+    // Pause the iframe
+    if (iframeRef.current) {
+      iframeRef.current.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo' }), '*');
+    }
+  };
+
+  const handleSkip = (dir) => {
+    const next = currentClip + dir;
+    if (next < 0 || next >= clips.length) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (progressRef.current) cancelAnimationFrame(progressRef.current);
+    setIsPlaying(true);
+    playClip(next);
+  };
+
+  const handleReplay = () => {
+    setShowEndCard(false);
+    setProgress(0);
+    setCurrentClip(0);
+    setIsPlaying(true);
+    playClip(0);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (progressRef.current) cancelAnimationFrame(progressRef.current);
+    };
+  }, []);
+
+  const editorUrl = `${window.location.origin}/?v=${videoId}&clips=${clips.map(c => `${Math.round(c.start)}-${Math.round(c.end)}`).join(',')}&titles=${encodeURIComponent(clips.map(c => c.label || '').join('|'))}`;
+
+  if (showEndCard) {
+    return (
+      <div className="reel-player-overlay">
+        <div className="reel-player-end-card">
+          <h2>Reel Complete</h2>
+          <p>{clips.length} clips from this civic meeting</p>
+          <div className="reel-end-actions">
+            <button className="reel-end-replay-btn" onClick={handleReplay}>Replay</button>
+            <button className="reel-end-editor-btn" onClick={() => { window.location.href = editorUrl; }}>Open in Editor</button>
+            <a className="reel-end-desktop-btn" href="https://github.com/amateurmenace/community-highlighter/releases/latest" target="_blank" rel="noopener noreferrer">
+              Download Desktop App
+            </a>
+          </div>
+          <p style={{ marginTop: 12, fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
+            Render as a real MP4 video with captions, transitions, and effects using the desktop app
+          </p>
+        </div>
+        <div className="reel-player-branding">Powered by Community Highlighter</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="reel-player-overlay">
+      <div className="reel-player-header">
+        <h2>{clips[currentClip]?.label || `Clip ${currentClip + 1}`}</h2>
+        <span className="reel-clip-counter">{currentClip + 1} / {clips.length}</span>
+      </div>
+
+      <div className="reel-player-video-wrap">
+        <iframe
+          ref={iframeRef}
+          src={`https://www.youtube.com/embed/${videoId}?start=${Math.floor(clips[0]?.start || 0)}&enablejsapi=1&controls=0&modestbranding=1&rel=0`}
+          allow="autoplay; encrypted-media"
+          allowFullScreen
+        />
+        <div className={`reel-player-fade ${isFading ? 'active' : ''}`} />
+        {isPlaying && clips[currentClip]?.label && (
+          <div className="reel-player-lower-third">
+            <div className="reel-player-lower-third-inner" key={currentClip}>
+              {clips[currentClip].label}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="reel-player-controls">
+        <button onClick={() => handleSkip(-1)} disabled={currentClip === 0}>Prev</button>
+        {isPlaying ? (
+          <button className="reel-play-btn" onClick={handlePause}>Pause</button>
+        ) : (
+          <button className="reel-play-btn" onClick={isPlaying ? handlePause : handlePlay}>
+            {progress > 0 ? 'Resume' : 'Play Reel'}
+          </button>
+        )}
+        <button onClick={() => handleSkip(1)} disabled={currentClip >= clips.length - 1}>Next</button>
+        <button onClick={() => { window.location.href = editorUrl; }} style={{ marginLeft: 8 }}>Open in Editor</button>
+      </div>
+
+      {/* Segmented progress bar */}
+      <div className="reel-player-progress">
+        {clips.map((clip, i) => {
+          const clipDuration = clip.end - clip.start;
+          const priorDuration = clips.slice(0, i).reduce((s, c) => s + (c.end - c.start), 0);
+          const clipStart = priorDuration / totalDuration;
+          const clipEnd = (priorDuration + clipDuration) / totalDuration;
+          let fillPct = 0;
+          if (progress >= clipEnd) fillPct = 100;
+          else if (progress > clipStart) fillPct = ((progress - clipStart) / (clipEnd - clipStart)) * 100;
+          return (
+            <div key={i} className={`reel-player-progress-seg ${i === currentClip ? 'active' : ''} ${fillPct >= 100 ? 'done' : ''}`}
+              style={{ flex: clipDuration }}
+              onClick={() => { if (timerRef.current) clearTimeout(timerRef.current); if (progressRef.current) cancelAnimationFrame(progressRef.current); setIsPlaying(true); playClip(i); }}
+            >
+              {fillPct > 0 && fillPct < 100 && <div className="reel-player-progress-fill" style={{ width: `${fillPct}%` }} />}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="reel-player-branding">Powered by Community Highlighter</div>
+    </div>
+  );
+}
+
+// About Community Highlighter — full page with philosophy, features, how it works
+function AboutPage({ onClose }) {
+  return (
+    <div className="about-page-overlay">
+      <div className="about-page">
+        <button className="about-close-btn" onClick={onClose}>Back to App</button>
+
+        {/* Hero */}
+        <div className="about-hero">
+          <h1 className="about-hero-title">Community Highlighter</h1>
+          <p className="about-hero-subtitle" style={{ maxWidth: '800px', fontSize: '19px' }}>
+            We believe civic technology should not solely be aimed at making things more <em style={{ fontStyle: 'italic' }}>inclusive</em> — for that means inviting more people to participate in the very unchanged systems that once excluded them in the first place. Instead, technology should be developed to make civic life more <strong style={{ color: '#1e7f63' }}>expansive</strong>: to make the systems themselves change and grow to meet more people where they're at — fitting into the contours of their lives and not the other way around.
+          </p>
+        </div>
+
+        {/* ============ PART 1: PHILOSOPHY ============ */}
+        <div className="about-section">
+          <h2 className="about-section-title" style={{ textAlign: 'left' }}>Philosophy</h2>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', marginBottom: '40px' }}>
+            <div style={{ fontSize: '15px', lineHeight: 1.8, color: '#334155' }}>
+              <h3 style={{ fontSize: '20px', fontWeight: 800, color: '#1e293b', marginBottom: '12px' }}>The Problem</h3>
+              <p style={{ marginBottom: '16px' }}>
+                Most people will never attend a city council meeting. Not because they don't care, but because attending a three-hour meeting on a Tuesday evening is a luxury that working parents, shift workers, caregivers, and students simply don't have. And yet the decisions made in those rooms — about zoning, school budgets, policing, development — shape every part of their daily lives.
+              </p>
+              <p>
+                Even when meetings are recorded and posted on YouTube, the barrier merely shifts from attendance to endurance. A two-hour recording with no table of contents, no search, no way to find the five minutes that actually affect your neighborhood. The information is technically public, but practically inaccessible.
+              </p>
+            </div>
+            <div style={{ fontSize: '15px', lineHeight: 1.8, color: '#334155' }}>
+              <h3 style={{ fontSize: '20px', fontWeight: 800, color: '#1e293b', marginBottom: '12px' }}>Our Approach</h3>
+              <p style={{ marginBottom: '16px' }}>
+                Community Highlighter exists to close that gap. Not by asking people to change their schedules, but by bringing the meeting to them — as a five-minute highlight reel on a commute, a searchable transcript at 11pm, a shareable clip in a group chat, or a single question answered by an AI that read the whole thing.
+              </p>
+              <p>
+                We built this tool for the parent who wants to know if their school's budget was discussed, the tenant who heard a zoning change might affect their building, the reporter on deadline who needs the exact quote, and the community organizer who wants to share one powerful moment of public testimony with their network.
+              </p>
+            </div>
+          </div>
+
+          <div style={{ textAlign: 'center', padding: '20px 0 32px', fontSize: '16px', fontWeight: 600, color: '#475569', fontStyle: 'italic' }}>
+            Every feature was designed with a specific question: What barrier to civic participation does this remove?
+          </div>
+
+          <h3 style={{ fontSize: '22px', fontWeight: 800, color: '#1e293b', marginBottom: '24px' }}>Features and Why They Exist</h3>
+          <div className="about-values-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+            <div className="about-value">
+              <h3>AI Summaries</h3>
+              <p><strong style={{ color: '#64748b' }}>Barrier removed: time.</strong> Nobody should have to watch a three-hour meeting to find out what happened. The AI reads the entire transcript and writes a concise summary with specific names, decisions, and dollar amounts — the things that actually matter to residents. For long meetings, it uses a map-reduce strategy, analyzing the transcript in chunks so no detail is lost regardless of meeting length.</p>
+            </div>
+            <div className="about-value">
+              <h3>Word Cloud</h3>
+              <p><strong style={{ color: '#64748b' }}>Barrier removed: information overload.</strong> A visual map of what the meeting was actually about. We filter out hundreds of common speech fillers — "thank you," "I think," "going to," "Mr. Chair" — that dominate civic meeting transcripts. What surfaces are the real topics: policy names, places, organizations, issues. Click any word to search for every mention.</p>
+            </div>
+            <div className="about-value">
+              <h3>Transcript Search</h3>
+              <p><strong style={{ color: '#64748b' }}>Barrier removed: navigation.</strong> Sometimes you only care about one topic. Search any word or phrase to instantly find every mention across the full transcript, with timestamps. Click to jump straight to that moment. A sparkline shows the distribution across the timeline so you can see where your topic clusters. Find the 30 seconds that matter to you.</p>
+            </div>
+            <div className="about-value">
+              <h3>Shareable Reel Links</h3>
+              <p><strong style={{ color: '#64748b' }}>Barrier removed: friction of sharing.</strong> Share a curated highlight reel without downloading anything, rendering anything, or creating an account. Recipients see your clips play back-to-back as a cinematic preview — with title overlays, CSS fade transitions, a segmented progress bar, and playback controls — entirely in the browser. The URL contains everything.</p>
+            </div>
+            <div className="about-value">
+              <h3>Transcript Upload</h3>
+              <p><strong style={{ color: '#64748b' }}>Barrier removed: platform dependency.</strong> Not every meeting has YouTube captions. Upload a .vtt, .srt, or plain text transcript file and the entire app works the same way — full search, AI analysis, highlight reels. We didn't want to leave anyone out just because their municipality hasn't enabled closed captioning or uses a different platform.</p>
+            </div>
+            <div className="about-value">
+              <h3>Channel Import</h3>
+              <p><strong style={{ color: '#64748b' }}>Barrier removed: discovery.</strong> Paste a YouTube channel URL or @handle to load all recent videos from an official municipal channel. Filter by meeting type (City Council, Planning, School Board), date range, and relevance. Follow your local government the same way you'd follow a creator — except the content is about your neighborhood.</p>
+            </div>
+            <div className="about-value">
+              <h3>Talk to a Meeting</h3>
+              <p><strong style={{ color: '#64748b' }}>Barrier removed: complexity.</strong> Ask an AI agent any question about a meeting. "Was my street mentioned?" "What did they decide about the school budget?" "Who voted against the zoning change?" It reads the full transcript and gives you answers with direct citations and timestamps — like having a colleague who took meticulous notes.</p>
+            </div>
+            <div className="about-value">
+              <h3>Multilingual Transcripts</h3>
+              <p><strong style={{ color: '#64748b' }}>Barrier removed: language.</strong> Civic participation shouldn't require English fluency. Translate any meeting transcript into Spanish, French, Portuguese, Chinese, Arabic, Russian, Japanese, or German. The decisions made in those rooms affect everyone in the community, regardless of what language they speak at home.</p>
+            </div>
+            <div className="about-value">
+              <h3>Video Editor Timeline</h3>
+              <p><strong style={{ color: '#64748b' }}>Barrier removed: technical skill.</strong> Build highlight reels with a professional-feeling timeline editor. Drag to reorder clips, drag edges to trim, split clips, choose transitions between them. Add captions, color grades, intro/outro slides, and background music. No video editing experience required — but the tools are there if you want them.</p>
+            </div>
+            <div className="about-value">
+              <h3>Entity Analysis</h3>
+              <p><strong style={{ color: '#64748b' }}>Barrier removed: context.</strong> The app automatically identifies every person, organization, place, and policy mentioned in a meeting. Click any entity to see news articles, maps, or Wikipedia pages. Cross-reference entities across multiple meetings to track how issues evolve over time. Context transforms information into understanding.</p>
+            </div>
+          </div>
+        </div>
+
+        {/* ============ PART 2: TECHNOLOGY ============ */}
+        <div className="about-section about-section-dark">
+          <h2 className="about-section-title" style={{ color: '#e2e8f0', textAlign: 'left' }}>Technology</h2>
+
+          <div style={{ fontSize: '14px', lineHeight: 1.8, color: '#94a3b8' }}>
+            <h3 style={{ color: '#e2e8f0', fontSize: '20px', fontWeight: 800, marginBottom: '12px' }}>The YouTube Downloading Problem</h3>
+            <p style={{ marginBottom: '16px' }}>
+              Downloading videos from YouTube is, by design, difficult. YouTube actively blocks automated downloads by frequently changing their internal APIs, rotating encryption signatures, and blocking IP ranges associated with cloud servers and data centers. Any tool that downloads YouTube videos is in a constant arms race — and most tools lose.
+            </p>
+            <p style={{ marginBottom: '16px' }}>
+              Community Highlighter relies on <a href="https://github.com/yt-dlp/yt-dlp" target="_blank" rel="noopener noreferrer" style={{ color: '#86efac', fontWeight: 600 }}>yt-dlp</a>, an extraordinary open-source project maintained by a dedicated community of developers who reverse-engineer YouTube's changes, sometimes within hours of a breaking update. yt-dlp handles the staggering complexity of YouTube's DASH streaming protocol, where high-resolution videos are split into separate video and audio streams that must be downloaded independently and merged with ffmpeg.
+            </p>
+            <p style={{ marginBottom: '24px' }}>
+              Because stable releases of yt-dlp can become outdated within weeks, our desktop app <strong style={{ color: '#e2e8f0' }}>automatically updates yt-dlp to the latest nightly build</strong> from GitHub's master branch on every launch. This means the app installs the newest code — sometimes committed just hours ago — ensuring video downloads keep working even as YouTube continuously evolves its defenses. If the nightly fails to install, it falls back to the latest stable release. Users can also manually trigger updates from the Settings panel.
+            </p>
+
+            <h3 style={{ color: '#e2e8f0', fontSize: '20px', fontWeight: 800, marginBottom: '12px' }}>Cloud and Desktop: Navigating the Tension</h3>
+            <p style={{ marginBottom: '16px' }}>
+              YouTube specifically blocks video downloads from cloud server IP addresses — the very servers that host web applications like this one. This creates a fundamental tension: the cloud provides the best user experience (instant access, no installation, works on any device), but the desktop is required for the core video download and rendering functionality.
+            </p>
+            <p style={{ marginBottom: '16px' }}>
+              Rather than treating this as a limitation, we designed the app to provide the <strong style={{ color: '#e2e8f0' }}>best of both worlds</strong>:
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', margin: '0 0 16px 0' }}>
+              <div style={{ padding: '18px 20px', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <p style={{ margin: '0 0 6px', color: '#86efac', fontWeight: 700, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Cloud App</p>
+                <p style={{ margin: 0, color: '#e2e8f0', fontSize: '13px', lineHeight: 1.7 }}>Instant access from any browser. AI analysis, transcript search and translation, word clouds, timeline editing, and shareable reel links — all without installing anything. Build an entire highlight reel, preview it, and share it in the browser.</p>
+              </div>
+              <div style={{ padding: '18px 20px', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <p style={{ margin: '0 0 6px', color: '#fbbf24', fontWeight: 700, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Desktop App</p>
+                <p style={{ margin: 0, color: '#e2e8f0', fontSize: '13px', lineHeight: 1.7 }}>Adds video downloading and MP4 rendering with captions, transitions, color grades, lower thirds, intro/outro slides, background music with smart ducking, and EBU R128 audio normalization. Hardware-accelerated encoding keeps rendering fast.</p>
+              </div>
+            </div>
+            <p style={{ marginBottom: '24px' }}>
+              The two work together seamlessly: build a reel in the cloud, export a <code style={{ color: '#86efac', background: 'rgba(134,239,172,0.1)', padding: '2px 6px', borderRadius: '4px' }}>.chreel</code> file, open it on desktop to render as video. Or share a reel link that works anywhere, then download the desktop app when you're ready to export.
+            </p>
+
+            <h3 style={{ color: '#e2e8f0', fontSize: '20px', fontWeight: 800, marginBottom: '12px' }}>The Reel Player: Zero-Cost Video Sharing</h3>
+            <p style={{ marginBottom: '16px' }}>
+              When you share a reel link, the recipient doesn't need to download or render anything. The entire experience is constructed client-side using a technique we call the <strong style={{ color: '#e2e8f0' }}>Reel Player</strong>.
+            </p>
+            <p style={{ marginBottom: '16px' }}>
+              The shared URL encodes all clip data directly: video ID, start/end timestamps, and titles. When opened, the Reel Player orchestrates sequential YouTube iframe seeks entirely in the browser — seeking to each clip's start time, auto-playing for its duration, fading to black via CSS transitions, then seeking to the next clip. Title overlays appear as CSS-animated lower thirds. A segmented progress bar shows position across all clips. Playback controls let you pause, skip, and replay.
+            </p>
+            <p style={{ marginBottom: '24px' }}>
+              The result feels like watching a rendered video, but costs zero server resources — no rendering pipeline, no storage, no bandwidth. YouTube serves the video. The browser orchestrates the experience. The URL is the entire "file."
+            </p>
+
+            <h3 style={{ color: '#e2e8f0', fontSize: '20px', fontWeight: 800, marginBottom: '12px' }}>AI Pipeline</h3>
+            <p style={{ marginBottom: '16px' }}>
+              For long meetings (some civic meetings run 3-4 hours), the AI uses a <strong style={{ color: '#e2e8f0' }}>map-reduce strategy</strong>: the transcript is split into chunks, each chunk is independently analyzed for key decisions, major discussions, and action items, then all results are combined and synthesized into a unified summary. This allows the app to handle meetings of any length without hitting token limits or losing detail from the beginning of a long session.
+            </p>
+            <p style={{ marginBottom: '16px' }}>
+              <strong style={{ color: '#e2e8f0' }}>Quote-to-timestamp matching</strong> connects AI-generated highlights back to the original video. The algorithm matches the first 8 words of each AI-quoted passage against transcript segments, finds the best match, and builds a clip with configurable padding. This is how "AI Highlight Reels" work — the AI identifies the most important moments, and the app automatically creates timed clips from them.
+            </p>
+            <p style={{ marginBottom: '24px' }}>
+              <strong style={{ color: '#e2e8f0' }}>Entity extraction</strong> identifies every person, organization, place, and policy mentioned in a meeting, then cross-references them to build a knowledge graph that spans multiple meetings. This powers features like issue tracking across meetings, cross-reference networks, and the ability to ask "Has this topic been discussed before?"
+            </p>
+
+            <h3 style={{ color: '#e2e8f0', fontSize: '20px', fontWeight: 800, marginBottom: '12px' }}>Video Rendering Pipeline</h3>
+            <p style={{ marginBottom: '16px' }}>
+              When the desktop app renders clips, it downloads only the necessary video segments (not the full video) using yt-dlp's section downloading feature. Adjacent clips within 30 seconds are merged into single download groups to minimize network requests. Clip encoding and downloading run in parallel via thread pools.
+            </p>
+            <p style={{ marginBottom: '24px' }}>
+              The encoder auto-detects hardware acceleration — VideoToolbox on macOS, NVENC on NVIDIA GPUs — and falls back to libx264. Captions are rendered as SRT subtitles with pill-style backgrounds. Color grades, transitions (fade, dissolve, wipe), speed changes, lower thirds with speaker names, intro/outro title cards, and background music with sidechain-compressed ducking are all composed via ffmpeg filter graphs. Real-time progress is tracked through ffmpeg's <code style={{ color: '#86efac', background: 'rgba(134,239,172,0.1)', padding: '2px 6px', borderRadius: '4px' }}>-progress pipe:1</code> output.
+            </p>
+
+            <h3 style={{ color: '#e2e8f0', fontSize: '20px', fontWeight: 800, marginBottom: '12px' }}>Tech Stack</h3>
+            <div className="about-tech-grid" style={{ marginBottom: '16px' }}>
+              <div className="about-tech-item"><strong>Frontend</strong> — React 19 + Vite, installable as a Progressive Web App with offline transcript caching via IndexedDB</div>
+              <div className="about-tech-item"><strong>Backend</strong> — FastAPI + Python with 70+ API endpoints, async request handling, and Webshare residential proxy support</div>
+              <div className="about-tech-item"><strong>AI</strong> — OpenAI GPT models (GPT-4o, GPT-5.1) with map-reduce for long documents and RAG-based Q&A</div>
+              <div className="about-tech-item"><strong>Video</strong> — yt-dlp (auto-updating nightly) + ffmpeg with hardware-accelerated encoding and parallel processing</div>
+              <div className="about-tech-item"><strong>Desktop</strong> — PyInstaller bundles for macOS (signed + notarized with Apple Developer ID) and Windows</div>
+              <div className="about-tech-item"><strong>Transcripts</strong> — 3-layer fallback: YouTubeTranscriptApi, YouTube Data API, yt-dlp subtitle extraction, plus user file upload</div>
+            </div>
+          </div>
+        </div>
+
+        {/* ============ CREDITS ============ */}
+        <div className="about-section">
+          <h2 className="about-section-title" style={{ textAlign: 'left' }}>Credits</h2>
+          <p style={{ fontSize: '15px', lineHeight: 1.7, color: '#475569', marginBottom: '28px', maxWidth: '720px' }}>
+            This app was continually worked on over the course of 9 months. It was built with the assistance of <a href="https://claude.ai/code" target="_blank" rel="noopener noreferrer" style={{ color: '#1e7f63', fontWeight: 600 }}>Claude Code</a> and from inside an actual public access TV station.
+          </p>
+          <div className="about-values-grid">
+            <div className="about-value" style={{ textAlign: 'center' }}>
+              <h3 style={{ fontSize: '18px' }}>Brookline Interactive Group</h3>
+              <p style={{ fontWeight: 600, color: '#1e7f63', marginBottom: '8px' }}>Producer</p>
+              <p>A community media organization in Brookline, Massachusetts dedicated to amplifying local voices through media production, technology education, and civic engagement programming. BIG has been empowering community storytelling and democratic participation for over two decades.</p>
+              <a href="https://brooklineinteractive.org" target="_blank" rel="noopener noreferrer" style={{ color: '#1e7f63', fontSize: '13px', fontWeight: 600 }}>brooklineinteractive.org</a>
+            </div>
+            <div className="about-value" style={{ textAlign: 'center' }}>
+              <h3 style={{ fontSize: '18px' }}>NeighborhoodAI</h3>
+              <p style={{ fontWeight: 600, color: '#1e7f63', marginBottom: '8px' }}>Advisor</p>
+              <p>An initiative exploring how artificial intelligence can strengthen neighborhoods and make community institutions more responsive, transparent, and accessible. NeighborhoodAI advises on the responsible application of AI to civic infrastructure.</p>
+              <a href="https://neighborhoodai.org" target="_blank" rel="noopener noreferrer" style={{ color: '#1e7f63', fontSize: '13px', fontWeight: 600 }}>neighborhoodai.org</a>
+            </div>
+            <div className="about-value" style={{ textAlign: 'center' }}>
+              <h3 style={{ fontSize: '18px' }}>Stephen Walter</h3>
+              <p style={{ fontWeight: 600, color: '#1e7f63', marginBottom: '8px' }}>Designer + Developer</p>
+              <p>Technologist and creative director building tools at the intersection of media, civic engagement, and emerging technology. Stephen designed and developed Community Highlighter from concept to deployment, including the AI pipeline, video rendering engine, and cloud/desktop architecture.</p>
+              <a href="https://weirdmachine.org" target="_blank" rel="noopener noreferrer" style={{ color: '#1e7f63', fontSize: '13px', fontWeight: 600 }}>weirdmachine.org</a>
+            </div>
+          </div>
+        </div>
+
+        {/* ============ FOOTER ============ */}
+        <div className="about-footer">
+          <button className="about-footer-btn" onClick={onClose}>Start Analyzing Meetings</button>
+          <div style={{ display: 'flex', gap: '24px', justifyContent: 'center', marginTop: '16px', fontSize: '13px' }}>
+            <a href="https://github.com/amateurmenace/community-highlighter" target="_blank" rel="noopener noreferrer">View on GitHub</a>
+            <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0 License</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HowToGuide({ onOpenAssistant }) {
   const scrollToElement = (id) => {
     const element = document.getElementById(id);
@@ -721,7 +1116,7 @@ function MentionedEntitiesCard({ entities, isLoading }) {
 
   // Determine default view based on entity type
   const getDefaultView = (entity) => {
-    return isPlaceOrAddress(entity) ? 'maps' : 'wikipedia';
+    return 'news';
   };
 
   // Handle entity click
@@ -2615,6 +3010,15 @@ function CivicMeetingFinder({ onSelectVideo }) {
   const [recentSearches, setRecentSearches] = useState([]);
   const [apiStatus, setApiStatus] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  // Filters
+  const [dateRange, setDateRange] = useState('90');
+  const [meetingType, setMeetingType] = useState('all');
+  const [sortBy, setSortBy] = useState('relevance');
+  // Channel import
+  const [showChannelImport, setShowChannelImport] = useState(false);
+  const [channelInput, setChannelInput] = useState('');
+  const [channelLoading, setChannelLoading] = useState(false);
+  const [channelName, setChannelName] = useState('');
 
   // Check API status on mount
   useEffect(() => {
@@ -2631,8 +3035,16 @@ function CivicMeetingFinder({ onSelectVideo }) {
     setError(null);
 
     try {
-      // Send the raw municipality name — backend handles multi-query strategy
-      const response = await fetch(`/api/youtube-search?q=${encodeURIComponent(searchQuery.trim())}&type=video&maxResults=50&order=date`);
+      // Send the raw municipality name with filters — backend handles multi-query strategy
+      const params = new URLSearchParams({
+        q: searchQuery.trim(),
+        type: 'video',
+        maxResults: '50',
+        order: sortBy === 'oldest' ? 'date' : 'date',
+        days: dateRange,
+        meetingType: meetingType,
+      });
+      const response = await fetch(`/api/youtube-search?${params}`);
       const data = await response.json();
 
       // Check for API error in response
@@ -2664,19 +3076,40 @@ function CivicMeetingFinder({ onSelectVideo }) {
         return { ...item, _civicScore: civicScore };
       });
 
-      // Sort: high civic score first, then by date within similar scores
-      items.sort((a, b) => {
-        // Group into tiers: high civic relevance (3+), medium (1-2), low (0)
-        const tierA = a._civicScore >= 3 ? 2 : a._civicScore >= 1 ? 1 : 0;
-        const tierB = b._civicScore >= 3 ? 2 : b._civicScore >= 1 ? 1 : 0;
+      // Post-filter by meeting type if a specific type is selected
+      if (meetingType !== 'all') {
+        const typeKeywords = {
+          council: ['council', 'city council', 'council meeting', 'council session'],
+          board: ['board', 'committee', 'selectboard', 'select board', 'commission'],
+          planning: ['planning', 'zoning', 'land use', 'development'],
+          hearing: ['hearing', 'public hearing', 'town hall', 'public comment', 'testimony'],
+          school: ['school', 'education', 'school board', 'school committee'],
+        };
+        const keywords = typeKeywords[meetingType] || [];
+        if (keywords.length > 0) {
+          items = items.filter(item => {
+            const text = `${item.snippet?.title || ''} ${item.snippet?.description || ''} ${item.snippet?.channelTitle || ''}`.toLowerCase();
+            return keywords.some(kw => text.includes(kw));
+          });
+        }
+      }
 
-        if (tierA !== tierB) return tierB - tierA;
-
-        // Within same tier, sort by date (newest first)
-        const dateA = new Date(a.snippet?.publishedAt || 0);
-        const dateB = new Date(b.snippet?.publishedAt || 0);
-        return dateB - dateA;
-      });
+      // Sort based on user preference
+      if (sortBy === 'oldest') {
+        items.sort((a, b) => new Date(a.snippet?.publishedAt || 0) - new Date(b.snippet?.publishedAt || 0));
+      } else if (sortBy === 'newest') {
+        items.sort((a, b) => new Date(b.snippet?.publishedAt || 0) - new Date(a.snippet?.publishedAt || 0));
+      } else {
+        // Relevance: high civic score first, then by date within similar scores
+        items.sort((a, b) => {
+          const tierA = a._civicScore >= 3 ? 2 : a._civicScore >= 1 ? 1 : 0;
+          const tierB = b._civicScore >= 3 ? 2 : b._civicScore >= 1 ? 1 : 0;
+          if (tierA !== tierB) return tierB - tierA;
+          const dateA = new Date(a.snippet?.publishedAt || 0);
+          const dateB = new Date(b.snippet?.publishedAt || 0);
+          return dateB - dateA;
+        });
+      }
 
       setResults(items);
 
@@ -2690,6 +3123,26 @@ function CivicMeetingFinder({ onSelectVideo }) {
       setResults([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const importChannel = async () => {
+    if (!channelInput.trim()) return;
+    setChannelLoading(true);
+    setError(null);
+    try {
+      const resp = await fetch(`/api/youtube-channel-videos?channel=${encodeURIComponent(channelInput.trim())}&maxResults=50`);
+      const data = await resp.json();
+      if (data.error) { setError(data.error); return; }
+      setResults(data.items || []);
+      setChannelName(data.channel_name || '');
+      if (data.items?.length > 0) {
+        setShowChannelImport(false);
+      }
+    } catch (err) {
+      setError('Failed to load channel videos');
+    } finally {
+      setChannelLoading(false);
     }
   };
 
@@ -2712,7 +3165,7 @@ function CivicMeetingFinder({ onSelectVideo }) {
   return (
     <div className="viz-card" style={{ marginTop: '20px' }}>
       <h3>🏛️ Find Civic Meetings</h3>
-      <p className="viz-desc">Search for government and civic meetings by city or town name. Click any result to analyze it.</p>
+      <p className="viz-desc">Search for government and civic meetings by city, town, or YouTube channel name. Click any result to analyze it.</p>
 
 
       <div style={{ marginBottom: '16px' }}>
@@ -2722,7 +3175,7 @@ function CivicMeetingFinder({ onSelectVideo }) {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && searchMeetings()}
-            placeholder="Enter city or town name (e.g., Boston, Arlington MA)..."
+            placeholder="Enter city, town, or YouTube channel (e.g., New York City Council, Brookline MA, @NYCCouncil)..."
             style={{
               flex: 1,
               padding: '14px 16px',
@@ -2742,9 +3195,77 @@ function CivicMeetingFinder({ onSelectVideo }) {
           </button>
         </div>
         <div style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
-          Try: "Boston", "Arlington MA", "San Francisco", "Denver"
+          Try: "New York City Council", "Brookline MA", "San Francisco", "@NYCCouncil"
         </div>
+
+        {/* Filters */}
+        <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <select value={dateRange} onChange={e => setDateRange(e.target.value)}
+            style={{ padding: '6px 10px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', background: 'white', color: '#374151' }}>
+            <option value="7">Last 7 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="365">Last year</option>
+            <option value="0">All time</option>
+          </select>
+          <select value={meetingType} onChange={e => setMeetingType(e.target.value)}
+            style={{ padding: '6px 10px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', background: 'white', color: '#374151' }}>
+            <option value="all">All Types</option>
+            <option value="council">City Council</option>
+            <option value="board">Board / Committee</option>
+            <option value="planning">Planning / Zoning</option>
+            <option value="hearing">Public Hearing</option>
+            <option value="school">School Committee</option>
+          </select>
+          <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+            style={{ padding: '6px 10px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', background: 'white', color: '#374151' }}>
+            <option value="relevance">Sort: Relevance</option>
+            <option value="newest">Sort: Newest First</option>
+            <option value="oldest">Sort: Oldest First</option>
+          </select>
+        </div>
+        <div style={{ marginTop: '8px' }}>
+          <button
+            onClick={() => setShowChannelImport(!showChannelImport)}
+            style={{ padding: '6px 14px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', background: showChannelImport ? '#f0fdf4' : 'white', cursor: 'pointer', color: '#166534', fontWeight: 500 }}
+          >
+            {showChannelImport ? 'Hide' : 'Import YouTube Channel'}
+          </button>
+        </div>
+
+        {/* Channel Import */}
+        {showChannelImport && (
+          <div style={{ marginTop: '10px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+            <div style={{ fontSize: '12px', color: '#475569', marginBottom: '8px', fontWeight: 500 }}>
+              Import all latest videos from a YouTube channel:
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                type="text"
+                value={channelInput}
+                onChange={e => setChannelInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && importChannel()}
+                placeholder="@NYCCouncil or https://youtube.com/@NYCCouncil"
+                style={{ flex: 1, padding: '8px 12px', fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px' }}
+              />
+              <button
+                onClick={importChannel}
+                disabled={channelLoading || !channelInput.trim()}
+                style={{ padding: '8px 16px', fontSize: '13px', background: '#1e7f63', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}
+              >
+                {channelLoading ? 'Loading...' : 'Load Videos'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Channel name display */}
+      {channelName && results.length > 0 && (
+        <div style={{ fontSize: '13px', color: '#166534', fontWeight: 600, marginBottom: '12px', padding: '8px 12px', background: '#f0fdf4', borderRadius: '8px' }}>
+          {results.length} videos from {channelName}
+        </div>
+      )}
 
       {/* Recent Searches */}
       {recentSearches.length > 0 && (
@@ -2882,6 +3403,9 @@ function CivicMeetingFinder({ onSelectVideo }) {
             <div style={{ fontSize: '40px', marginBottom: '12px' }}>🔍</div>
             <div style={{ fontSize: '15px', fontWeight: 500 }}>Enter your city or town name above</div>
             <div style={{ fontSize: '13px', marginTop: '6px' }}>We'll find recent government meetings for you to analyze</div>
+            <div style={{ fontSize: '11px', marginTop: '12px', color: '#94a3b8', lineHeight: '1.4' }}>
+              Tip: This app works with meetings that have YouTube captions. If a video doesn't have captions, you can upload a transcript file after loading.
+            </div>
           </div>
         )}
       </div>
@@ -3382,7 +3906,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
                 value={searchCity}
                 onChange={(e) => setSearchCity(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && searchCivicMeetings()}
-                placeholder="Enter city or town name (e.g., Boston, Arlington MA)..."
+                placeholder="Enter city, town, or YouTube channel (e.g., New York City Council, Brookline MA, @NYCCouncil)..."
                 style={{
                   flex: 1,
                   padding: '14px 18px',
@@ -6395,6 +6919,8 @@ export default function App() {
   const [downloadJob, setDownloadJob] = useState(null); // { jobId, percent, message, status }
   const [showCelebration, setShowCelebration] = useState(null); // {file: url} when render completes
   const [videoTitle, setVideoTitle] = useState("");
+  const [showTranscriptUpload, setShowTranscriptUpload] = useState(false); // Show upload prompt when no captions
+  const [showAboutPage, setShowAboutPage] = useState(false); // About Community Highlighter page
 
   const [previewingClip, setPreviewingClip] = useState(null); // {idx, clip} when previewing
   const [selectedClipIndex, setSelectedClipIndex] = useState(null);
@@ -6681,11 +7207,18 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Import reel from URL params (?v=videoId&clips=start-end,start-end&titles=t1|t2)
+  // Import reel from URL params (?v=videoId&clips=start-end,start-end&titles=t1|t2&mode=play|edit)
+  const [reelPlayerMode, setReelPlayerMode] = useState(null); // { videoId, clips } when mode=play
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    // Direct link to About page: ?page=about
+    if (params.get('page') === 'about') {
+      setShowAboutPage(true);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
     const urlVid = params.get('v');
     const urlClips = params.get('clips');
+    const mode = params.get('mode');
     if (urlVid && urlClips) {
       const titles = (params.get('titles') || '').split('|');
       const clips = urlClips.split(',').map((seg, i) => {
@@ -6694,6 +7227,11 @@ export default function App() {
         return { start: s, end: e, label: titles[i] || `Clip ${i + 1}`, highlight: titles[i] || '' };
       }).filter(Boolean);
       if (clips.length > 0) {
+        if (mode === 'play') {
+          // Reel Player mode — cinematic playback
+          setReelPlayerMode({ videoId: urlVid, clips });
+          return; // Don't load editor
+        }
         setUrl(`https://www.youtube.com/watch?v=${urlVid}`);
         // Small delay to let the component mount, then load
         setTimeout(() => {
@@ -6707,6 +7245,47 @@ export default function App() {
     }
   }, []);
 
+
+  // Handle transcript file upload for videos without captions
+  const handleTranscriptUpload = async (file) => {
+    if (!videoId || !file) return;
+    setShowTranscriptUpload(false);
+    setProcessStatus({ active: true, message: "Uploading transcript...", percent: 15, isVideoDownload: false });
+    try {
+      const formData = new FormData();
+      formData.append('video_id', videoId);
+      formData.append('file', file);
+      const resp = await fetch('/api/transcript/upload', { method: 'POST', body: formData });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || 'Upload failed');
+      }
+      const vttText = await resp.text();
+      addToast(`Transcript uploaded successfully (${file.name})`);
+      // Continue with normal transcript processing
+      setVtt(vttText);
+      const cc = parseVTT(vttText);
+      setCues(cc);
+      const ss = splitSentences(cc);
+      setSents(ss);
+      const all = ss.map(s => s.text).join(" ");
+      setFullText(all);
+      setLoading(l => ({ ...l, transcript: false }));
+      // Cache for offline
+      cacheTranscript(videoId, cc.map(c => ({ start: c.start, end: c.end, text: c.text })));
+      // Continue loading word frequency and summary
+      setProcessStatus({ active: true, message: "Analyzing transcript...", percent: 40, isVideoDownload: false });
+      apiWordfreq(all).then(data => setWords(data.freq || [])).catch(() => {});
+      apiSummaryAI(videoId, all, 'highlights_with_quotes').then(data => {
+        setSummary({ para: data.summary || '', bullets: data.bullets || [] });
+        if (data.highlights_with_quotes) setHighlightsWithQuotes(data.highlights_with_quotes);
+        setProcessStatus({ active: false, message: "", percent: 0 });
+      }).catch(() => setProcessStatus({ active: false, message: "", percent: 0 }));
+    } catch (e) {
+      addToast(`Transcript upload failed: ${e.message}`);
+      setProcessStatus({ active: false, message: "", percent: 0 });
+    }
+  };
 
   const loadAll = async (overrideVideoId) => {
     // Guard: if called from onClick, the event object gets passed — ignore it
@@ -6766,7 +7345,8 @@ export default function App() {
       if (!vttText) {
         setLoading(l => ({ ...l, transcript: false }));
         setProcessStatus({ active: false, message: "", percent: 0 });
-        addToast(`Could not load captions: ${e.message || 'Unknown error'}`);
+        addToast(`Could not load captions: ${e.message || 'Unknown error'}. You can upload a transcript file instead.`);
+        setShowTranscriptUpload(true);
         setLoadingEntities(false);
         return;
       }
@@ -7462,12 +8042,26 @@ export default function App() {
       console.error("Cannot open expanded view: invalid match object", match);
       return;
     }
+    // Show the full transcript overlay in the word cloud area
+    setShowFullTranscript(true);
     setExpanded({ open: true, focusIdx: match.idx });
+    // Scroll the page to the transcript area first, then scroll within it
     setTimeout(() => {
-      if (transcriptRef.current) {
-        const el = transcriptRef.current.querySelector(`#sent-${match.idx}`);
-        if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-      }
+      const searchZone = document.querySelector('.search-zone-left');
+      if (searchZone) searchZone.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setTimeout(() => {
+        if (transcriptRef.current) {
+          const el = transcriptRef.current.querySelector(`#sent-${match.idx}`);
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+            // Highlight the focused sentence
+            el.style.background = '#fef08a';
+            el.style.borderRadius = '4px';
+            el.style.transition = 'background 0.3s';
+            setTimeout(() => { el.style.background = ''; }, 3000);
+          }
+        }
+      }, 300);
     }, 100);
   };
 
@@ -7514,6 +8108,22 @@ export default function App() {
     addToBasket({ start: s, end: e, label });
     window.getSelection().removeAllRanges();
   };
+
+  // About page — full overlay
+  if (showAboutPage) {
+    return <AboutPage onClose={() => setShowAboutPage(false)} />;
+  }
+
+  // Reel Player mode — render cinematic player instead of full app
+  if (reelPlayerMode) {
+    return (
+      <ReelPlayer
+        videoId={reelPlayerMode.videoId}
+        clips={reelPlayerMode.clips}
+        onOpenEditor={() => setReelPlayerMode(null)}
+      />
+    );
+  }
 
   return (
     <>
@@ -7696,68 +8306,66 @@ export default function App() {
         </div>
       )}
 
+      {/* Cloud CTA banner — top of page */}
+      {isCloudMode && !videoId && (
+        <div className="cloud-cta-banner">
+          For the best experience, including downloading video straight from YouTube, get the free Desktop app.
+          <a href="#why-desktop" onClick={(e) => { e.preventDefault(); document.getElementById('why-desktop')?.scrollIntoView({ behavior: 'smooth' }); }}>
+            Learn more below
+          </a>
+        </div>
+      )}
+
       <header className="animate-fadeIn">
         <div className="container">
           <div className="wrap">
             <div className="brand">
               <img src="/logo.png" alt="Community Highlighter" className="logo-main" />
               <div className="subtitle-large">{t.appSubtitle}</div>
+              <button onClick={() => setShowAboutPage(true)} style={{
+                background: 'none', border: '2px solid #1e7f63', color: '#1e7f63', fontSize: '15px',
+                fontWeight: 700, cursor: 'pointer', padding: '8px 18px', borderRadius: '8px',
+                letterSpacing: '-0.2px', transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#1e7f63'; e.currentTarget.style.color = 'white'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = '#1e7f63'; }}
+              >About</button>
             </div>
             <div className="right">
+              {/* Dev toggle — only on localhost */}
+              {window.location.hostname === 'localhost' && (
+                <button
+                  onClick={() => {
+                    const newMode = !isCloudMode;
+                    localStorage.setItem('dev_cloud_override', String(newMode));
+                    fetch('/api/dev/toggle-cloud', { method: 'POST' }).catch(() => {});
+                    addToast(`Switched to ${newMode ? 'Cloud' : 'Desktop'} mode — reloading...`);
+                    setTimeout(() => window.location.reload(), 500);
+                  }}
+                  style={{ padding: '4px 10px', fontSize: '10px', fontWeight: 600, background: isCloudMode ? '#0ea5e9' : '#22c55e', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                  title="Toggle between cloud and desktop mode for testing"
+                >
+                  {isCloudMode ? 'CLOUD' : 'DESKTOP'} mode
+                </button>
+              )}
               <div className="lang-selector">
-                <label>{t.siteLanguage}</label>
                 <select value={lang} onChange={e => setLang(e.target.value)} className="select-input">
                   <option value="en">English</option>
                 </select>
               </div>
-              <div className="download-history-wrapper">
-                <button className="download-history-badge" onClick={() => setShowDownloadDropdown(!showDownloadDropdown)}>
-                  Downloads {downloadHistory.length > 0 && <span className="badge-count">{downloadHistory.length}</span>}
-                </button>
-                {showDownloadDropdown && (
-                  <div className="download-history-dropdown">
-                    <div className="download-history-header">Recent Downloads</div>
-                    {downloadHistory.length === 0 ? (
-                      <div className="download-empty">No recent downloads</div>
-                    ) : downloadHistory.map((d, i) => (
-                      <a key={i} href={d.url} download className="download-history-item">
-                        <span className="download-item-name">{d.filename}</span>
-                        <span className="download-item-time">{new Date(d.timestamp).toLocaleTimeString()}</span>
-                      </a>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="powered-section">
-                <span className="powered-text">{t.poweredBy}</span>
-                <img src="/secondary.png" alt="BIG" className="secondary-logo-large" />
-                {/* Feedback button */}
-                <div style={{ marginLeft: '12px', textAlign: 'center' }}>
-                  <button
-                    className="btn btn-ghost"
-                    onClick={() => setShowFeedbackModal(true)}
-                    style={{
-                      fontSize: '13px',
-                      padding: '8px 16px',
-                      background: '#1e7f63',
-                      color: 'white',
-                      fontWeight: '600',
-                      borderRadius: '6px',
-                      border: 'none',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Give Feedback
-                  </button>
-                  <div style={{ fontSize: '10px', color: '#888', marginTop: '4px' }}>
-                    This app is in BETA
-                  </div>
-                </div>
+              <div className="powered-section" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                <a href="https://brooklineinteractive.org" target="_blank" rel="noopener noreferrer">
+                  <img src="/secondary.png" alt="Brookline Interactive Group" className="secondary-logo-large" />
+                </a>
+                <a href="https://weirdmachine.org" target="_blank" rel="noopener noreferrer">
+                  <img src="/weirdmachine.png" alt="Weird Machine" style={{ height: '40px', opacity: 0.9 }} />
+                </a>
               </div>
             </div>
           </div>
         </div>
       </header>
+      <div className="subtitle-mobile">{t.appSubtitle}</div>
 
       <main className={`container ${videoId ? 'desktop-editor-mode' : ''}`} style={{ paddingTop: 32, paddingBottom: 100 }}>
         {processStatus.active && (
@@ -7904,7 +8512,39 @@ export default function App() {
               </>
             )}
           </div>
+          {!videoId && (
+            <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '10px', lineHeight: '1.5' }}>
+              Works best with YouTube videos that have captions or closed captioning enabled. No captions? You can upload your own transcript file (.vtt, .srt, or .txt).
+            </div>
+          )}
         </section>
+
+        {/* Transcript Upload Prompt — shown when video has no captions */}
+        {showTranscriptUpload && videoId && (
+          <section className="card section animate-fadeIn" style={{ marginTop: 16 }}>
+            <div className="transcript-upload-prompt">
+              <h4>This video doesn't have captions</h4>
+              <p>
+                You can upload your own transcript file to analyze this meeting. Supported formats: .vtt (WebVTT), .srt (SubRip), or .txt (plain text).
+              </p>
+              <label>
+                Upload Transcript File
+                <input
+                  type="file"
+                  accept=".vtt,.srt,.txt"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleTranscriptUpload(file);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+              <div style={{ marginTop: 10, fontSize: 12, color: '#92400e' }}>
+                Tip: Many meeting services (Zoom, Teams, etc.) can export transcripts as .vtt or .srt files.
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* .chreel Import Zone — desktop landing page */}
         {!videoId && !isCloudMode && (
@@ -7994,96 +8634,6 @@ export default function App() {
           </section>
         )}
 
-        {/* Desktop App Download Banner - Show on landing page when in cloud mode */}
-        {!videoId && isCloudMode && (
-          <section className="card section animate-fadeIn" style={{
-            marginTop: 16,
-            background: 'linear-gradient(135deg, #1e7f63 0%, #145c47 50%, #0f4435 100%)',
-            color: 'white',
-            border: 'none',
-            borderRadius: '16px',
-            padding: '28px 32px',
-            boxShadow: '0 4px 24px rgba(30, 127, 99, 0.25)',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px' }}>
-              <div style={{ flex: 1, minWidth: '280px' }}>
-                <h3 style={{ margin: '0 0 8px 0', fontSize: '20px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  Want video editing & downloads? Get the Desktop App
-                </h3>
-                <p style={{ margin: 0, fontSize: '14px', color: 'rgba(255,255,255,0.8)', maxWidth: '520px', lineHeight: '1.5' }}>
-                  The desktop version unlocks <strong style={{ color: '#86efac' }}>video downloads</strong>,
-                  <strong style={{ color: '#86efac' }}> highlight reel creation</strong>,
-                  <strong style={{ color: '#86efac' }}> clip exports</strong>, and
-                  <strong style={{ color: '#86efac' }}> timeline editing</strong> — features not available in the web version.
-                </p>
-              </div>
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                <a
-                  href="https://github.com/amateurmenace/community-highlighter/releases/latest"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    padding: '12px 24px',
-                    background: 'white',
-                    color: '#1e7f63',
-                    borderRadius: '10px',
-                    textDecoration: 'none',
-                    fontWeight: 700,
-                    fontSize: '14px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-                    whiteSpace: 'nowrap',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.2)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></svg>
-                  Download for macOS
-                </a>
-                <a
-                  href="https://github.com/amateurmenace/community-highlighter/releases/latest"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    padding: '12px 24px',
-                    background: 'rgba(255,255,255,0.15)',
-                    color: 'white',
-                    borderRadius: '10px',
-                    textDecoration: 'none',
-                    fontWeight: 600,
-                    fontSize: '14px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    border: '1.5px solid rgba(255,255,255,0.3)',
-                    transition: 'transform 0.2s ease, background 0.2s ease',
-                    whiteSpace: 'nowrap',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.25)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.15)';
-                  }}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
-                  Download for Windows
-                </a>
-              </div>
-            </div>
-          </section>
-        )}
-
         {/* Civic Meeting Finder - Show on landing page when no video loaded */}
         {!videoId && (
           <section className="card section animate-fadeIn" style={{ marginTop: 16 }}>
@@ -8110,6 +8660,61 @@ export default function App() {
                 }, 150);
               }}
             />
+          </section>
+        )}
+
+        {/* Why Desktop App — cloud mode only, below Civic Meeting Finder */}
+        {!videoId && isCloudMode && (
+          <section id="why-desktop" className="card section animate-fadeIn" style={{
+            marginTop: 16,
+            background: 'linear-gradient(135deg, #1e7f63 0%, #145c47 50%, #0f4435 100%)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '16px',
+            padding: '28px 32px',
+            boxShadow: '0 4px 24px rgba(30, 127, 99, 0.25)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px' }}>
+              <div style={{ flex: 1, minWidth: '280px' }}>
+                <h3 style={{ margin: '0 0 10px 0', fontSize: '20px', fontWeight: 700 }}>
+                  Why do I need the Desktop App?
+                </h3>
+                <p style={{ margin: '0 0 12px 0', fontSize: '14px', color: 'rgba(255,255,255,0.85)', maxWidth: '560px', lineHeight: '1.5' }}>
+                  YouTube blocks video downloads from cloud server IP addresses (like the ones hosting this web app).
+                  The desktop app runs on <strong style={{ color: '#86efac' }}>your computer</strong>, so downloads work without restrictions and your videos stay private.
+                </p>
+                <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: 'rgba(255,255,255,0.75)', maxWidth: '560px', lineHeight: '1.5' }}>
+                  However, we've still got some tricks up our sleeves, including the ability to share edited reels without downloading anything, and some others we'd rather not share{' '}
+                  <a href="#" onClick={(e) => { e.preventDefault(); setShowAboutPage(true); }} style={{ color: '#86efac', fontWeight: 600, textDecoration: 'underline' }}>right on the homepage</a>.
+                </p>
+                <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', fontSize: '13px', color: 'rgba(255,255,255,0.7)' }}>
+                  <div>
+                    <div style={{ fontWeight: 600, color: '#86efac', marginBottom: '4px' }}>What you can do here</div>
+                    <div>AI analysis & summaries</div>
+                    <div>Search transcripts & word clouds</div>
+                    <div>Build & preview clip timelines</div>
+                    <div>Share interactive reel links</div>
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600, color: '#fbbf24', marginBottom: '4px' }}>Requires desktop app</div>
+                    <div>Download full videos (MP4)</div>
+                    <div>Render highlight reels</div>
+                    <div>Export clips with effects</div>
+                    <div>Captions, transitions, color grades</div>
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <a href="https://github.com/amateurmenace/community-highlighter/releases/latest" target="_blank" rel="noopener noreferrer"
+                  style={{ padding: '12px 24px', background: 'white', color: '#1e7f63', borderRadius: '10px', textDecoration: 'none', fontWeight: 700, fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}>
+                  Download for macOS
+                </a>
+                <a href="https://github.com/amateurmenace/community-highlighter/releases/latest" target="_blank" rel="noopener noreferrer"
+                  style={{ padding: '12px 24px', background: 'rgba(255,255,255,0.15)', color: 'white', borderRadius: '10px', textDecoration: 'none', fontWeight: 600, fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px', border: '1.5px solid rgba(255,255,255,0.3)', whiteSpace: 'nowrap' }}>
+                  Download for Windows
+                </a>
+              </div>
+            </div>
           </section>
         )}
 
@@ -8172,7 +8777,18 @@ export default function App() {
           </section>
         )}
 
-        {/* UPDATED: AI Summary now has PERMANENT green highlight */}
+        {/* Section 1: Meeting Highlighter — above AI summary */}
+        {videoId && (
+          <div className="section-divider">
+            <div className="section-divider-line" />
+            <div className="section-divider-title">
+              <span className="section-divider-icon">🔍</span>
+              Meeting Highlighter
+            </div>
+          </div>
+        )}
+
+        {/* AI Summary */}
         {summary.para && (
           <section className="card section summary-card animate-slideUp" style={{ marginTop: 16 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
@@ -8320,16 +8936,6 @@ export default function App() {
            ================================================================ */}
         {videoId && (
           <>
-            {/* Section 1: Video Searcher */}
-            <div className="section-divider">
-              <div className="section-divider-line" />
-              <div className="section-divider-title">
-                <span className="section-divider-icon">🔍</span>
-                Video Searcher
-              </div>
-              <div className="section-divider-line" />
-            </div>
-
             {/* ================================================================
                SEARCH & DISCOVER ZONE
                ================================================================ */}
@@ -8503,6 +9109,8 @@ export default function App() {
                       )}
                     </div>
                   )}
+
+                  {/* Transcript Tools moved to right column */}
                 </div>
 
                 {/* RIGHT: Small Video Player for search preview */}
@@ -8518,10 +9126,28 @@ export default function App() {
                       allowFullScreen
                     />
                   </div>
-                  {/* Jargon Translator — moved here from word cloud */}
+                  {/* Jargon Translator */}
                   <div style={{ marginTop: '12px' }}>
                     <JargonTranslatorPanel />
                   </div>
+                  {/* Transcript Tools */}
+                  {sents.length > 0 && (
+                    <div style={{ marginTop: '12px', padding: '14px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#166534', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Transcript Tools</div>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <select value={translateLang} onChange={(e) => setTranslateLang(e.target.value)} className="desktop-search-lang-select" style={{ fontSize: '13px', padding: '7px 10px' }}>
+                          <option value="Spanish">Spanish</option><option value="French">French</option><option value="Portuguese">Portuguese</option>
+                          <option value="Chinese">Chinese</option><option value="Arabic">Arabic</option><option value="Russian">Russian</option>
+                          <option value="Japanese">Japanese</option><option value="German">German</option>
+                        </select>
+                        <button className="search-result-btn" style={{ fontSize: '13px', padding: '7px 14px' }} onClick={translateTranscript} disabled={loading.translate}>🌐 Translate</button>
+                        <button className="search-result-btn" style={{ fontSize: '13px', padding: '7px 14px' }} onClick={() => {
+                          const blob = new Blob([vtt || fullText], { type: vtt ? 'text/vtt' : 'text/plain' });
+                          const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `transcript-${videoId}.${vtt ? 'vtt' : 'txt'}`; a.click(); URL.revokeObjectURL(url);
+                        }}>⬇️ Download</button>
+                      </div>
+                    </div>
+                  )}
                   {highlightsWithQuotes.length > 0 && (
                     <div style={{ marginTop: '8px', padding: '12px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0', maxHeight: '200px', overflowY: 'auto' }}>
                       <div style={{ fontSize: '11px', fontWeight: 700, color: '#166534', marginBottom: '6px' }}>⭐ Highlights ({highlightsWithQuotes.length})</div>
@@ -8554,14 +9180,13 @@ export default function App() {
               </div>
             </div>
 
-            {/* Section 2: Video Highlighter */}
+            {/* Section 2: Highlight Video Editor */}
             <div className="section-divider">
               <div className="section-divider-line" />
               <div className="section-divider-title">
                 <span className="section-divider-icon">🎬</span>
-                Video Highlighter
+                Highlight Video Editor
               </div>
-              <div className="section-divider-line" />
             </div>
 
             {/* ================================================================
@@ -8655,7 +9280,7 @@ export default function App() {
                         if (clipBasket.length === 0) return;
                         const clipsParam = clipBasket.map(c => `${Math.round(c.start)}-${Math.round(c.end)}`).join(',');
                         const titlesParam = clipBasket.map(c => (c.label || '').slice(0, 50)).join('|');
-                        const shareUrl = `${window.location.origin}/?v=${videoId}&clips=${clipsParam}&titles=${encodeURIComponent(titlesParam)}`;
+                        const shareUrl = `${window.location.origin}/?v=${videoId}&clips=${clipsParam}&titles=${encodeURIComponent(titlesParam)}&mode=play`;
                         navigator.clipboard.writeText(shareUrl).then(() => addToast('🔗 Reel link copied to clipboard!')).catch(() => {
                           prompt('Copy this reel link:', shareUrl);
                         });
@@ -8686,11 +9311,25 @@ export default function App() {
                       </button>
                     </>
                   ) : (
-                    <button className="toolbar-export-btn" onClick={() => setShowExportModal(true)} disabled={clipBasket.length === 0}
-                      title={clipBasket.length === 0 ? 'Add clips to the timeline first, then export as video' : `Export ${clipBasket.length} clips as MP4 video`}>
-                      <span className="toolbar-export-icon">📦</span>
-                      <span className="toolbar-export-label">{clipBasket.length > 0 ? `Export ${clipBasket.length} Clip${clipBasket.length !== 1 ? 's' : ''} as Video` : 'Export as Video'}</span>
-                    </button>
+                    <>
+                      <button className="toolbar-export-btn" onClick={() => setShowExportModal(true)} disabled={clipBasket.length === 0}
+                        title={clipBasket.length === 0 ? 'Add clips to the timeline first, then export as video' : `Export ${clipBasket.length} clips as MP4 video`}>
+                        <span className="toolbar-export-icon">📦</span>
+                        <span className="toolbar-export-label">{clipBasket.length > 0 ? `Export ${clipBasket.length} Clip${clipBasket.length !== 1 ? 's' : ''} as Video` : 'Export as Video'}</span>
+                      </button>
+                      <button className="toolbar-share-btn" disabled={clipBasket.length === 0} onClick={() => {
+                        if (clipBasket.length === 0) return;
+                        const clipsParam = clipBasket.map(c => `${Math.round(c.start)}-${Math.round(c.end)}`).join(',');
+                        const titlesParam = clipBasket.map(c => (c.label || '').slice(0, 50)).join('|');
+                        const shareUrl = `${window.location.origin}/?v=${videoId}&clips=${clipsParam}&titles=${encodeURIComponent(titlesParam)}&mode=play`;
+                        navigator.clipboard.writeText(shareUrl).then(() => addToast('🔗 Reel link copied to clipboard!')).catch(() => {
+                          prompt('Copy this reel link:', shareUrl);
+                        });
+                      }} title="Copy a shareable link that plays your clips as a reel">
+                        <span>🔗</span>
+                        <span>Share Reel Link</span>
+                      </button>
+                    </>
                   )}
 
                   <button className="toolbar-settings-btn" onClick={() => setShowSettingsDrawer(true)} title="Customize resolution, effects, captions, branding, transitions, and download full video">
@@ -9107,23 +9746,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* Transcript Tools — always visible */}
-              <div className="bottom-panel-section bottom-panel-tools">
-                <div className="insights-section-title">📝 Transcript Tools</div>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <select value={translateLang} onChange={(e) => setTranslateLang(e.target.value)} className="desktop-search-lang-select">
-                    <option value="Spanish">Spanish</option><option value="French">French</option><option value="Portuguese">Portuguese</option>
-                    <option value="Chinese">Chinese</option><option value="Arabic">Arabic</option><option value="Russian">Russian</option>
-                    <option value="Japanese">Japanese</option><option value="German">German</option>
-                  </select>
-                  <button className="search-result-btn" onClick={translateTranscript} disabled={loading.translate}>🌐 Translate Transcript</button>
-                  <button className="search-result-btn" onClick={() => {
-                    const blob = new Blob([vtt || fullText], { type: vtt ? 'text/vtt' : 'text/plain' });
-                    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `transcript-${videoId}.${vtt ? 'vtt' : 'txt'}`; a.click(); URL.revokeObjectURL(url);
-                  }}>⬇️ Download Transcript</button>
-                  <button className="search-result-btn" onClick={() => { setShowFullTranscript(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>📖 View Full Transcript</button>
-                </div>
-              </div>
+              {/* Transcript Tools moved to word cloud column */}
 
               {/* Translation result */}
               {translation.show && (
@@ -9151,6 +9774,51 @@ export default function App() {
                 <h3>Settings</h3>
                 <button className="settings-drawer-close" onClick={() => setShowSettingsDrawer(false)}>✕</button>
               </div>
+
+              {/* yt-dlp Update — desktop only */}
+              {!isCloudMode && <div className="settings-drawer-section">
+                <div className="settings-drawer-section-title">yt-dlp (Video Downloader)</div>
+                <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px', lineHeight: '1.5' }}>
+                  YouTube frequently blocks older versions of yt-dlp. If video downloads are failing, updating to the latest nightly build usually fixes the issue.
+                </div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <button className="btn" style={{ fontSize: '13px', padding: '8px 14px' }}
+                    onClick={async () => {
+                      // Show current version first
+                      try {
+                        const statusResp = await fetch('/api/ytdlp/status');
+                        const statusData = await statusResp.json();
+                        addToast(`Current yt-dlp version: ${statusData.version}. Updating...`);
+                      } catch {}
+                      // Run update
+                      try {
+                        const resp = await fetch('/api/ytdlp/update', { method: 'POST' });
+                        const data = await resp.json();
+                        if (data.success) {
+                          addToast(`yt-dlp updated: ${data.old_version} → ${data.new_version}`);
+                        } else {
+                          addToast(`yt-dlp update failed: ${data.error || 'Unknown error'}`);
+                        }
+                      } catch (e) {
+                        addToast(`yt-dlp update failed: ${e.message}`);
+                      }
+                    }}>
+                    Update to Latest Nightly
+                  </button>
+                  <button className="btn" style={{ fontSize: '13px', padding: '8px 14px' }}
+                    onClick={async () => {
+                      try {
+                        const resp = await fetch('/api/ytdlp/status');
+                        const data = await resp.json();
+                        addToast(`yt-dlp version: ${data.version}`);
+                      } catch (e) {
+                        addToast('Could not check yt-dlp version');
+                      }
+                    }}>
+                    Check Version
+                  </button>
+                </div>
+              </div>}
 
               {/* Full Video Download — desktop only */}
               {!isCloudMode && <div className="settings-drawer-section">
@@ -10099,7 +10767,6 @@ export default function App() {
                 <span className="section-divider-icon">📊</span>
                 Meeting Analyzer
               </div>
-              <div className="section-divider-line" />
             </div>
 
             <section id="analytics-section" className="full-width-viz card section animate-slideUp" style={{ marginTop: 0 }}>
@@ -10107,13 +10774,7 @@ export default function App() {
               Meeting Analytics
             </h2>
             <div className="data-viz-container">
-              {/* 1. Meeting Scorecard - FULL WIDTH with clickable metrics */}
-              <MeetingScorecard
-                transcript={fullText}
-                highlights={highlightsWithQuotes}
-                entities={entities}
-                isLoading={loadingEntities}
-              />
+              {/* Meeting Scorecard removed */}
 
               {/* 2. People, Places & Things + Participation Tracker - SIDE BY SIDE */}
               <MentionedEntitiesCard
@@ -10252,8 +10913,21 @@ export default function App() {
             <div className="footer-tech">
               Built with React, FastAPI, OpenAI GPT, and Community
             </div>
+            <div style={{ marginTop: '8px' }}>
+              <button
+                onClick={() => setShowFeedbackModal(true)}
+                style={{ background: '#1e7f63', color: 'white', border: 'none', padding: '8px 20px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
+              >
+                Give Feedback
+              </button>
+            </div>
+            <div style={{ marginTop: '8px' }}>
+              <button onClick={() => setShowAboutPage(true)} style={{ background: 'none', border: 'none', color: '#1e7f63', fontSize: '13px', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                About Community Highlighter
+              </button>
+            </div>
             <div className="footer-license">
-              License: MIT License - See project documentation for details
+              Licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer" style={{ color: '#1e7f63' }}>Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)</a>
             </div>
             <div className="footer-website">
               <a href="https://weirdmachine.org" target="_blank" rel="noopener noreferrer">weirdmachine.org</a>
