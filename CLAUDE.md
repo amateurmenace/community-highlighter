@@ -360,11 +360,11 @@ npm run build                        # Build React to dist/
 build_windows.bat
 
 # Option 2: Build via GitHub Actions (from any machine)
-gh workflow run build-windows.yml -f version=v7.2.0
+gh workflow run build-windows.yml -f version=v8.1.0
 ```
 
 ### Build Scripts
-- `build_mac_app_signed.sh` — Signed + notarized macOS build (`.app` + `.dmg`), v7.2.0
+- `build_mac_app_signed.sh` — Signed + notarized macOS build (`.app` + `.dmg`), v8.1.0. Adds `/opt/homebrew/bin` to PATH for node/npm access.
 - `build_windows.bat` — Windows build (`.exe` in portable ZIP)
 - `CommunityHighlighter.spec` — PyInstaller spec for macOS
 - `CommunityHighlighter-Windows.spec` — PyInstaller spec for Windows
@@ -426,6 +426,7 @@ gh workflow run build-windows.yml -f version=v7.2.0
 - YouTube API key is optional — transcript fetching and civic meeting search fall back to yt-dlp without it
 - Windows builds use `msvcrt` for instance locking (macOS uses `fcntl`)
 - Optimization stats endpoint polled once on mount (was every 30s — caused noisy terminal logs)
+- `build_mac_app_signed.sh` requires `export PATH="/opt/homebrew/bin:$PATH"` for node/npm — added to script header
 - AI translation truncates long transcripts — frontend now offers Google Translate fallback for transcripts >30K chars
 
 ## Version

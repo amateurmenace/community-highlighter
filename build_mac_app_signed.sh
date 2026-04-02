@@ -4,6 +4,9 @@
 
 set -e  # Exit on error
 
+# Ensure Homebrew tools (node, npm, ffmpeg) are on PATH
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 echo "=============================================="
 echo "🏛️  Building Community Highlighter for macOS"
 echo "       (With Code Signing & Notarization)"
