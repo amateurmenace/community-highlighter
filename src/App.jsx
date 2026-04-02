@@ -7528,22 +7528,11 @@ export default function App() {
     return () => document.removeEventListener('mousedown', dismiss);
   }, [floatingClipBtn]);
 
-  // ⚙️ NEW: Load optimization stats on mount
+  // Load optimization stats once on mount (no polling)
   useEffect(() => {
-    const loadStats = async () => {
-      try {
-        const stats = await apiOptimizationStats();
-        setOptimizationStats(stats);
-      } catch (e) {
-        console.error("Failed to load optimization stats:", e);
-      }
-    };
-
-    loadStats();
-
-    // Refresh stats every 30 seconds
-    const interval = setInterval(loadStats, 30000);
-    return () => clearInterval(interval);
+    apiOptimizationStats()
+      .then(stats => setOptimizationStats(stats))
+      .catch(() => {}); // Silently ignore — stats are optional
   }, []);
 
   // Import reel from URL params (?v=videoId&clips=start-end,start-end&titles=t1|t2&mode=play|edit)
@@ -8458,9 +8447,22 @@ export default function App() {
     }
   };
 
+  // Open full transcript in Google Translate (free, no token cost, full text)
+  const translateFullTranscriptBrowser = () => {
+    if (!fullText) { addToast("Load a video first"); return; }
+    const langCodes = { Spanish: 'es', French: 'fr', Portuguese: 'pt', Chinese: 'zh-CN', Japanese: 'ja', Korean: 'ko', German: 'de', Arabic: 'ar' };
+    const tl = langCodes[translateLang] || 'es';
+    // Google Translate URL supports up to ~5000 chars in URL; for longer, use the form POST approach
+    const text = fullText.slice(0, 5000);
+    window.open(`https://translate.google.com/?sl=en&tl=${tl}&text=${encodeURIComponent(text)}&op=translate`, '_blank');
+    if (fullText.length > 5000) {
+      addToast(`Opened first portion in Google Translate. Full transcript is ${Math.round(fullText.length / 1000)}K chars — use the Download button to get the full text file, then upload to translate.google.com.`);
+    }
+  };
+
   const translateTranscript = async () => {
     if (!fullText) {
-      alert("Load a video first");
+      addToast("Load a video first");
       return;
     }
 
@@ -8468,6 +8470,17 @@ export default function App() {
     setProcessStatus({ active: true, message: `Translating to ${translateLang}...`, percent: 0, isVideoDownload: false });
 
     try {
+      // For very long transcripts, suggest browser translation instead
+      if (fullText.length > 30000) {
+        const useBrowser = confirm(`This transcript is ${Math.round(fullText.length / 1000)}K characters. AI translation may be truncated.\n\nClick OK to open in Google Translate (free, full text)\nClick Cancel to use AI translation (may be partial)`);
+        if (useBrowser) {
+          translateFullTranscriptBrowser();
+          setLoading(l => ({ ...l, translate: false }));
+          setProcessStatus({ active: false, message: "", percent: 0 });
+          return;
+        }
+      }
+
       const res = await apiTranslate({
         text: fullText,
         target_lang: translateLang,
@@ -9292,7 +9305,6 @@ export default function App() {
           <div className="section-divider" ref={sectionHighlightRef}>
             <div className="section-divider-line" />
             <div className="section-divider-title">
-              <span className="section-divider-icon">🔍</span>
               Meeting Highlighter
             </div>
             <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>
@@ -9695,8 +9707,11 @@ export default function App() {
                     </div>
                   ) : matches.length > 0 ? (
                     <div className="desktop-search-results-area">
-                      <div style={{ fontWeight: 700, fontSize: '13px', color: '#166534', marginBottom: '8px' }}>
-                        🔍 {matches.length} match{matches.length !== 1 ? 'es' : ''} for "{query}"
+                      <div style={{ fontWeight: 700, fontSize: '13px', color: '#166534', marginBottom: '4px' }}>
+                        {matches.length} match{matches.length !== 1 ? 'es' : ''} for "{query}"
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '10px', lineHeight: 1.4 }}>
+                        Click "+ Timeline" to add a clip. Or click "See in Transcript" then highlight text to create custom clips.
                       </div>
                       {matches.slice(0, 20).map((m, i) => (
                         <div key={i} className="search-result-card">
@@ -9718,7 +9733,7 @@ export default function App() {
                             <button className="search-result-btn search-result-btn-context" onClick={() => {
                               setExpanded({ open: true, focusIdx: m.idx || i });
                               setTimeout(() => { const el = document.getElementById(`sent-${m.idx || i}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100);
-                            }}>📖 Context</button>
+                            }}>See in Transcript</button>
                             <button className="search-result-btn search-result-btn-investigate" onClick={() => {
                               setInvestigateWord({ text: m.text.split(/\s+/).slice(0, 5).join(' ') });
                             }}>Investigate</button>
@@ -9781,6 +9796,57 @@ export default function App() {
                       allow="autoplay; encrypted-media; picture-in-picture"
                       allowFullScreen
                     />
+                    <button
+                      onClick={() => {
+                        // Extract current timestamp from iframe src
+                        const src = searchPlayerRef.current?.src || '';
+                        const startMatch = src.match(/start=(\d+)/);
+                        const seconds = startMatch ? parseInt(startMatch[1]) : 0;
+                        // Open transcript and highlight at this timestamp
+                        setShowFullTranscript(true);
+                        // Find closest cue
+                        let bestIdx = 0;
+                        let bestDist = Infinity;
+                        for (let i = 0; i < sents.length; i++) {
+                          const dist = Math.abs(sents[i].start - seconds);
+                          if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+                        }
+                        setActiveCueIdx(bestIdx);
+                        setTimeout(() => {
+                          const el = document.getElementById(`sent-${bestIdx}`);
+                          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 200);
+                        // Auto-track playback
+                        if (activeCueTimerRef.current) clearInterval(activeCueTimerRef.current);
+                        let currentTime = seconds;
+                        let trackIdx = bestIdx;
+                        activeCueTimerRef.current = setInterval(() => {
+                          currentTime += 1;
+                          for (let i = trackIdx; i < sents.length; i++) {
+                            if (sents[i].start <= currentTime && (i === sents.length - 1 || sents[i + 1].start > currentTime)) {
+                              if (i !== trackIdx) {
+                                trackIdx = i;
+                                setActiveCueIdx(i);
+                                const cueEl = document.getElementById(`sent-${i}`);
+                                if (cueEl) cueEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                              }
+                              break;
+                            }
+                          }
+                        }, 1000);
+                        setTimeout(() => { if (activeCueTimerRef.current) clearInterval(activeCueTimerRef.current); }, 120000);
+                      }}
+                      style={{
+                        display: 'block', width: '100%', marginTop: 8, padding: '8px 12px',
+                        background: '#f0fdf4', border: '1.5px solid #1e7f63', borderRadius: 8,
+                        color: '#1e7f63', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                        transition: 'all 0.15s',
+                      }}
+                      onMouseEnter={e => { e.target.style.background = '#1e7f63'; e.target.style.color = '#fff'; }}
+                      onMouseLeave={e => { e.target.style.background = '#f0fdf4'; e.target.style.color = '#1e7f63'; }}
+                    >
+                      View in Transcript
+                    </button>
                   </div>
                   {/* Jargon Translator */}
                   <div style={{ marginTop: '12px' }}>
@@ -9840,7 +9906,6 @@ export default function App() {
             <div className="section-divider" ref={sectionEditRef}>
               <div className="section-divider-line" />
               <div className="section-divider-title">
-                <span className="section-divider-icon">🎬</span>
                 Highlight Video Editor
               </div>
               <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>
@@ -11407,7 +11472,6 @@ export default function App() {
             <div className="section-divider" ref={sectionAnalyzeRef}>
               <div className="section-divider-line" />
               <div className="section-divider-title">
-                <span className="section-divider-icon">📊</span>
                 Meeting Analyzer
               </div>
               <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>

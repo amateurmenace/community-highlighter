@@ -49,11 +49,11 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
    - **Model selector** visible on landing page before video loads (GPT-4o, GPT-4o Mini, Gemini 2.5 Flash, GPT-5.1)
    - **Logo click** reloads the homepage
 1. **Search & Discover Zone** — appears ABOVE the editor, white card with neo-brutalist borders:
-   - **Search Bar** — full-width, green-highlighted input (green border, light green gradient bg), "Investigate" text button (no emoji), Translate, Download, Full Transcript toggle, language selector (8 languages)
+   - **Search Bar** — full-width, green-highlighted input (green border, light green gradient bg), "Investigate" text button (no emoji), Translate, Download, Full Transcript toggle, language selector (8 languages). Search results show instruction: "Click + Timeline to add a clip. Or click See in Transcript then highlight text to create custom clips."
    - **Search Sparkline** — timeline distribution bar (50 bins) when searching
    - **Two-column grid**:
      - **Left**: Word Cloud Hero (420px min-height, dark blueprint bg, 80 words logarithmic sizing, top 3 glow) OR Full Transcript overlay OR Search Result Cards (when searching). "View Full Transcript" button overlays word cloud with scrollable transcript (text selection creates clips)
-     - **Right**: Small preview video (240px YouTube embed, `searchPlayerRef`) + Jargon Translator + compact Highlights list
+     - **Right**: Small preview video (240px YouTube embed, `searchPlayerRef`) + "View in Transcript" button (opens Full Transcript, syncs to current player timestamp, auto-highlights cues as video plays) + Jargon Translator + compact Highlights list
    - Search result "▶ Watch" seeks the small preview player; timeline clips seek the big editor player
 2. **Dark Editing Workspace** (`#0f1419` background) — video + toolbar + timeline as one connected unit:
    - **Video Player** — full-width, 520px height, embedded YouTube iframe (`playerRef`)
@@ -70,7 +70,7 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
 3. **Bottom Panel** — AI Summary, Key Highlights
 4. **Meeting Analyzer Section** — separated by "📊 Meeting Analyzer" section divider:
    - ALL data visualizations always visible: Entities, Participation, Topics, Timeline, Disagreements, Dynamics, Cross-References, Subscriptions, Issue Tracker
-   - Three named section dividers separate the page: "🔍 Meeting Highlighter", "🎬 Highlight Video Editor", "📊 Meeting Analyzer"
+   - Three named section dividers separate the page: "Meeting Highlighter", "Highlight Video Editor", "Meeting Analyzer" (no emojis)
    - Section titles are large (38px), bold (900 weight), left-aligned with line above
 5. **Settings Drawer** — slides from right edge (400px), triggered by "⚙️ Customize Settings":
    - Quality: Resolution, Speed, Audio Normalize
@@ -283,7 +283,7 @@ When a shared reel link is opened with `?mode=play`, the app renders a cinematic
 ### Transcript
 - `POST /api/transcript` — Fetch with 3-layer fallback
 - `POST /api/transcript/upload` — Upload .vtt/.srt/.txt transcript file for videos without captions
-- `POST /api/translate` — Translate transcript
+- `POST /api/translate` — Translate transcript (AI-powered, may truncate long transcripts — frontend offers Google Translate fallback for transcripts >30K chars)
 - `POST /api/wordfreq` — Word frequency analysis (with extensive civic stopword filtering)
 
 ### System/Dev
@@ -418,9 +418,11 @@ gh workflow run build-windows.yml -f version=v7.2.0
 - yt-dlp download timeout (10 min) can fail on long videos
 - YouTube API key is optional — transcript fetching and civic meeting search fall back to yt-dlp without it
 - Windows builds use `msvcrt` for instance locking (macOS uses `fcntl`)
+- Optimization stats endpoint polled once on mount (was every 30s — caused noisy terminal logs)
+- AI translation truncates long transcripts — frontend now offers Google Translate fallback for transcripts >30K chars
 
 ## Version
 
-Current: 8.0.0 (default AI: Gemini 2.5 Flash)
+Current: 8.0.1 (default AI: Gemini 2.5 Flash)
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)
