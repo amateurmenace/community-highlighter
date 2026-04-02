@@ -1,0 +1,49 @@
+# Dependencies & environments
+node_modules/
+venv/
+.venv/
+backend/venv/
+__pycache__/
+*.pyc
+
+# Build artifacts (rebuilt in container)
+dist/
+build/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Desktop builds
+*.dmg
+*.app
+*.exe
+*.zip
+*.spec
+
+# Environment files (secrets set via Cloud Run env vars)
+.env
+backend/.env
+
+# Caches (ephemeral)
+backend/cache/
+backend/ai_cache/
+ai_cache/
+cache/
+
+# Claude config
+.claude/
+
+# Misc
+*.log
+*.tmp
+*.backup
+App-backup.jsx
+App.jsx.backup
+*.copy.*

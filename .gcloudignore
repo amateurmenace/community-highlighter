@@ -1,0 +1,20 @@
+# Same as .dockerignore — speeds up source upload to Cloud Build
+node_modules/
+venv/
+.venv/
+backend/venv/
+__pycache__/
+dist/
+build/
+.git/
+*.dmg
+*.app
+*.exe
+*.zip
+backend/cache/
+backend/ai_cache/
+ai_cache/
+cache/
+.claude/
+*.log
+*.backup
