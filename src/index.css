@@ -6899,6 +6899,31 @@ header.scrolled {
   width: 12px;
 }
 
+/* ===================== Download Center ===================== */
+.download-center-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1.5px solid #d1d5db;
+  border-radius: 6px;
+  background: white;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.download-center-btn:hover:not(:disabled) {
+  border-color: var(--green);
+  color: var(--green);
+  background: #f0fdf4;
+}
+.download-center-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* ===================== Timestamp Pills ===================== */
 .timestamp-pill {
   display: inline-block;

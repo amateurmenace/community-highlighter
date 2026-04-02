@@ -53,7 +53,14 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
    - **Search Sparkline** — timeline distribution bar (50 bins) when searching
    - **Two-column grid**:
      - **Left**: Word Cloud Hero (420px min-height, dark blueprint bg, 80 words logarithmic sizing, top 3 glow) OR Full Transcript overlay OR Search Result Cards (when searching). "View Full Transcript" button overlays word cloud with scrollable transcript (text selection creates clips)
-     - **Right**: Small preview video (240px YouTube embed, `searchPlayerRef`) + "View in Transcript" button (opens Full Transcript, syncs to current player timestamp, auto-highlights cues as video plays) + Jargon Translator + compact Highlights list
+     - **Right**: Small preview video (240px YouTube embed, `searchPlayerRef`) + "View in Transcript" button (syncs to player timestamp with auto-highlight tracking) + **Download Center** + Jargon Translator + compact Highlights list
+   - **Download Center** (replaces "Transcript Tools"):
+     - **Transcript**: Full transcript download (.vtt/.txt), language selector + AI translate, Google Translate button (free, full-length)
+     - **Report**: Download full report as .md (when generated)
+     - **Video**: Full YouTube video download with resolution picker (disabled in cloud mode with "Requires desktop app" notice)
+     - **Highlight Reel**: Download rendered reel .mp4 (appears after reel is rendered)
+     - **Desktop App CTA** (cloud only): Dark download button linking to GitHub releases, with reminder that desktop app is needed for video files
+     - **"Use AI to Create Highlight Reel"** button: green gradient CTA, triggers `buildReel()` and scrolls to the video editor section
    - Search result "▶ Watch" seeks the small preview player; timeline clips seek the big editor player
 2. **Dark Editing Workspace** (`#0f1419` background) — video + toolbar + timeline as one connected unit:
    - **Video Player** — full-width, 520px height, embedded YouTube iframe (`playerRef`)
@@ -423,6 +430,6 @@ gh workflow run build-windows.yml -f version=v7.2.0
 
 ## Version
 
-Current: 8.0.1 (default AI: Gemini 2.5 Flash)
+Current: 8.1.0 (default AI: Gemini 2.5 Flash)
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)

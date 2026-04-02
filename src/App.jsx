@@ -9852,21 +9852,120 @@ export default function App() {
                   <div style={{ marginTop: '12px' }}>
                     <JargonTranslatorPanel />
                   </div>
-                  {/* Transcript Tools */}
+                  {/* Download Center */}
                   {sents.length > 0 && (
-                    <div style={{ marginTop: '12px', padding: '14px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#166534', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Transcript Tools</div>
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                        <select value={translateLang} onChange={(e) => setTranslateLang(e.target.value)} className="desktop-search-lang-select" style={{ fontSize: '13px', padding: '7px 10px' }}>
-                          <option value="Spanish">Spanish</option><option value="French">French</option><option value="Portuguese">Portuguese</option>
-                          <option value="Chinese">Chinese</option><option value="Arabic">Arabic</option><option value="Russian">Russian</option>
-                          <option value="Japanese">Japanese</option><option value="German">German</option>
-                        </select>
-                        <button className="search-result-btn" style={{ fontSize: '13px', padding: '7px 14px' }} onClick={translateTranscript} disabled={loading.translate}>🌐 Translate</button>
-                        <button className="search-result-btn" style={{ fontSize: '13px', padding: '7px 14px' }} onClick={() => {
-                          const blob = new Blob([vtt || fullText], { type: vtt ? 'text/vtt' : 'text/plain' });
-                          const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `transcript-${videoId}.${vtt ? 'vtt' : 'txt'}`; a.click(); URL.revokeObjectURL(url);
-                        }}>⬇️ Download</button>
+                    <div style={{ marginTop: '12px', padding: '16px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#166534', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Download Center</div>
+
+                      {/* Transcript Downloads */}
+                      <div style={{ marginBottom: '10px' }}>
+                        <div style={{ fontSize: '11px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Transcript</div>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                          <button className="download-center-btn" onClick={() => {
+                            const blob = new Blob([vtt || fullText], { type: vtt ? 'text/vtt' : 'text/plain' });
+                            const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `transcript-${videoId}.${vtt ? 'vtt' : 'txt'}`; a.click(); URL.revokeObjectURL(url);
+                          }}>Full Transcript (.{vtt ? 'vtt' : 'txt'})</button>
+                          <select value={translateLang} onChange={(e) => setTranslateLang(e.target.value)} style={{ fontSize: '11px', padding: '5px 8px', borderRadius: 6, border: '1px solid #d1d5db', background: 'white' }}>
+                            <option value="Spanish">Spanish</option><option value="French">French</option><option value="Portuguese">Portuguese</option>
+                            <option value="Chinese">Chinese</option><option value="Arabic">Arabic</option><option value="Russian">Russian</option>
+                            <option value="Japanese">Japanese</option><option value="German">German</option>
+                          </select>
+                          <button className="download-center-btn" onClick={translateTranscript} disabled={loading.translate}>
+                            {loading.translate ? 'Translating...' : 'Translate'}
+                          </button>
+                          <button className="download-center-btn" style={{ color: '#6366f1' }} onClick={translateFullTranscriptBrowser}>
+                            Google Translate
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Report Download */}
+                      {fullReport.text && (
+                        <div style={{ marginBottom: '10px' }}>
+                          <div style={{ fontSize: '11px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Report</div>
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            <button className="download-center-btn" onClick={() => {
+                              const content = '# ' + (fullReport.headline || 'Meeting Report') + '\n\n' + fullReport.text;
+                              const blob = new Blob([content], { type: 'text/markdown' });
+                              const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `report-${videoId}.md`; a.click();
+                            }}>Full Report (.md)</button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Video Download */}
+                      <div style={{ marginBottom: '10px' }}>
+                        <div style={{ fontSize: '11px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Video</div>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                          <button className="download-center-btn" disabled={isCloudMode || downloadJob?.status === 'running'} onClick={async () => {
+                            if (isCloudMode) return;
+                            setDownloadJob({ status: 'running', percent: 0 });
+                            try {
+                              const res = await apiDownloadMp4({ videoId, resolution: downloadResolution });
+                              if (res.jobId) {
+                                const poll = setInterval(async () => {
+                                  try {
+                                    const st = await apiJobStatus(res.jobId);
+                                    setDownloadJob({ status: st.status, percent: st.percent, file: st.file });
+                                    if (st.status === 'done') { clearInterval(poll); if (st.file) { window.open(st.file, '_blank'); addDownload(`${videoId}.mp4`, st.file, 'full_video'); } }
+                                    else if (st.status === 'error') { clearInterval(poll); addToast('Download failed'); }
+                                  } catch(e) { clearInterval(poll); setDownloadJob(null); }
+                                }, 1500);
+                              } else if (res.file) { window.open(res.file, '_blank'); setDownloadJob(null); }
+                            } catch(e) { addToast('Download failed: ' + e.message); setDownloadJob(null); }
+                          }} title={isCloudMode ? 'Video download requires the desktop app' : 'Download full YouTube video'}>
+                            {downloadJob?.status === 'running' ? `Downloading ${downloadJob.percent || 0}%` : 'Full Video (.mp4)'}
+                          </button>
+                          <select value={downloadResolution} onChange={(e) => setDownloadResolution(e.target.value)} disabled={isCloudMode} style={{ fontSize: '11px', padding: '5px 8px', borderRadius: 6, border: '1px solid #d1d5db', background: 'white' }}>
+                            {availableFormats.length > 0 ? availableFormats.map(f => (
+                              <option key={f.label} value={f.label}>{f.label === 'best' ? 'Best' : f.label}</option>
+                            )) : (<><option value="best">Best</option><option value="1080p">1080p</option><option value="720p">720p</option></>)}
+                          </select>
+                          {/* Rendered highlight reel download */}
+                          {showCelebration?.file && (
+                            <a href={showCelebration.file} download className="download-center-btn" style={{ textDecoration: 'none', background: '#ecfdf5', borderColor: '#22c55e', color: '#166534' }}>
+                              Highlight Reel (.mp4)
+                            </a>
+                          )}
+                          {isCloudMode && <span style={{ fontSize: '10px', color: '#94a3b8' }}>Video download requires desktop app</span>}
+                        </div>
+                      </div>
+
+                      {/* Desktop App CTA (cloud only) */}
+                      {isCloudMode && (
+                        <div style={{ marginBottom: '12px' }}>
+                          <a href="https://github.com/amateurmenace/community-highlighter/releases/latest" target="_blank" rel="noopener noreferrer"
+                            style={{ display: 'inline-block', padding: '8px 16px', background: '#0f172a', color: '#fff', borderRadius: 8, fontSize: '12px', fontWeight: 600, textDecoration: 'none', transition: 'background 0.15s' }}
+                            onMouseEnter={e => e.target.style.background = '#1e293b'}
+                            onMouseLeave={e => e.target.style.background = '#0f172a'}
+                          >
+                            Download Desktop App
+                          </a>
+                          <span style={{ fontSize: '10px', color: '#94a3b8', marginLeft: 8 }}>Required to download and render video files</span>
+                        </div>
+                      )}
+
+                      {/* AI Highlight Reel CTA */}
+                      <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '12px', marginTop: '4px' }}>
+                        <button
+                          onClick={() => {
+                            buildReel("combined");
+                            // Scroll to editor section
+                            setTimeout(() => {
+                              if (sectionEditRef.current) sectionEditRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            }, 500);
+                          }}
+                          disabled={loading.reel}
+                          style={{
+                            width: '100%', padding: '10px 16px',
+                            background: loading.reel ? '#94a3b8' : 'linear-gradient(135deg, #1e7f63 0%, #166534 100%)',
+                            color: '#fff', border: 'none', borderRadius: 8,
+                            fontSize: '13px', fontWeight: 700, cursor: loading.reel ? 'wait' : 'pointer',
+                            transition: 'all 0.2s', letterSpacing: '0.3px',
+                          }}
+                        >
+                          {loading.reel ? 'Building Highlight Reel...' : 'Use AI to Create Highlight Reel'}
+                        </button>
                       </div>
                     </div>
                   )}
