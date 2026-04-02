@@ -4,7 +4,7 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 
 ## Architecture
 
-- **Frontend**: React 19 + Vite + vite-plugin-pwa + recharts, built to `dist/`. Monolithic `src/App.jsx` (~12500 lines) with 40+ inline sub-components (includes ReelPlayer, AboutPage, TranscriptUploadPrompt, GuidedTour, SectionPreviews, KnowledgeBasePanel, QuestionFlowDiagram, FramingPluralityMap, DisagreementTopology, IssueLifecycle)
+- **Frontend**: React 19 + Vite + vite-plugin-pwa + recharts, built to `dist/`. Code-split into 4 chunks: ReelPlayer (4.5KB), App editor (330KB), recharts (384KB), React runtime (185KB). Monolithic `src/App.jsx` (~12400 lines) with 40+ inline sub-components (includes AnimatedTagline, TopicTrendsChart, EntityNetworkGraph, AboutPage, TranscriptUploadPrompt, GuidedTour, SectionPreviews, KnowledgeBasePanel, QuestionFlowDiagram, FramingPluralityMap, DisagreementTopology, IssueLifecycle). ReelPlayer extracted to `src/ReelPlayer.jsx` for code-splitting.
 - **Backend**: FastAPI (`backend/app.py`, ~340KB monolith), served by Uvicorn on port 8000. 85+ API endpoints (includes SSE streaming, WebSocket job status)
 - **Desktop packaging**: PyInstaller bundles into macOS `.app` (signed+notarized) and Windows `.exe`
 - **Cloud deployment**: Render (https://community-highlighter.onrender.com/) — full video editor with Share Reel Link + Desktop Handoff (.chreel); video download/render disabled in cloud mode
@@ -20,6 +20,8 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 | `desktop_app.py` | Server process launcher (starts Uvicorn, opens browser/pywebview) |
 | `backend/app.py` | FastAPI application (all API endpoints) |
 | `src/App.jsx` | React frontend (large monolithic component) |
+| `src/ReelPlayer.jsx` | Code-split cinematic reel player (`?mode=play`) |
+| `src/main.jsx` | Entry point — routes between ReelPlayer and App via lazy loading |
 | `src/api.js` | API client (all fetch calls to backend) |
 
 ## User Workflow
@@ -114,17 +116,18 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
 
 ## Landing Page Layout (Before Video Loaded)
 
-1. **Section Preview Cards** — 3-column grid at top (Highlight, Edit, Analyze)
-2. **URL Input Hero** — green highlighter effect (`.url-input-hero`): green border, green-tinted gradient background, `::before` highlighter stroke, 16px font, green placeholder
-3. **Bridge Text** — "Don't have the link? Use our AI search tool to find the most recent civic meetings near you."
-4. **Civic Meeting Finder** — integrated inline (no longer a separate section), with search, filters, channel import
-5. **Tip Text** — styled card with border, visible text: "Tip: This app works best with YouTube videos that have captions..." + "Learn more about how Community Highlighter works" link to About page
-6. **.chreel Import Zone** — dark drag-and-drop (desktop only)
-7. **Batch Processing** — collapsible
+1. **Animated Tagline** (`AnimatedTagline`) — cycling mission statements as big 26px headline (5s interval, fade transition), with subtitle line "**[verb]** your city's public meetings — entirely in your browser." where only the colored verb (Search/Highlight/Edit/Analyze/Share) animates. 5 mission statements cycle: civic engagement themes about accessibility, transparency, and public data.
+2. **Section Preview Cards** — 3-column grid (Highlight, Edit, Analyze) with detailed descriptions
+3. **URL Input Hero** — green highlighter effect (`.url-input-hero`): green border, green-tinted gradient background, `::before` highlighter stroke, 16px font, green placeholder
+4. **Bridge Text** — "Don't have the link? Use our AI search tool to find the most recent civic meetings near you."
+5. **Civic Meeting Finder** — integrated inline (no longer a separate section), with search, filters, channel import
+6. **Tip Text** — styled card with border, visible text: "Tip: This app works best with YouTube videos that have captions..." + "Learn more about how Community Highlighter works" link to About page
+7. **.chreel Import Zone** — dark drag-and-drop (desktop only)
+8. **Batch Processing** — collapsible
 
 ## Reel Player Mode
 
-When a shared reel link is opened with `?mode=play`, the app renders a cinematic `ReelPlayer` component instead of the full editor:
+When a shared reel link is opened with `?mode=play`, `main.jsx` detects this and lazy-loads only the `ReelPlayer` chunk (~4.5KB + React runtime ~185KB) instead of the full editor bundle (~330KB + recharts ~384KB). This is a **78% reduction** in JS loaded for share link viewers:
 - Sequential clip playback via YouTube iframe src changes with CSS fade transitions (0.5s)
 - Title overlays as CSS-animated lower thirds during each clip (controllable via `&labels=on/off` URL param)
 - `showLabels` prop passed from URL parsing — respects editor's Titles ON/OFF setting
@@ -227,6 +230,8 @@ When a shared reel link is opened with `?mode=play`, the app renders a cinematic
 ### Frontend Performance
 - **Parallel API calls**: `loadAll` fires metadata + wordfreq + executive summary + entity extraction simultaneously via `Promise.allSettled`
 - Word frequency: 150+ stopwords including civic meeting title words (council, board, committee, etc.)
+- **Code splitting** (v8.3): `main.jsx` routes between lazy-loaded ReelPlayer and App. Vite `manualChunks` splits recharts into its own chunk. Build produces 4 JS chunks: ReelPlayer (4.5KB), index/React (185KB), App (330KB), recharts (384KB)
+- **Mobile responsive** (v8.3): Breakpoints at 768px and 500px for word cloud (scaled fonts), timeline (vertical card layout), settings drawer (full-width), section nav (horizontal scroll), toolbar (wrapped buttons), viz cards (compact padding)
 
 ### Quote-to-Timestamp Matching
 - `find_quote_timestamp()`: Matches first 8 words of AI-generated quote against transcript segments
@@ -246,6 +251,11 @@ When a shared reel link is opened with `?mode=play`, the app renders a cinematic
 - ~~Summary lacks timestamps~~ **FIXED**: Executive brief returns structured `{sentences: [{text, timestamp_seconds}]}`. Clickable green timestamp pills seek YouTube player
 - ~~Gemini JSON truncation~~ **FIXED**: Truncation repair (closes open brackets), regex text extraction fallback, increased max_tokens to 1000
 - ~~openai_client undefined in find_relevant_documents~~ **FIXED**: Replaced with `call_ai_api()` wrapper
+- ~~Share links load full 850KB bundle~~ **FIXED** (v8.3): Code-split ReelPlayer — `?mode=play` loads only 190KB (ReelPlayer 4.5KB + React runtime 185KB), 78% reduction
+- ~~No SRT export~~ **FIXED** (v8.3): `POST /api/export/srt` generates SRT from transcript, supports clip-range filtering
+- ~~No PDF summary export~~ **FIXED** (v8.3): `POST /api/export/pdf` generates branded one-page PDF with fpdf2
+- ~~No cross-meeting visualizations~~ **FIXED** (v8.3): TopicTrendsChart (recharts LineChart) + EntityNetworkGraph (SVG radial layout)
+- ~~Mobile layout issues~~ **FIXED** (v8.3): Comprehensive responsive pass — word cloud, timeline, settings drawer, nav pills, toolbar, viz cards
 
 ## New Data Visualizations (v8.2)
 
@@ -271,6 +281,8 @@ All new viz components work WITHOUT speaker attribution (YouTube transcripts rar
   - Related meetings with similarity scores
 - Backend: ChromaDB with `all-MiniLM-L6-v2` embeddings, 500-char semantic chunks
 - All 4 KB API functions already existed in `api.js`; this wires them into the UI
+- **TopicTrendsChart** (v8.3): recharts LineChart showing top 8 topic frequencies across meetings over time. Requires 2+ meetings in KB. Uses `POST /api/knowledge/topic_trends` (5-min in-memory cache). Color-coded lines per topic, dark theme matching KBPanel.
+- **EntityNetworkGraph** (v8.3): SVG radial layout showing meetings (green inner ring) connected to shared entities (blue outer ring). Uses existing `/api/graph/build`. Max 30 entity nodes + all meeting nodes. Hover reveals labels, shared entities highlighted with thicker edges.
 
 ## Relevant Documents — CivicClerk Integration
 
@@ -338,6 +350,11 @@ All new viz components work WITHOUT speaker attribution (YouTube transcripts rar
 
 ### Knowledge Base
 - `POST /api/knowledge/add_meeting`, `search`, `find_related` — ChromaDB-backed cross-meeting search
+- `POST /api/knowledge/topic_trends` — Topic frequency time-series across all KB meetings (5-min cache)
+
+### Export (v8.3)
+- `POST /api/export/srt` — Export transcript as SRT subtitle file, optionally filtered to clip ranges
+- `POST /api/export/pdf` — Generate branded one-page PDF summary (title, executive brief, highlights, entities table)
 
 ### Issues & Subscriptions
 - `POST /api/issues/create`, `list`, `add_meeting`, `auto_track`, `{id}/timeline`
@@ -388,7 +405,7 @@ python desktop_app.py  # Start backend in desktop mode
 
 ### Production Build — macOS
 ```bash
-npm run build                        # Build React to dist/
+npm run build                        # Build React to dist/ (4 chunks: ReelPlayer, App, recharts, runtime)
 ./build_mac_app_signed.sh           # Full signed+notarized .app + .dmg
 ```
 
@@ -466,9 +483,14 @@ gh workflow run build-windows.yml -f version=v8.1.0
 - Optimization stats endpoint polled once on mount (was every 30s — caused noisy terminal logs)
 - `build_mac_app_signed.sh` requires `export PATH="/opt/homebrew/bin:$PATH"` for node/npm — added to script header
 - AI translation truncates long transcripts — frontend offers Google Translate fallback. For >5K chars, copies full transcript to clipboard and opens Google Translate in new tab (avoids URL length limits). Button labeled "Google Translate (Free, Full Text)"
+- ReelPlayer is code-split into its own chunk via `main.jsx` lazy routing — `?mode=play` viewers never load the editor bundle
+- `src/main.jsx` is the entry point now, not `src/App.jsx` — it routes between lazy-loaded ReelPlayer and App
+- PDF export uses fpdf2 with Helvetica (latin-1 encoding) — non-Latin characters get replaced. Future: bundle a Unicode font
+- Topic trends endpoint queries all ChromaDB documents in memory — may be slow for 100+ meetings. Has 5-min TTL cache
+- Timeline drag-and-drop uses HTML5 DnD which doesn't work on mobile touch — mobile users use move-up/move-down buttons instead
 
 ## Version
 
-Current: 8.2.0 (default AI: Gemini 2.5 Flash)
+Current: 8.3.0 (default AI: Gemini 2.5 Flash)
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)

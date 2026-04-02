@@ -60,7 +60,7 @@ main {
 /* Header */
 header {
   background: white;
-  border-bottom: 3px solid var(--line);
+  border-bottom: 2px solid var(--line);
   position: sticky;
   top: 0;
   z-index: 100;
@@ -71,13 +71,13 @@ header .wrap {
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding: 5px 0;
+  padding: 12px 0;
 }
 
 header .brand {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 20px;
 }
 
 header .logo-main {
@@ -86,15 +86,16 @@ header .logo-main {
 }
 
 header .logo-main:hover {
-  transform: scale(1.05);
+  transform: scale(1.03);
 }
 
 .subtitle-large {
   font-size: 18px;
   color: #334155;
-  max-width: 450px;
+  max-width: 500px;
   line-height: 1.5;
   font-weight: 500;
+  letter-spacing: -0.2px;
 }
 .subtitle-mobile {
   display: none;
@@ -110,7 +111,69 @@ header .logo-main:hover {
 header .right {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 12px;
+}
+
+/* Animated tagline — in main body area */
+.animated-tagline {
+  padding: 20px 20px 16px;
+  text-align: center;
+  overflow: hidden;
+}
+
+.animated-tagline-mission {
+  font-size: 26px;
+  font-weight: 600;
+  color: #1e293b;
+  letter-spacing: -0.5px;
+  line-height: 1.35;
+  margin-bottom: 8px;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+
+.animated-tagline-action {
+  font-size: 19px;
+  font-weight: 400;
+  color: #475569;
+  letter-spacing: -0.2px;
+  line-height: 1.5;
+}
+
+.animated-tagline-verb {
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: -0.3px;
+  display: inline-block;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+
+.animated-tagline-rest {
+  font-weight: 400;
+}
+
+.tagline-fade-in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.tagline-fade-out {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+@media (max-width: 768px) {
+  .animated-tagline {
+    padding: 14px 16px 12px;
+  }
+  .animated-tagline-mission {
+    font-size: 20px;
+  }
+  .animated-tagline-action {
+    font-size: 16px;
+  }
+  .animated-tagline-verb {
+    font-size: 17px;
+  }
 }
 
 .powered-section {
@@ -129,7 +192,7 @@ header .right {
 }
 
 .secondary-logo-large {
-  height: 70px;
+  height: 44px;
   transition: transform 0.3s ease;
 }
 
@@ -1595,11 +1658,11 @@ header .right {
   }
   
   header .logo-main {
-    height: 70px;
+    height: 80px;
   }
-  
+
   header .brand {
-    gap: 12px;
+    gap: 10px;
   }
 
   .subtitle-large {
@@ -1607,10 +1670,28 @@ header .right {
   }
   .subtitle-mobile {
     display: block !important;
+    font-size: 14px;
+    color: #475569;
+    text-align: center;
+    padding: 8px 16px 0;
+    line-height: 1.5;
+    font-weight: 500;
   }
 
   .secondary-logo-large {
-    height: 50px;
+    height: 32px !important;
+  }
+
+  .powered-section {
+    display: none !important;
+  }
+
+  .lang-selector {
+    display: none !important;
+  }
+
+  header .right {
+    gap: 8px;
   }
 }
 
@@ -5060,7 +5141,7 @@ header.scrolled {
 }
 
 .desktop-editor-mode .logo-main {
-  height: 50px !important;
+  height: 44px !important;
 }
 
 .desktop-editor-mode .subtitle-large {
@@ -9176,5 +9257,165 @@ header.scrolled {
 
   .card.section {
     padding: 12px;
+  }
+}
+
+
+/* ============================================================================
+   v8.3: COMPREHENSIVE MOBILE RESPONSIVE PASS
+   ============================================================================ */
+
+/* Section nav pills — horizontal scroll on mobile */
+@media (max-width: 768px) {
+  .section-nav-bar {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    justify-content: flex-start !important;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+    scrollbar-width: none;
+    gap: 6px !important;
+  }
+  .section-nav-bar::-webkit-scrollbar { display: none; }
+  .section-nav-btn {
+    flex-shrink: 0 !important;
+    min-width: 140px;
+    padding: 8px 14px !important;
+  }
+}
+
+/* Word cloud hero — scale down for mobile */
+@media (max-width: 768px) {
+  .word-cloud-hero {
+    min-height: 280px;
+    padding: 16px;
+    border-radius: 12px;
+  }
+  .word-cloud-hero-words {
+    gap: 3px 6px !important;
+  }
+  .wc-mega { font-size: 48px !important; }
+  .wc-xl { font-size: 36px !important; }
+  .wc-large { font-size: 26px !important; }
+  .wc-medium { font-size: 18px !important; }
+  .wc-small { font-size: 13px !important; }
+  .wc-tiny { font-size: 10px !important; }
+}
+
+/* Search zone — tighter mobile layout */
+@media (max-width: 768px) {
+  .search-zone {
+    padding: 10px 12px !important;
+    border-radius: 10px !important;
+  }
+  .search-zone-grid {
+    gap: 10px !important;
+  }
+  .search-zone-left {
+    min-height: auto !important;
+  }
+}
+
+/* Download center — stack buttons vertically on small screens */
+@media (max-width: 500px) {
+  .download-center-btn {
+    font-size: 11px !important;
+    padding: 6px 10px !important;
+  }
+}
+
+/* Settings drawer — full width on mobile */
+@media (max-width: 768px) {
+  .settings-drawer {
+    width: 100vw !important;
+    max-width: 100vw !important;
+  }
+  .settings-drawer-header h3 {
+    font-size: 15px;
+  }
+  .settings-close-btn {
+    width: 44px !important;
+    height: 44px !important;
+    font-size: 20px !important;
+  }
+}
+
+/* Timeline editor — more compact clips on mobile */
+@media (max-width: 768px) {
+  .timeline-track {
+    min-height: 180px !important;
+  }
+  .timeline-clip {
+    height: auto !important;
+    min-height: 80px !important;
+  }
+  .timeline-clip-label {
+    font-size: 11px !important;
+  }
+  .timeline-clip-time {
+    font-size: 10px !important;
+  }
+}
+
+/* Playback controls — compact */
+@media (max-width: 768px) {
+  .playback-controls-bar {
+    padding: 8px 12px !important;
+    gap: 8px !important;
+  }
+  .playback-controls-bar button {
+    padding: 6px 12px !important;
+    font-size: 12px !important;
+  }
+}
+
+/* Toolbar — wrap on mobile */
+@media (max-width: 768px) {
+  .toolbar-export-btn,
+  .toolbar-settings-btn,
+  .toolbar-action-btn {
+    font-size: 11px !important;
+    padding: 5px 10px !important;
+  }
+}
+
+/* Viz cards — full width, reduced padding */
+@media (max-width: 768px) {
+  .viz-card {
+    padding: 14px !important;
+  }
+  .viz-card h3 {
+    font-size: 15px !important;
+  }
+  .viz-desc {
+    font-size: 12px !important;
+  }
+}
+
+/* Section dividers — already handled above but ensure consistency */
+@media (max-width: 500px) {
+  .section-divider-title {
+    font-size: 22px !important;
+  }
+  .section-divider {
+    margin: 24px 0 12px !important;
+  }
+}
+
+/* About page — responsive on mobile */
+@media (max-width: 768px) {
+  .about-page {
+    padding: 16px !important;
+  }
+  .about-hero-title {
+    font-size: 28px !important;
+  }
+}
+
+/* Highlights panel under timeline — compact on mobile */
+@media (max-width: 768px) {
+  .highlights-panel-item {
+    padding: 8px 10px !important;
+    font-size: 12px !important;
   }
 }

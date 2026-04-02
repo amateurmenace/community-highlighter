@@ -731,6 +731,38 @@ export async function apiBuildKnowledgeGraph(data) {
   return res.json();
 }
 
+// v8.3: Topic trends across KB meetings
+export async function apiTopicTrends() {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/topic_trends`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({})
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// v8.3: Export endpoints
+export async function apiExportSrt(data) {
+  const res = await fetch(`${BACKEND_URL}/api/export/srt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.blob();
+}
+
+export async function apiExportPdf(data) {
+  const res = await fetch(`${BACKEND_URL}/api/export/pdf`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.blob();
+}
+
 // ============================================================================
 // v6.1 NEW FEATURES: Scorecard, Share Moment, Accessibility
 // ============================================================================

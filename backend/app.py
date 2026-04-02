@@ -7056,6 +7056,216 @@ async def download_file(file_name: str):
 
 
 # ============================================================================
+# v8.3: EXPORT ENDPOINTS (SRT, PDF)
+# ============================================================================
+
+
+def _format_srt_time(seconds):
+    """Format seconds to SRT timestamp HH:MM:SS,mmm"""
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    ms = int((seconds % 1) * 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+@app.post("/api/export/srt")
+async def export_srt(req: Request):
+    """Export transcript as SRT subtitle file, optionally filtered to specific clips"""
+    data = await req.json()
+    video_id = data.get("videoId")
+    clips = data.get("clips")  # Optional: [{start, end}]
+
+    if not video_id:
+        raise HTTPException(400, "videoId required")
+
+    # Get transcript
+    transcript_data = STORED_TRANSCRIPTS.get(video_id)
+    if not transcript_data:
+        try:
+            transcript_data = ytt_api.fetch(video_id).to_raw_data()
+        except Exception as e:
+            raise HTTPException(404, f"Transcript not found for {video_id}: {e}")
+
+    # Build segments
+    segments = []
+    for item in transcript_data:
+        start = float(item.get("start", 0))
+        duration = float(item.get("duration", 0))
+        text = item.get("text", "").strip()
+        if not text:
+            continue
+        segments.append({"start": start, "end": start + duration, "text": text})
+
+    # Filter to clips if provided
+    if clips:
+        filtered = []
+        for clip in clips:
+            cs, ce = float(clip["start"]), float(clip["end"])
+            for seg in segments:
+                if seg["end"] > cs and seg["start"] < ce:
+                    filtered.append({
+                        "start": max(seg["start"] - cs, 0),
+                        "end": min(seg["end"] - cs, ce - cs),
+                        "text": seg["text"]
+                    })
+        segments = filtered
+
+    if not segments:
+        raise HTTPException(404, "No transcript segments found")
+
+    # Generate SRT content
+    srt_lines = []
+    for i, seg in enumerate(segments):
+        srt_lines.append(f"{i + 1}")
+        srt_lines.append(f"{_format_srt_time(seg['start'])} --> {_format_srt_time(seg['end'])}")
+        srt_lines.append(seg['text'])
+        srt_lines.append("")
+    srt_content = "\n".join(srt_lines)
+
+    # Write to cache and return
+    filename = f"{video_id}_subtitles.srt"
+    filepath = os.path.join(FILES_DIR, filename)
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(srt_content)
+
+    return FileResponse(filepath, filename=filename, media_type="application/x-subrip")
+
+
+@app.post("/api/export/pdf")
+async def export_pdf(req: Request):
+    """Generate a one-page PDF summary of a meeting"""
+    data = await req.json()
+    video_id = data.get("videoId", "")
+    title = data.get("title", "Meeting Summary")
+    date = data.get("date", "")
+    summary = data.get("summary", "")
+    highlights = data.get("highlights", [])  # [{text, timestamp_seconds}]
+    entities = data.get("entities", [])  # [{text, type, count}]
+
+    try:
+        from fpdf import FPDF
+    except ImportError:
+        raise HTTPException(503, "PDF generation not available — fpdf2 not installed")
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.add_page()
+
+    # Brand colors
+    brand_green = (30, 127, 99)  # #1e7f63
+    dark = (15, 23, 42)  # #0f172a
+    gray = (100, 116, 139)  # #64748b
+
+    # Header bar
+    pdf.set_fill_color(*brand_green)
+    pdf.rect(0, 0, 210, 12, 'F')
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_xy(10, 3)
+    pdf.cell(0, 6, "Community Highlighter", ln=True)
+
+    # Title
+    pdf.set_xy(10, 18)
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.set_text_color(*dark)
+    # Truncate title to fit
+    display_title = title[:80] + ('...' if len(title) > 80 else '')
+    pdf.cell(0, 10, display_title, ln=True)
+
+    # Date
+    if date:
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(*gray)
+        pdf.cell(0, 6, date, ln=True)
+
+    pdf.ln(4)
+
+    # Executive Brief
+    if summary:
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.set_text_color(*dark)
+        pdf.cell(0, 8, "Executive Brief", ln=True)
+        pdf.set_draw_color(*brand_green)
+        pdf.line(10, pdf.get_y(), 80, pdf.get_y())
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(51, 65, 85)  # #334155
+        # Handle encoding — fpdf2 uses latin-1 by default
+        safe_summary = summary.encode('latin-1', 'replace').decode('latin-1')
+        pdf.multi_cell(0, 5, safe_summary)
+        pdf.ln(4)
+
+    # Key Highlights
+    if highlights:
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.set_text_color(*dark)
+        pdf.cell(0, 8, "Key Highlights", ln=True)
+        pdf.set_draw_color(*brand_green)
+        pdf.line(10, pdf.get_y(), 80, pdf.get_y())
+        pdf.ln(2)
+        for i, h in enumerate(highlights[:7]):
+            if pdf.get_y() > 260:
+                break
+            text = h.get("text", "") if isinstance(h, dict) else str(h)
+            ts = h.get("timestamp_seconds") if isinstance(h, dict) else None
+            ts_str = ""
+            if ts is not None:
+                m, s = int(ts) // 60, int(ts) % 60
+                ts_str = f" [{m}:{s:02d}]"
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(*brand_green)
+            pdf.cell(6, 5, chr(8226))  # bullet
+            pdf.set_font("Helvetica", "", 9)
+            pdf.set_text_color(51, 65, 85)
+            safe_text = (text + ts_str).encode('latin-1', 'replace').decode('latin-1')
+            pdf.multi_cell(0, 5, safe_text)
+            pdf.ln(1)
+        pdf.ln(3)
+
+    # Top Entities
+    if entities:
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.set_text_color(*dark)
+        pdf.cell(0, 8, "Key Entities", ln=True)
+        pdf.set_draw_color(*brand_green)
+        pdf.line(10, pdf.get_y(), 80, pdf.get_y())
+        pdf.ln(2)
+        # Table header
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_fill_color(241, 245, 249)  # #f1f5f9
+        pdf.set_text_color(*dark)
+        pdf.cell(80, 6, "Entity", border=0, fill=True)
+        pdf.cell(40, 6, "Type", border=0, fill=True)
+        pdf.cell(30, 6, "Mentions", border=0, fill=True, ln=True)
+        # Table rows
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(51, 65, 85)
+        for e in entities[:10]:
+            if pdf.get_y() > 270:
+                break
+            name = (e.get("text", "") if isinstance(e, dict) else str(e)).encode('latin-1', 'replace').decode('latin-1')
+            etype = (e.get("type", "") if isinstance(e, dict) else "").encode('latin-1', 'replace').decode('latin-1')
+            count = str(e.get("count", "")) if isinstance(e, dict) else ""
+            pdf.cell(80, 5, name[:40])
+            pdf.cell(40, 5, etype)
+            pdf.cell(30, 5, count, ln=True)
+
+    # Footer
+    pdf.set_y(-15)
+    pdf.set_font("Helvetica", "I", 7)
+    pdf.set_text_color(*gray)
+    pdf.cell(0, 5, f"Generated by Community Highlighter  |  CC BY-SA 4.0  |  {video_id}", align='C')
+
+    # Save
+    filename = f"{video_id}_summary.pdf"
+    filepath = os.path.join(FILES_DIR, filename)
+    pdf.output(filepath)
+
+    return FileResponse(filepath, filename=filename, media_type="application/pdf")
+
+
+# ============================================================================
 #  LIVE CHAT ENDPOINTS (YouTube Live Streaming & Chat)
 # ============================================================================
 
@@ -8242,6 +8452,99 @@ async def get_knowledge_base_stats():
     except Exception as e:
         print(f" Stats error: {e}")
         return {"error": str(e), "total_meetings": 0, "total_documents": 0}
+
+
+# v8.3: Topic trends across meetings in knowledge base
+_topic_trends_cache = {"data": None, "timestamp": 0}
+
+@app.post("/api/knowledge/topic_trends")
+async def knowledge_topic_trends(req: Request):
+    """Analyze topic frequency across all meetings in the knowledge base over time"""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+
+    import time as _time
+    # Return cached result if fresh (5 min TTL)
+    if _topic_trends_cache["data"] and (_time.time() - _topic_trends_cache["timestamp"]) < 300:
+        return _topic_trends_cache["data"]
+
+    try:
+        collection_data = meetings_collection.get()
+        if not collection_data or not collection_data["metadatas"]:
+            return {"topics": [], "meetings": []}
+
+        # Group documents by meeting (video_id)
+        meeting_docs = {}
+        for doc, meta in zip(collection_data["documents"], collection_data["metadatas"]):
+            vid = meta.get("video_id", "")
+            if vid not in meeting_docs:
+                meeting_docs[vid] = {
+                    "title": meta.get("title", "Unknown"),
+                    "date": meta.get("date", ""),
+                    "text": ""
+                }
+            meeting_docs[vid]["text"] += " " + doc
+
+        if len(meeting_docs) < 2:
+            return {"topics": [], "meetings": [], "message": "Need at least 2 meetings for trends"}
+
+        # Civic stopwords (subset of wordfreq endpoint's list)
+        civic_stops = {
+            "the", "and", "for", "with", "that", "this", "from", "into", "your", "about",
+            "have", "will", "they", "them", "were", "has", "had", "not", "but", "are",
+            "our", "you", "its", "there", "here", "been", "was", "who", "what", "when",
+            "where", "how", "why", "which", "than", "then", "going", "think", "know",
+            "want", "need", "would", "could", "should", "also", "very", "much", "just",
+            "like", "really", "actually", "thank", "thanks", "please", "okay", "yes",
+            "yeah", "right", "sure", "well", "thing", "things", "something", "people",
+            "time", "today", "year", "years", "meeting", "meetings", "board", "council",
+            "committee", "motion", "vote", "agenda", "minutes", "chair", "member",
+            "members", "public", "comment", "comments", "item", "discussion",
+        }
+
+        # Extract top words per meeting
+        from collections import Counter
+        meeting_word_counts = {}
+        global_counts = Counter()
+        for vid, mdata in meeting_docs.items():
+            words = [w.lower() for w in mdata["text"].split() if len(w) > 3]
+            words = [w for w in words if w.isalpha() and w not in civic_stops]
+            counts = Counter(words)
+            meeting_word_counts[vid] = counts
+            global_counts.update(counts)
+
+        # Get top 8 topics across all meetings
+        top_topics = [word for word, _ in global_counts.most_common(8)]
+
+        # Build time-series data sorted by date
+        meetings_sorted = sorted(meeting_docs.items(), key=lambda x: x[1]["date"])
+        meetings_list = []
+        topic_series = {topic: [] for topic in top_topics}
+
+        for vid, mdata in meetings_sorted:
+            date_str = mdata["date"]
+            # Format YYYYMMDD → YYYY-MM-DD
+            if len(date_str) == 8:
+                date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+            meetings_list.append({"video_id": vid, "title": mdata["title"], "date": date_str})
+            counts = meeting_word_counts[vid]
+            for topic in top_topics:
+                topic_series[topic].append({
+                    "date": date_str,
+                    "count": counts.get(topic, 0),
+                    "video_id": vid
+                })
+
+        topics_out = [{"name": topic, "data": topic_series[topic]} for topic in top_topics]
+
+        result = {"topics": topics_out, "meetings": meetings_list}
+        _topic_trends_cache["data"] = result
+        _topic_trends_cache["timestamp"] = _time.time()
+        return result
+
+    except Exception as e:
+        print(f" Topic trends error: {e}")
+        raise HTTPException(500, str(e))
 
 
 # ============================================================================

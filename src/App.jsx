@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, Legend } from 'recharts';
 
 // v5.6: Desktop App Banner for cloud mode
 import { DesktopAppBanner, useCloudMode } from './DesktopAppBanner';
@@ -11,7 +11,7 @@ import {
   apiExtendedAnalytics,
   apiOptimizationStats, apiClearCache,
   apiChatWithMeeting, apiChatSuggestions,
-  apiAddToKnowledgeBase, apiSearchKnowledgeBase, apiFindRelated,
+  apiAddToKnowledgeBase, apiSearchKnowledgeBase, apiFindRelated, apiKnowledgeBaseStats,
   apiClipPreview, apiStartLiveMonitoring, apiVideoFormats, apiClipThumbnails,
   apiStoreTranscript,
   // v6.0: New feature API calls
@@ -19,7 +19,7 @@ import {
   apiCreateIssue, apiListIssues, apiAddMeetingToIssue, apiAutoTrackIssue, apiGetIssueTimeline,
   apiCompareMeetings,
   apiExplainJargon, apiGetJargonDictionary,
-  apiBuildKnowledgeGraph,
+  apiBuildKnowledgeGraph, apiTopicTrends, apiExportSrt, apiExportPdf,
   // v6.1: New feature API calls
   apiMeetingScorecard, apiShareMoment, apiGetSharedMoment,
   apiSimplifyText, apiTranslateSummary,
@@ -293,188 +293,50 @@ function useDebounce(value, delay = 220) {
   return v;
 }
 
-// Reel Player — cinematic playback mode for shared reel links (?mode=play)
-function ReelPlayer({ videoId, clips, showLabels = true, onOpenEditor }) {
-  const [currentClip, setCurrentClip] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isFading, setIsFading] = useState(false);
-  const [showEndCard, setShowEndCard] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const iframeRef = useRef(null);
-  const timerRef = useRef(null);
-  const progressRef = useRef(null);
-  const startTimeRef = useRef(null);
+// ReelPlayer extracted to src/ReelPlayer.jsx for code-splitting (loaded via main.jsx)
 
-  const totalDuration = clips.reduce((sum, c) => sum + (c.end - c.start), 0);
+// v8.3: Animated tagline cycling through app capabilities
+const TAGLINE_ACTIONS = [
+  { verb: 'Search', color: '#1e7f63' },
+  { verb: 'Highlight', color: '#f59e0b' },
+  { verb: 'Edit', color: '#8b5cf6' },
+  { verb: 'Analyze', color: '#3b82f6' },
+  { verb: 'Share', color: '#ec4899' },
+];
 
-  const playClip = useCallback((idx) => {
-    if (idx >= clips.length) {
-      setIsPlaying(false);
-      setShowEndCard(true);
-      if (progressRef.current) cancelAnimationFrame(progressRef.current);
-      return;
-    }
-    const clip = clips[idx];
-    setCurrentClip(idx);
-    setShowEndCard(false);
+const TAGLINE_MISSIONS = [
+  'Six-hour meetings shouldn\'t disappear into the void.',
+  'Every resident deserves to know what was decided and why.',
+  'Civic data belongs to everyone, not just those with time to watch.',
+  'Making public meetings work for the public.',
+  'The meetings happen. Now make them matter.',
+];
 
-    // Fade in
-    setIsFading(true);
-    setTimeout(() => {
-      if (iframeRef.current) {
-        iframeRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(clip.start)}&autoplay=1&controls=0&modestbranding=1&rel=0&showinfo=0&enablejsapi=1`;
-      }
-      setTimeout(() => setIsFading(false), 300);
-    }, 500);
-
-    const duration = (clip.end - clip.start) * 1000;
-    startTimeRef.current = Date.now();
-
-    // Update progress during playback
-    const updateProgress = () => {
-      const elapsed = Date.now() - startTimeRef.current;
-      const clipProgress = Math.min(elapsed / duration, 1);
-      // Calculate total progress
-      const priorDuration = clips.slice(0, idx).reduce((s, c) => s + (c.end - c.start), 0);
-      const currentElapsed = clipProgress * (clip.end - clip.start);
-      setProgress((priorDuration + currentElapsed) / totalDuration);
-      if (clipProgress < 1 && isPlaying) {
-        progressRef.current = requestAnimationFrame(updateProgress);
-      }
-    };
-    progressRef.current = requestAnimationFrame(updateProgress);
-
-    // Schedule next clip
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      playClip(idx + 1);
-    }, duration);
-  }, [clips, videoId, totalDuration, isPlaying]);
-
-  const handlePlay = () => {
-    setIsPlaying(true);
-    setShowEndCard(false);
-    setProgress(0);
-    playClip(0);
-  };
-
-  const handlePause = () => {
-    setIsPlaying(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    if (progressRef.current) cancelAnimationFrame(progressRef.current);
-    // Pause the iframe
-    if (iframeRef.current) {
-      iframeRef.current.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo' }), '*');
-    }
-  };
-
-  const handleSkip = (dir) => {
-    const next = currentClip + dir;
-    if (next < 0 || next >= clips.length) return;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    if (progressRef.current) cancelAnimationFrame(progressRef.current);
-    setIsPlaying(true);
-    playClip(next);
-  };
-
-  const handleReplay = () => {
-    setShowEndCard(false);
-    setProgress(0);
-    setCurrentClip(0);
-    setIsPlaying(true);
-    playClip(0);
-  };
+function AnimatedTagline() {
+  const [idx, setIdx] = useState(0);
+  const [fadeClass, setFadeClass] = useState('tagline-fade-in');
 
   useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      if (progressRef.current) cancelAnimationFrame(progressRef.current);
-    };
+    const interval = setInterval(() => {
+      setFadeClass('tagline-fade-out');
+      setTimeout(() => {
+        setIdx(i => (i + 1) % TAGLINE_MISSIONS.length);
+        setFadeClass('tagline-fade-in');
+      }, 400);
+    }, 5000);
+    return () => clearInterval(interval);
   }, []);
 
-  const editorUrl = `${window.location.origin}/?v=${videoId}&clips=${clips.map(c => `${Math.round(c.start)}-${Math.round(c.end)}`).join(',')}&titles=${encodeURIComponent(clips.map(c => c.label || '').join('|'))}`;
-
-  if (showEndCard) {
-    return (
-      <div className="reel-player-overlay">
-        <div className="reel-player-end-card">
-          <h2>Reel Complete</h2>
-          <p>{clips.length} clips from this civic meeting</p>
-          <div className="reel-end-actions">
-            <button className="reel-end-replay-btn" onClick={handleReplay}>Replay</button>
-            <button className="reel-end-editor-btn" onClick={() => { window.location.href = editorUrl; }}>Open in Editor</button>
-            <a className="reel-end-desktop-btn" href="https://github.com/amateurmenace/community-highlighter/releases/latest" target="_blank" rel="noopener noreferrer">
-              Download Desktop App
-            </a>
-          </div>
-          <p style={{ marginTop: 12, fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
-            Render as a real MP4 video with captions, transitions, and effects using the desktop app
-          </p>
-        </div>
-        <div className="reel-player-branding">Powered by Community Highlighter</div>
-      </div>
-    );
-  }
-
+  const action = TAGLINE_ACTIONS[idx % TAGLINE_ACTIONS.length];
   return (
-    <div className="reel-player-overlay">
-      <div className="reel-player-header">
-        <h2>{clips[currentClip]?.label || `Clip ${currentClip + 1}`}</h2>
-        <span className="reel-clip-counter">{currentClip + 1} / {clips.length}</span>
+    <div className="animated-tagline">
+      <div className={`animated-tagline-mission ${fadeClass}`}>
+        {TAGLINE_MISSIONS[idx]}
       </div>
-
-      <div className="reel-player-video-wrap">
-        <iframe
-          ref={iframeRef}
-          src={`https://www.youtube.com/embed/${videoId}?start=${Math.floor(clips[0]?.start || 0)}&enablejsapi=1&controls=0&modestbranding=1&rel=0`}
-          allow="autoplay; encrypted-media"
-          allowFullScreen
-        />
-        <div className={`reel-player-fade ${isFading ? 'active' : ''}`} />
-        {isPlaying && showLabels && clips[currentClip]?.label && (
-          <div className="reel-player-lower-third">
-            <div className="reel-player-lower-third-inner" key={currentClip}>
-              {clips[currentClip].label}
-            </div>
-          </div>
-        )}
+      <div className="animated-tagline-action">
+        <span className={`animated-tagline-verb ${fadeClass}`} style={{ color: action.color }}>{action.verb}</span>
+        <span className="animated-tagline-rest">{" your city's public meetings — entirely in your browser."}</span>
       </div>
-
-      <div className="reel-player-controls">
-        <button onClick={() => handleSkip(-1)} disabled={currentClip === 0}>Prev</button>
-        {isPlaying ? (
-          <button className="reel-play-btn" onClick={handlePause}>Pause</button>
-        ) : (
-          <button className="reel-play-btn" onClick={isPlaying ? handlePause : handlePlay}>
-            {progress > 0 ? 'Resume' : 'Play Reel'}
-          </button>
-        )}
-        <button onClick={() => handleSkip(1)} disabled={currentClip >= clips.length - 1}>Next</button>
-        <button onClick={() => { window.location.href = editorUrl; }} style={{ marginLeft: 8 }}>Open in Editor</button>
-      </div>
-
-      {/* Segmented progress bar */}
-      <div className="reel-player-progress">
-        {clips.map((clip, i) => {
-          const clipDuration = clip.end - clip.start;
-          const priorDuration = clips.slice(0, i).reduce((s, c) => s + (c.end - c.start), 0);
-          const clipStart = priorDuration / totalDuration;
-          const clipEnd = (priorDuration + clipDuration) / totalDuration;
-          let fillPct = 0;
-          if (progress >= clipEnd) fillPct = 100;
-          else if (progress > clipStart) fillPct = ((progress - clipStart) / (clipEnd - clipStart)) * 100;
-          return (
-            <div key={i} className={`reel-player-progress-seg ${i === currentClip ? 'active' : ''} ${fillPct >= 100 ? 'done' : ''}`}
-              style={{ flex: clipDuration }}
-              onClick={() => { if (timerRef.current) clearTimeout(timerRef.current); if (progressRef.current) cancelAnimationFrame(progressRef.current); setIsPlaying(true); playClip(i); }}
-            >
-              {fillPct > 0 && fillPct < 100 && <div className="reel-player-progress-fill" style={{ width: `${fillPct}%` }} />}
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="reel-player-branding">Powered by Community Highlighter</div>
     </div>
   );
 }
@@ -787,7 +649,7 @@ function SectionPreviews() {
           <span style={{ fontSize: 18 }}>{'\u2315'}</span>
         </div>
         <div className="section-preview-title">Search & Highlight</div>
-        <div className="section-preview-sub">Search any word across the full transcript. Click words in the word cloud to find every mention.</div>
+        <div className="section-preview-sub">Search any word or phrase across any video on YouTube. Discover patterns, see what was really talked about at a meeting, and collect video highlights you want others to see.</div>
         <div className="section-preview-mockup" style={{ background: '#0f172a', borderRadius: 8, padding: 16, marginTop: 12 }}>
           {/* Word cloud skeleton */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', minHeight: 80 }}>
@@ -809,7 +671,7 @@ function SectionPreviews() {
           <span style={{ fontSize: 16 }}>{'\u25B6'}</span>
         </div>
         <div className="section-preview-title">Edit & Export</div>
-        <div className="section-preview-sub">AI selects the best moments and loads them into a video editor. Trim, reorder, and export reels.</div>
+        <div className="section-preview-sub">Use the innovative editor to actually pull out clips from the video straight into a new timeline for a shareable highlight reel right in your web browser. Or have AI analyze and build a reel for you, and edit, add effects, download, and more.</div>
         <div className="section-preview-mockup" style={{ background: '#0f1419', borderRadius: 8, padding: 16, marginTop: 12 }}>
           {/* Video player skeleton */}
           <div className="shimmer-block" style={{ width: '100%', height: 60, borderRadius: 4, marginBottom: 10 }} />
@@ -828,7 +690,7 @@ function SectionPreviews() {
           <span style={{ fontSize: 18 }}>{'\u2261'}</span>
         </div>
         <div className="section-preview-title">Analyze & Discover</div>
-        <div className="section-preview-sub">Entities, topics, participation, disagreements, and cross-references in one view.</div>
+        <div className="section-preview-sub">Discover patterns and insights with powerful, playful video content analytics. Entities, topics, participation, disagreements, and cross-references in one view. Everything is exportable, translatable, sharable. Always free, always open source.</div>
         <div className="section-preview-mockup" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 16, marginTop: 12 }}>
           {/* Chart skeleton */}
           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', height: 60, marginBottom: 10 }}>
@@ -1844,6 +1706,259 @@ function KnowledgeBasePanel({ videoId, videoTitle, fullText, entities }) {
       {!kbStats && (
         <div style={{ fontSize: 12, color: '#64748b', padding: '12px', background: '#1e293b', borderRadius: 8 }}>
           Knowledge Base requires ChromaDB. If not available, the backend will indicate this.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// v8.3: Topic trends across meetings in knowledge base
+const TREND_COLORS = ['#4ade80', '#3b82f6', '#f59e0b', '#ef4444', '#a78bfa', '#ec4899', '#14b8a6', '#f97316'];
+
+function TopicTrendsChart() {
+  const [trendsData, setTrendsData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [kbMeetingCount, setKbMeetingCount] = useState(0);
+
+  useEffect(() => {
+    apiKnowledgeBaseStats().then(s => setKbMeetingCount(s.total_meetings || 0)).catch(() => {});
+  }, []);
+
+  const canShow = kbMeetingCount >= 2;
+
+  const loadTrends = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await apiTopicTrends();
+      setTrendsData(data);
+    } catch (err) {
+      setError(err.message || 'Failed to load trends');
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (canShow) loadTrends();
+  }, [canShow, loadTrends]);
+
+  if (!canShow) return null;
+
+  // Transform data for recharts: [{date, topic1: count, topic2: count, ...}]
+  const chartData = useMemo(() => {
+    if (!trendsData || !trendsData.topics || trendsData.topics.length === 0) return [];
+    const meetings = trendsData.meetings || [];
+    return meetings.map((m, i) => {
+      const point = { date: m.date || `Meeting ${i + 1}`, title: m.title };
+      trendsData.topics.forEach(topic => {
+        point[topic.name] = topic.data[i]?.count || 0;
+      });
+      return point;
+    });
+  }, [trendsData]);
+
+  return (
+    <div className="viz-card" style={{ gridColumn: '1 / -1', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155' }}>
+      <h3 style={{ color: '#f1f5f9' }}>Topic Trends Across Meetings</h3>
+      <p className="viz-desc" style={{ color: '#94a3b8' }}>
+        Track how topics rise and fall across meetings in the knowledge base over time.
+      </p>
+      {loading && <div style={{ fontSize: 12, color: '#94a3b8', padding: 12 }}>Loading trends...</div>}
+      {error && <div style={{ fontSize: 12, color: '#ef4444', padding: 12 }}>{error}</div>}
+      {chartData.length > 0 && (
+        <ResponsiveContainer width="100%" height={300}>
+          <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+            <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} />
+            <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} axisLine={false} />
+            <Tooltip
+              contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, color: '#e2e8f0', fontSize: 12 }}
+              labelFormatter={(label, payload) => payload?.[0]?.payload?.title || label}
+            />
+            <Legend wrapperStyle={{ fontSize: 11, color: '#94a3b8' }} />
+            {trendsData.topics.map((topic, i) => (
+              <Line
+                key={topic.name}
+                type="monotone"
+                dataKey={topic.name}
+                stroke={TREND_COLORS[i % TREND_COLORS.length]}
+                strokeWidth={2}
+                dot={{ r: 4, fill: TREND_COLORS[i % TREND_COLORS.length] }}
+                activeDot={{ r: 6 }}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+      {!loading && !error && chartData.length === 0 && trendsData && (
+        <div style={{ fontSize: 12, color: '#64748b', padding: 12 }}>
+          Add more meetings to the knowledge base to see topic trends.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// v8.3: Entity network graph showing shared entities across meetings
+function EntityNetworkGraph() {
+  const [graphData, setGraphData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [hoveredNode, setHoveredNode] = useState(null);
+  const [kbMeetingCount, setKbMeetingCount] = useState(0);
+
+  useEffect(() => {
+    apiKnowledgeBaseStats().then(s => setKbMeetingCount(s.total_meetings || 0)).catch(() => {});
+  }, []);
+
+  const canShow = kbMeetingCount >= 2;
+
+  useEffect(() => {
+    if (!canShow) return;
+    setLoading(true);
+    // We need meeting data to call the graph endpoint — use KB search to get all meetings
+    apiKnowledgeBaseStats().then(async () => {
+      // Search for common civic terms to get all meetings from KB
+      try {
+        const searchRes = await apiSearchKnowledgeBase({ query: "meeting discussion", limit: 50 });
+        const results = searchRes.results || [];
+        // Deduplicate by video_id
+        const seen = new Set();
+        const meetings = [];
+        for (const r of results) {
+          if (!seen.has(r.video_id)) {
+            seen.add(r.video_id);
+            meetings.push({ video_id: r.video_id, title: r.title || r.video_id, entities: [] });
+          }
+        }
+        // For now, build the graph with meeting titles as entities (since we don't have per-meeting entity lists stored in KB)
+        // The graph endpoint expects meetings_data with entities arrays
+        if (meetings.length >= 2) {
+          const graphRes = await apiBuildKnowledgeGraph({ meetings_data: meetings });
+          setGraphData(graphRes);
+        }
+      } catch (err) {
+        console.error('Entity network error:', err);
+      }
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [canShow]);
+
+  if (!canShow) return null;
+
+  // Simple radial layout
+  const renderGraph = useMemo(() => {
+    if (!graphData || !graphData.nodes || graphData.nodes.length === 0) return null;
+    const W = 600, H = 400, CX = W / 2, CY = H / 2;
+    const meetingNodes = graphData.nodes.filter(n => n.type === 'meeting');
+    const entityNodes = graphData.nodes.filter(n => n.type !== 'meeting').slice(0, 30);
+
+    // Position meetings in inner ring
+    const innerR = Math.min(W, H) * 0.2;
+    const outerR = Math.min(W, H) * 0.38;
+    const positioned = {};
+
+    meetingNodes.forEach((n, i) => {
+      const angle = (2 * Math.PI * i) / meetingNodes.length - Math.PI / 2;
+      positioned[n.id] = { x: CX + innerR * Math.cos(angle), y: CY + innerR * Math.sin(angle), ...n };
+    });
+
+    entityNodes.forEach((n, i) => {
+      const angle = (2 * Math.PI * i) / entityNodes.length - Math.PI / 2;
+      positioned[n.id] = { x: CX + outerR * Math.cos(angle), y: CY + outerR * Math.sin(angle), ...n };
+    });
+
+    // Edges
+    const sharedSet = new Set(graphData.shared_entities?.map(e => `entity_${e.name.toLowerCase().replace(/ /g, '_')}`) || []);
+
+    return (
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxHeight: 400 }}>
+        {/* Edges */}
+        {graphData.edges.map((edge, i) => {
+          const s = positioned[edge.source];
+          const t = positioned[edge.target];
+          if (!s || !t) return null;
+          const isShared = sharedSet.has(edge.target) || sharedSet.has(edge.source);
+          return (
+            <line key={i} x1={s.x} y1={s.y} x2={t.x} y2={t.y}
+              stroke={isShared ? '#4ade80' : '#334155'}
+              strokeWidth={isShared ? 1.5 : 0.5}
+              opacity={isShared ? 0.6 : 0.2}
+            />
+          );
+        })}
+        {/* Entity nodes (outer) */}
+        {entityNodes.map(n => {
+          const pos = positioned[n.id];
+          if (!pos) return null;
+          const isShared = sharedSet.has(n.id);
+          const isHovered = hoveredNode === n.id;
+          return (
+            <g key={n.id}
+              onMouseEnter={() => setHoveredNode(n.id)}
+              onMouseLeave={() => setHoveredNode(null)}
+              style={{ cursor: 'pointer' }}
+            >
+              <circle cx={pos.x} cy={pos.y} r={isShared ? 8 : 5}
+                fill={isShared ? '#3b82f6' : '#475569'}
+                stroke={isHovered ? '#fff' : 'none'}
+                strokeWidth={1.5}
+              />
+              {(isHovered || isShared) && (
+                <text x={pos.x} y={pos.y - 12} textAnchor="middle"
+                  fill="#e2e8f0" fontSize={isHovered ? 11 : 9} fontWeight={isHovered ? 600 : 400}>
+                  {n.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
+        {/* Meeting nodes (inner) */}
+        {meetingNodes.map(n => {
+          const pos = positioned[n.id];
+          if (!pos) return null;
+          const isHovered = hoveredNode === n.id;
+          return (
+            <g key={n.id}
+              onMouseEnter={() => setHoveredNode(n.id)}
+              onMouseLeave={() => setHoveredNode(null)}
+              style={{ cursor: 'pointer' }}
+            >
+              <circle cx={pos.x} cy={pos.y} r={12}
+                fill="#1e7f63"
+                stroke={isHovered ? '#4ade80' : '#22c55e'}
+                strokeWidth={isHovered ? 2.5 : 1.5}
+              />
+              <text x={pos.x} y={pos.y + (isHovered ? -18 : 22)} textAnchor="middle"
+                fill="#e2e8f0" fontSize={10} fontWeight={600}>
+                {n.label.length > 25 ? n.label.slice(0, 25) + '...' : n.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    );
+  }, [graphData, hoveredNode]);
+
+  return (
+    <div className="viz-card" style={{ gridColumn: '1 / -1', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155' }}>
+      <h3 style={{ color: '#f1f5f9' }}>Entity Network Across Meetings</h3>
+      <p className="viz-desc" style={{ color: '#94a3b8' }}>
+        Shared entities connecting different meetings. Green nodes are meetings, blue nodes are entities mentioned in multiple meetings.
+      </p>
+      {loading && <div style={{ fontSize: 12, color: '#94a3b8', padding: 12 }}>Building network graph...</div>}
+      {renderGraph}
+      {graphData?.shared_entities?.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+          {graphData.shared_entities.slice(0, 10).map((e, i) => (
+            <span key={i} style={{ padding: '3px 10px', background: '#1e293b', borderRadius: 6, fontSize: 11, color: '#94a3b8', border: '1px solid #334155' }}>
+              {e.name} ({e.meeting_count} meetings)
+            </span>
+          ))}
+        </div>
+      )}
+      {!loading && !graphData && (
+        <div style={{ fontSize: 12, color: '#64748b', padding: 12 }}>
+          Add meetings with entity data to see the network graph.
         </div>
       )}
     </div>
@@ -6133,8 +6248,8 @@ function LoadingCard({ title, message, percent, bytesLoaded, bytesTotal, startTi
 
 const translations = {
   en: {
-    appSubtitle: "An app made by folks in community media that turns long public meetings into useful moments in minutes.",
-    appDescription: "Tap into one of the largest sources of civic data throughout the US: local government and community meetings. No longer trapped by the inaccessible timeframes of 6 hours on a Tuesday night, or hidden within the unsearchable black box of closed video formats, Community Highlighter is an evolving suite of tools that gives people the power to do things with meetings.",
+    appSubtitle: "Turn long public meetings into useful moments in minutes. A free, open source app made by folks in community media.",
+    appDescription: null, // Replaced by AnimatedTagline component
     siteLanguage: "Site language:",
     step1: "Paste a YouTube link to analyze a meeting.",
     step2: "Search the video for anything! Or click on a word below to see all of its mentions.",
@@ -8171,8 +8286,8 @@ export default function App() {
       .catch(() => {}); // Silently ignore — stats are optional
   }, []);
 
-  // Import reel from URL params (?v=videoId&clips=start-end,start-end&titles=t1|t2&mode=play|edit)
-  const [reelPlayerMode, setReelPlayerMode] = useState(null); // { videoId, clips } when mode=play
+  // Import reel from URL params (?v=videoId&clips=start-end,start-end&titles=t1|t2)
+  // Note: mode=play is handled in main.jsx (code-split ReelPlayer) — never reaches App
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     // Direct link to About page: ?page=about
@@ -8182,7 +8297,6 @@ export default function App() {
     }
     const urlVid = params.get('v');
     const urlClips = params.get('clips');
-    const mode = params.get('mode');
     if (urlVid && urlClips) {
       const titles = (params.get('titles') || '').split('|');
       const clips = urlClips.split(',').map((seg, i) => {
@@ -8191,18 +8305,12 @@ export default function App() {
         return { start: s, end: e, label: titles[i] || `Clip ${i + 1}`, highlight: titles[i] || '' };
       }).filter(Boolean);
       if (clips.length > 0) {
-        if (mode === 'play') {
-          // Reel Player mode — cinematic playback
-          const showLabels = params.get('labels') !== 'off';
-          setReelPlayerMode({ videoId: urlVid, clips, showLabels });
-          return; // Don't load editor
-        }
         setUrl(`https://www.youtube.com/watch?v=${urlVid}`);
         // Small delay to let the component mount, then load
         setTimeout(() => {
           setVideoId(urlVid);
           updateClipBasket(clips);
-          addToast(`🔗 Loaded shared reel with ${clips.length} clips`);
+          addToast(`Loaded shared reel with ${clips.length} clips`);
         }, 500);
         // Clean URL params without reload
         window.history.replaceState({}, '', window.location.pathname);
@@ -9239,18 +9347,6 @@ export default function App() {
     return <AboutPage onClose={() => setShowAboutPage(false)} />;
   }
 
-  // Reel Player mode — render cinematic player instead of full app
-  if (reelPlayerMode) {
-    return (
-      <ReelPlayer
-        videoId={reelPlayerMode.videoId}
-        clips={reelPlayerMode.clips}
-        showLabels={reelPlayerMode.showLabels !== false}
-        onOpenEditor={() => setReelPlayerMode(null)}
-      />
-    );
-  }
-
   return (
     <>
       {/* v5.7: Full-width Investigate Modal */}
@@ -9450,7 +9546,7 @@ export default function App() {
               <div className="subtitle-large">{t.appSubtitle}</div>
               <button onClick={() => setShowAboutPage(true)} style={{
                 background: 'none', border: '2px solid #1e7f63', color: '#1e7f63', fontSize: '15px',
-                fontWeight: 700, cursor: 'pointer', padding: '8px 18px', borderRadius: '8px',
+                fontWeight: 700, cursor: 'pointer', padding: '10px 24px', borderRadius: '10px',
                 letterSpacing: '-0.2px', transition: 'all 0.2s',
               }}
               onMouseEnter={(e) => { e.currentTarget.style.background = '#1e7f63'; e.currentTarget.style.color = 'white'; }}
@@ -9468,7 +9564,7 @@ export default function App() {
                     addToast(`Switched to ${newMode ? 'Cloud' : 'Desktop'} mode — reloading...`);
                     setTimeout(() => window.location.reload(), 500);
                   }}
-                  style={{ padding: '4px 10px', fontSize: '10px', fontWeight: 600, background: isCloudMode ? '#0ea5e9' : '#22c55e', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                  style={{ padding: '3px 8px', fontSize: '9px', fontWeight: 600, background: isCloudMode ? '#0ea5e9' : '#94a3b8', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', letterSpacing: '0.03em', textTransform: 'uppercase' }}
                   title="Toggle between cloud and desktop mode for testing"
                 >
                   {isCloudMode ? 'CLOUD' : 'DESKTOP'} mode
@@ -9484,17 +9580,14 @@ export default function App() {
                   <img src="/secondary.png" alt="Brookline Interactive Group" className="secondary-logo-large" />
                 </a>
                 <a href="https://weirdmachine.org" target="_blank" rel="noopener noreferrer">
-                  <img src="/weirdmachine.png" alt="Weird Machine" style={{ height: '40px', opacity: 0.9 }} />
+                  <img src="/weirdmachine.png" alt="Weird Machine" style={{ height: '28px', opacity: 0.85 }} />
                 </a>
               </div>
             </div>
           </div>
         </div>
       </header>
-      <div className="subtitle-mobile">{t.appSubtitle}</div>
-      {!videoId && t.appDescription && (
-        <div style={{ maxWidth: '800px', margin: '0 auto', padding: '12px 24px 0', fontSize: '13.5px', color: '#64748b', lineHeight: 1.7, textAlign: 'center' }}>{t.appDescription}</div>
-      )}
+      {videoId && <div className="subtitle-mobile">{t.appSubtitle}</div>}
 
       <main className={`container ${videoId ? 'desktop-editor-mode' : ''}`} style={{ paddingTop: 32, paddingBottom: 100 }}>
         {processStatus.active && (
@@ -9524,6 +9617,9 @@ export default function App() {
         )}
 
         <section className="card section animate-fadeIn">
+          {/* Animated tagline — cycles through app capabilities */}
+          {!videoId && <AnimatedTagline />}
+
           {/* Section previews at top of landing page */}
           {!videoId && <SectionPreviews />}
 
@@ -9921,7 +10017,7 @@ export default function App() {
 
         {/* Section Navigation Bar */}
         {videoId && fullText && (
-          <div style={{
+          <div className="section-nav-bar" style={{
             display: 'flex', justifyContent: 'center', gap: 8, padding: '16px 0 8px',
           }}>
             {[
@@ -10526,6 +10622,13 @@ export default function App() {
                           <button className="download-center-btn" style={{ color: '#6366f1', fontWeight: 700 }} onClick={translateFullTranscriptBrowser} title="Free, handles full transcript length — copies text to clipboard and opens Google Translate">
                             Google Translate (Free, Full Text)
                           </button>
+                          <button className="download-center-btn" onClick={async () => {
+                            try {
+                              const blob = await apiExportSrt({ videoId });
+                              const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `subtitles-${videoId}.srt`; a.click(); URL.revokeObjectURL(url);
+                              addToast('SRT subtitles downloaded');
+                            } catch (e) { addToast('SRT export failed: ' + e.message); }
+                          }}>SRT Subtitles (.srt)</button>
                         </div>
                       </div>
 
@@ -10539,6 +10642,21 @@ export default function App() {
                               const blob = new Blob([content], { type: 'text/markdown' });
                               const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `report-${videoId}.md`; a.click();
                             }}>Full Report (.md)</button>
+                            <button className="download-center-btn" onClick={async () => {
+                              try {
+                                const pdfData = {
+                                  videoId,
+                                  title: videoTitle || 'Meeting Summary',
+                                  date: videoTitle || '',
+                                  summary: summary.para || '',
+                                  highlights: (highlightsWithQuotes || []).slice(0, 7).map(h => ({ text: h.highlight || h.text || '', timestamp_seconds: h.timestamp })),
+                                  entities: (entities || []).slice(0, 10)
+                                };
+                                const blob = await apiExportPdf(pdfData);
+                                const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `summary-${videoId}.pdf`; a.click(); URL.revokeObjectURL(url);
+                                addToast('PDF summary downloaded');
+                              } catch (e) { addToast('PDF export failed: ' + e.message); }
+                            }}>PDF Summary (.pdf)</button>
                           </div>
                         </div>
                       )}
@@ -12425,6 +12543,8 @@ export default function App() {
                 fullText={fullText}
                 entities={entities}
               />
+              <TopicTrendsChart />
+              <EntityNetworkGraph />
 
               {/* Issue Tracker & Meeting Comparison */}
               <CrossMeetingAnalysisPanel
