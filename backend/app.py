@@ -4497,17 +4497,27 @@ def create_chapter_markers(clips, output_path):
         return False
 
 
+def _job_log(job, msg):
+    """Append a log line to the job's logs array (max 200 lines, FIFO)."""
+    if "logs" not in job:
+        job["logs"] = []
+    job["logs"].append(msg)
+    if len(job["logs"]) > 200:
+        job["logs"] = job["logs"][-200:]
+
+
 def run_ffmpeg_with_progress(cmd, job, clip_index, total_clips, expected_duration,
                               base_percent=30, percent_range=50):
     """Run ffmpeg with real-time progress tracking via -progress pipe:1.
     Updates job dict with smooth progress instead of coarse jumps."""
     # Insert -progress pipe:1 before the output file (last 2 args: output, -y)
-    # Find the output file position (last arg before -y, or last arg)
     cmd_with_progress = list(cmd)
     if cmd_with_progress[-1] == '-y':
         cmd_with_progress = cmd_with_progress[:-2] + ['-progress', 'pipe:1'] + cmd_with_progress[-2:]
     else:
         cmd_with_progress = cmd_with_progress[:-1] + ['-progress', 'pipe:1'] + cmd_with_progress[-1:]
+
+    _job_log(job, f"[ffmpeg] Encoding clip {clip_index + 1}/{total_clips} ({expected_duration:.1f}s)")
 
     try:
         proc = subprocess.Popen(cmd_with_progress, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -4527,14 +4537,25 @@ def run_ffmpeg_with_progress(cmd, job, clip_index, total_clips, expected_duratio
                     job["message"] = f"Rendering clip {clip_index + 1}/{total_clips} ({int(clip_progress * 100)}%)"
                 except (ValueError, ZeroDivisionError):
                     pass
+            elif line.startswith('bitrate=') or line.startswith('total_size=') or line.startswith('speed='):
+                _job_log(job, f"[ffmpeg] {line}")
 
         proc.wait(timeout=600)
         stderr_out = proc.stderr.read()
+        # Capture key stderr lines (codec info, stream mapping)
+        if stderr_out:
+            for sline in stderr_out.split('\n'):
+                sline = sline.strip()
+                if sline and any(kw in sline.lower() for kw in ['stream #', 'video:', 'audio:', 'duration:', 'encoder', 'output #', 'error', 'warning']):
+                    _job_log(job, f"[ffmpeg] {sline[:200]}")
+        _job_log(job, f"[ffmpeg] Clip {clip_index + 1}/{total_clips} done (exit code {proc.returncode})")
         return proc.returncode, stderr_out
     except subprocess.TimeoutExpired:
         proc.kill()
+        _job_log(job, f"[ffmpeg] ERROR: Clip {clip_index + 1} timed out after 600s")
         return -1, "FFmpeg timed out"
     except Exception as e:
+        _job_log(job, f"[ffmpeg] ERROR: {str(e)}")
         return -1, str(e)
 
 
@@ -4907,6 +4928,13 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
     job["status"] = "running"
     job["percent"] = 5
     job["message"] = "Preparing video download..."
+    job["logs"] = []
+    # Estimate total time: ~10s per clip for download+encode + 15s overhead
+    est_seconds = len(clips) * 10 + 15
+    job["estimated_seconds"] = est_seconds
+    _job_log(job, f"[job] Starting render: {len(clips)} clips, format={format_type}")
+    _job_log(job, f"[job] Estimated time: ~{est_seconds}s ({est_seconds // 60}m {est_seconds % 60}s)")
+    _job_log(job, f"[job] Video ID: {vid}")
     
     # Default video options
     opts = video_options or {}
@@ -5348,6 +5376,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
         if use_segment_download:
             print(f"[simple_job] Pre-downloading segments in parallel...")
             job["message"] = f"Downloading {len(merged_groups)} segment group(s)..."
+            _job_log(job, f"[yt-dlp] Downloading {len(merged_groups)} segment groups from YouTube...")
 
             def _download_group(group):
                 """Download a merged segment group, return {clip_idx: (path, padding)}."""
@@ -5374,6 +5403,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     done_count += 1
                     job["percent"] = 10 + int(20 * done_count / len(merged_groups))
                     job["message"] = f"Downloaded {done_count}/{len(merged_groups)} segments"
+                    _job_log(job, f"[yt-dlp] Segment {done_count}/{len(merged_groups)} downloaded")
 
             print(f"[simple_job] Pre-downloaded {len(pre_downloaded)}/{len(clips)} clip segments")
         else:
@@ -5854,13 +5884,15 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
         if os.path.exists(output):
             job["percent"] = 85
             job["message"] = "Applying finishing touches..."
-            
+            _job_log(job, "[post] Applying finishing touches (audio normalize, music, watermark)...")
+
             final_output = output
             temp_count = 0
             
             # Audio normalization (default ON) - must run before music mixing
             if do_normalize_audio:
                 job["message"] = "Normalizing audio levels..."
+                _job_log(job, "[post] Normalizing audio (EBU R128, I=-16, TP=-1.5, LRA=11)")
                 print(f"[postproc] Normalizing audio (EBU R128, -16 LUFS)...")
                 temp_output = os.path.join(work, f"normalized_{temp_count}.mp4")
                 if normalize_audio(final_output, temp_output):
@@ -5873,6 +5905,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
             # Add background music if requested (works for ALL formats)
             if do_background_music:
                 job["message"] = "Adding background music..."
+                _job_log(job, "[post] Mixing background music with sidechaincompress ducking")
                 print(f"[postproc] Adding background music to {format_type} video...")
                 temp_output = os.path.join(work, f"with_music_{temp_count}.mp4")
                 if add_upbeat_background_music(final_output, temp_output, music_volume=0.5):
@@ -5903,6 +5936,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
             print(f"[simple_job] SUCCESS! Output: {output} ({file_size / 1024 / 1024:.1f} MB)")
             job["status"] = "done"
             job["message"] = "Ready to download!"
+            _job_log(job, f"[job] Render complete! Output ready for download.")
             job["file"] = f"/files/{os.path.basename(output)}"
             job["zip"] = f"/files/{os.path.basename(output)}"
             job["percent"] = 100

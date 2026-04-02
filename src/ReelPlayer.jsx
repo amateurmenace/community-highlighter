@@ -6,12 +6,35 @@ export default function ReelPlayer({ videoId, clips, showLabels = true, onOpenEd
   const [isFading, setIsFading] = useState(false);
   const [showEndCard, setShowEndCard] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [copied, setCopied] = useState(false);
   const iframeRef = useRef(null);
   const timerRef = useRef(null);
   const progressRef = useRef(null);
   const startTimeRef = useRef(null);
 
   const totalDuration = clips.reduce((sum, c) => sum + (c.end - c.start), 0);
+  const shareUrl = window.location.href;
+
+  const copyShareLink = () => {
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {
+      prompt('Copy this reel link:', shareUrl);
+    });
+  };
+
+  const shareToSocial = (platform) => {
+    const text = encodeURIComponent('Check out this civic meeting highlight reel');
+    const url = encodeURIComponent(shareUrl);
+    const urls = {
+      twitter: `https://twitter.com/intent/tweet?url=${url}&text=${text}`,
+      facebook: `https://www.facebook.com/sharer/sharer.php?u=${url}`,
+      linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${url}`,
+      email: `mailto:?subject=${text}&body=${url}`,
+    };
+    window.open(urls[platform], '_blank', 'width=600,height=400');
+  };
 
   const playClip = useCallback((idx) => {
     if (idx >= clips.length) {
@@ -111,7 +134,45 @@ export default function ReelPlayer({ videoId, clips, showLabels = true, onOpenEd
               Download Desktop App
             </a>
           </div>
-          <p style={{ marginTop: 12, fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
+
+          {/* Share this reel */}
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+            <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', marginBottom: 10 }}>Share this reel</p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button onClick={copyShareLink} style={{
+                padding: '7px 14px', fontSize: 12, fontWeight: 600, border: '1px solid rgba(255,255,255,0.2)',
+                background: copied ? '#22c55e' : 'rgba(255,255,255,0.08)', color: 'white', borderRadius: 6, cursor: 'pointer', transition: 'all 0.2s'
+              }}>
+                {copied ? 'Copied!' : 'Copy Link'}
+              </button>
+              <button onClick={() => shareToSocial('twitter')} style={{
+                padding: '7px 14px', fontSize: 12, fontWeight: 600, border: '1px solid rgba(255,255,255,0.2)',
+                background: 'rgba(255,255,255,0.08)', color: 'white', borderRadius: 6, cursor: 'pointer'
+              }}>
+                X / Twitter
+              </button>
+              <button onClick={() => shareToSocial('facebook')} style={{
+                padding: '7px 14px', fontSize: 12, fontWeight: 600, border: '1px solid rgba(255,255,255,0.2)',
+                background: 'rgba(255,255,255,0.08)', color: 'white', borderRadius: 6, cursor: 'pointer'
+              }}>
+                Facebook
+              </button>
+              <button onClick={() => shareToSocial('linkedin')} style={{
+                padding: '7px 14px', fontSize: 12, fontWeight: 600, border: '1px solid rgba(255,255,255,0.2)',
+                background: 'rgba(255,255,255,0.08)', color: 'white', borderRadius: 6, cursor: 'pointer'
+              }}>
+                LinkedIn
+              </button>
+              <button onClick={() => shareToSocial('email')} style={{
+                padding: '7px 14px', fontSize: 12, fontWeight: 600, border: '1px solid rgba(255,255,255,0.2)',
+                background: 'rgba(255,255,255,0.08)', color: 'white', borderRadius: 6, cursor: 'pointer'
+              }}>
+                Email
+              </button>
+            </div>
+          </div>
+
+          <p style={{ marginTop: 14, fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>
             Render as a real MP4 video with captions, transitions, and effects using the desktop app
           </p>
         </div>
@@ -154,7 +215,10 @@ export default function ReelPlayer({ videoId, clips, showLabels = true, onOpenEd
           </button>
         )}
         <button onClick={() => handleSkip(1)} disabled={currentClip >= clips.length - 1}>Next</button>
-        <button onClick={() => { window.location.href = editorUrl; }} style={{ marginLeft: 8 }}>Open in Editor</button>
+        <button onClick={copyShareLink} style={{ marginLeft: 8, background: copied ? '#22c55e' : undefined, transition: 'background 0.2s' }}>
+          {copied ? 'Copied!' : 'Share'}
+        </button>
+        <button onClick={() => { window.location.href = editorUrl; }} style={{ marginLeft: 4 }}>Open in Editor</button>
       </div>
 
       {/* Segmented progress bar */}

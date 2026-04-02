@@ -133,10 +133,12 @@ When a shared reel link is opened with `?mode=play`, `main.jsx` detects this and
 - `showLabels` prop passed from URL parsing — respects editor's Titles ON/OFF setting
 - Segmented progress bar showing position across all clips (clickable segments)
 - Play/pause, skip forward/back, clip counter ("2 / 5")
-- End card with Replay, Open in Editor, Download Desktop App CTAs
+- End card with Replay, Open in Editor, Download Desktop App CTAs + **social share buttons** (Copy Link, X/Twitter, Facebook, LinkedIn, Email)
+- **Share button** in controls bar (copies current URL to clipboard with "Copied!" feedback)
 - "Powered by Community Highlighter" branding
 - Zero server cost — entirely client-side iframe orchestration
-- **"View Your Edited Reel"** button in editor toolbar opens reel in new tab (alongside Share Reel Link)
+- **"View Your Edited Reel"** button in editor toolbar opens reel in new tab — **glows teal** when clips exist in cloud mode
+- **Social media vertical CTA** below AI Highlight Reel button: cloud mode links to GitHub releases ("Download desktop app to reformat to vertical for social media"), desktop mode triggers `buildReel('social')` for 9:16 vertical render
 
 ## Transcript Upload
 
@@ -197,6 +199,8 @@ When a shared reel link is opened with `?mode=play`, `main.jsx` detects this and
 - **Intro/outro slides**: Animated title cards with brand-colored (#1e7f63) background, wired into render pipeline
 - **Music ducking**: `sidechaincompress` filter auto-lowers background music during speech
 - **Progress tracking**: `run_ffmpeg_with_progress()` provides real-time per-clip percentage updates via `-progress pipe:1`
+- **Terminal log output** (v8.3): `_job_log(job, msg)` captures processing logs into `job["logs"]` array (max 200 lines). Logs include ffmpeg codec/stream info, yt-dlp download progress, post-processing stages. Sent via WebSocket every 500ms. Frontend renders in a dark monospace terminal panel inside `ProgressIndicator` (auto-scrolls, color-coded: red=error, green=done, blue=yt-dlp)
+- **Time estimation**: `job["estimated_seconds"]` calculated as `clips * 10 + 15`. Displayed in ProgressIndicator as "Estimated time: ~Ns" or "~N min"
 
 ### AI Summary Pipeline (Two-Tier + Streaming)
 - **Executive Brief** (auto-loads): 4-5 sentence summary with clickable timestamps, uses user's selected model, 1000 max tokens, cached by `(video_id, strategy_ts, model)` via `ai_cache.py`

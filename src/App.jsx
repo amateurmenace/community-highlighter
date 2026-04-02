@@ -6120,7 +6120,7 @@ function CelebrationModal({ fileUrl, onClose, onDownload }) {
   );
 }
 
-function ProgressIndicator({ status, percent, message, estimatedTime, isVideoDownload }) {
+function ProgressIndicator({ status, percent, message, estimatedTime, isVideoDownload, logs, estimatedSeconds }) {
   const [dots, setDots] = useState('');
   
   // Animated dots to show activity
@@ -6191,6 +6191,30 @@ function ProgressIndicator({ status, percent, message, estimatedTime, isVideoDow
         </div>
       )}
       
+      {/* Estimated time for render jobs */}
+      {estimatedSeconds && estimatedSeconds > 0 && (
+        <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: 8 }}>
+          Estimated time: ~{estimatedSeconds < 60 ? `${estimatedSeconds}s` : `${Math.ceil(estimatedSeconds / 60)} min`}
+        </div>
+      )}
+
+      {/* Terminal output — shows actual processing logs */}
+      {logs && logs.length > 0 && (
+        <div style={{
+          background: '#0a0e14', borderRadius: 8, padding: '10px 12px', marginTop: 8,
+          maxHeight: 140, overflowY: 'auto', fontFamily: 'ui-monospace, "SF Mono", Menlo, Monaco, monospace',
+          fontSize: 11, lineHeight: 1.6, color: '#8b949e', border: '1px solid rgba(255,255,255,0.1)',
+          scrollBehavior: 'smooth'
+        }} ref={el => { if (el) el.scrollTop = el.scrollHeight; }}>
+          {logs.slice(-20).map((line, i) => (
+            <div key={i} style={{
+              color: line.includes('ERROR') ? '#f85149' : line.includes('done') ? '#4ade80' : line.includes('[yt-dlp]') ? '#58a6ff' : '#8b949e',
+              whiteSpace: 'pre-wrap', wordBreak: 'break-all'
+            }}>{line}</div>
+          ))}
+        </div>
+      )}
+
       {/* CSS for spin animation */}
       <style>{`
         @keyframes spin {
@@ -7801,6 +7825,8 @@ export default function App() {
   const [matches, setMatches] = useState([]);
   const [pad, setPad] = useState(2);
   const [job, setJob] = useState({ id: null, percent: 0, message: "", status: "idle", zip: null });
+  const [jobLogs, setJobLogs] = useState([]);
+  const [jobEstimate, setJobEstimate] = useState(null);
   const [extendedAnalytics, setExtendedAnalytics] = useState(null);
   const [actions, setActions] = useState({ reel: "", sum: "", dl: "", tr: "" });
   const [summary, setSummary] = useState({ para: "", bullets: [] });
@@ -8751,6 +8777,13 @@ export default function App() {
       status: status.status || "running",
       zip: status.zip || status.file || null
     });
+    // Capture logs and time estimate from job status
+    if (status.logs && Array.isArray(status.logs)) {
+      setJobLogs(status.logs);
+    }
+    if (status.estimated_seconds && !jobEstimate) {
+      setJobEstimate(status.estimated_seconds);
+    }
     if (!isComplete) {
       setProcessStatus(prev => ({ ...prev, percent: currentPercent, message: status.message || prev.message }));
     } else {
@@ -8760,7 +8793,11 @@ export default function App() {
         const fileUrl = status.zip || status.file || status.output;
         if (fileUrl) setShowCelebration({ file: fileUrl });
       }
-      setTimeout(() => setProcessStatus({ active: false, message: "", percent: 0, estimatedTime: null, isVideoDownload: false }), status.status === "done" ? 2500 : 3500);
+      setTimeout(() => {
+        setProcessStatus({ active: false, message: "", percent: 0, estimatedTime: null, isVideoDownload: false });
+        setJobLogs([]);
+        setJobEstimate(null);
+      }, status.status === "done" ? 2500 : 3500);
     }
   };
 
@@ -9597,6 +9634,8 @@ export default function App() {
             message={processStatus.message}
             estimatedTime={processStatus.estimatedTime}
             isVideoDownload={processStatus.isVideoDownload}
+            logs={jobLogs}
+            estimatedSeconds={jobEstimate}
           />
         )}
 
@@ -10814,6 +10853,29 @@ export default function App() {
                 </button>
               </div>
 
+              {/* Social media vertical video CTA */}
+              <div style={{ textAlign: 'center', marginTop: 6, marginBottom: 8 }}>
+                {isCloudMode ? (
+                  <a href="https://github.com/amateurmenace/community-highlighter/releases/latest" target="_blank" rel="noopener noreferrer"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, color: '#94a3b8', background: '#1a2332', border: '1px solid #334155', borderRadius: 8, textDecoration: 'none', transition: 'all 0.2s' }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#4ade80'; e.currentTarget.style.color = '#e2e8f0'; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = '#334155'; e.currentTarget.style.color = '#94a3b8'; }}
+                  >
+                    <span style={{ fontSize: 16 }}>📱</span>
+                    Download the desktop app to save and auto reformat to vertical video for social media
+                  </a>
+                ) : (
+                  <button onClick={() => buildReel('social')} disabled={loading.reel || loading.summary}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, color: '#e2e8f0', background: 'linear-gradient(135deg, #7c3aed 0%, #a855f7 100%)', border: 'none', borderRadius: 8, cursor: 'pointer', transition: 'all 0.2s' }}
+                    onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 14px rgba(124, 58, 237, 0.4)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
+                  >
+                    <span style={{ fontSize: 16 }}>📱</span>
+                    Generate Social Media Reel (9:16 Vertical)
+                  </button>
+                )}
+              </div>
+
               {/* Reel Styles — collapsible under toggle */}
               <div className="reel-styles-toggle-bar">
                 <button className="reel-styles-toggle-btn" onClick={() => setShowReelStyles(!showReelStyles)}>
@@ -10881,7 +10943,7 @@ export default function App() {
                         <span>🔗</span>
                         <span>Share Reel Link</span>
                       </button>
-                      <button className="toolbar-view-btn" disabled={clipBasket.length === 0} onClick={() => {
+                      <button className={`toolbar-view-btn${clipBasket.length > 0 ? ' toolbar-view-btn-glow' : ''}`} disabled={clipBasket.length === 0} onClick={() => {
                         if (clipBasket.length === 0) return;
                         const clipsParam = clipBasket.map(c => `${Math.round(c.start)}-${Math.round(c.end)}`).join(',');
                         const titlesParam = clipBasket.map(c => (c.label || '').slice(0, 50)).join('|');
