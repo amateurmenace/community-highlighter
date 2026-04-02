@@ -135,7 +135,47 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 YOUTUBE_API_KEY_SECONDARY = os.getenv("YOUTUBE_API_KEY_SECONDARY", "")
-_youtube_active_key = None  # Tracks which key to use (None = primary first)
+
+# Multi-key rotation pool — reads YOUTUBE_API_KEY, YOUTUBE_API_KEY_SECONDARY,
+# YOUTUBE_API_KEY_3, YOUTUBE_API_KEY_4, ... up to YOUTUBE_API_KEY_10
+_youtube_key_pool = []
+if YOUTUBE_API_KEY:
+    _youtube_key_pool.append(YOUTUBE_API_KEY)
+if YOUTUBE_API_KEY_SECONDARY:
+    _youtube_key_pool.append(YOUTUBE_API_KEY_SECONDARY)
+for _i in range(3, 11):
+    _extra = os.getenv(f"YOUTUBE_API_KEY_{_i}", "")
+    if _extra:
+        _youtube_key_pool.append(_extra)
+_youtube_key_idx = 0  # Index into the pool
+_youtube_exhausted_keys = set()  # Keys that hit quota
+print(f"[YouTube] {len(_youtube_key_pool)} API key(s) in rotation pool")
+
+def _get_youtube_key():
+    """Get the current active YouTube API key, skipping exhausted ones."""
+    global _youtube_key_idx
+    if not _youtube_key_pool:
+        return None
+    # Try each key starting from current index
+    for _ in range(len(_youtube_key_pool)):
+        key = _youtube_key_pool[_youtube_key_idx % len(_youtube_key_pool)]
+        if key not in _youtube_exhausted_keys:
+            return key
+        _youtube_key_idx = (_youtube_key_idx + 1) % len(_youtube_key_pool)
+    # All keys exhausted
+    return None
+
+def _rotate_youtube_key(exhausted_key):
+    """Mark a key as exhausted and rotate to the next one."""
+    global _youtube_key_idx
+    _youtube_exhausted_keys.add(exhausted_key)
+    _youtube_key_idx = (_youtube_key_idx + 1) % len(_youtube_key_pool)
+    remaining = len(_youtube_key_pool) - len(_youtube_exhausted_keys)
+    print(f"[YouTube] Key exhausted, rotated. {remaining} key(s) remaining")
+    return _get_youtube_key()
+
+# Legacy compat
+_youtube_active_key = None
 
 # Auto-detect yt-dlp path (check venv, homebrew, then PATH)
 YT_DLP_PATH = None
@@ -2986,10 +3026,12 @@ else:
 @app.get("/api/youtube-status")
 async def youtube_status():
     """Check if YouTube API is configured — always re-read from env in case it was set after import"""
-    key = os.environ.get("YOUTUBE_API_KEY", "") or YOUTUBE_API_KEY
+    key = _get_youtube_key()
     return {
         "configured": bool(key),
-        "key_preview": f"{key[:8]}..." if key else None
+        "key_pool_size": len(_youtube_key_pool),
+        "keys_exhausted": len(_youtube_exhausted_keys),
+        "keys_available": len(_youtube_key_pool) - len(_youtube_exhausted_keys),
     }
 
 
@@ -3124,29 +3166,21 @@ _yt_cache_load()
 async def youtube_search(q: str, type: str = "video", maxResults: int = 10, order: str = "date",
                          days: int = 90, meetingType: str = "all"):
     """Search YouTube for videos (used by Civic Meeting Finder).
+    Supports: municipality names, YouTube @handles, channel URLs.
+    Filters: days (7/30/90/365/0=all), meetingType (all/council/board/planning/hearing/school).
+    Uses multi-key rotation pool. Falls back to yt-dlp search only as last resort."""
+    import re
+
     # Check server-side cache first
     cache_key = _yt_cache_key(q, days, meetingType, order)
     cached = _yt_cache_get(cache_key)
     if cached is not None:
         return cached
 
-    Supports: municipality names, YouTube @handles, channel URLs.
-    Filters: days (7/30/90/365/0=all), meetingType (all/council/board/planning/hearing/school).
-    Falls back to secondary API key on quota exceeded, then to yt-dlp search."""
-    global _youtube_active_key
-    import re
-
-    # Key selection: use previously working key, or try primary first
-    primary = os.environ.get("YOUTUBE_API_KEY", "") or YOUTUBE_API_KEY
-    secondary = os.environ.get("YOUTUBE_API_KEY_SECONDARY", "") or YOUTUBE_API_KEY_SECONDARY
-    if _youtube_active_key == "secondary" and secondary:
-        api_key = secondary
-    elif primary:
-        api_key = primary
-    elif secondary:
-        api_key = secondary
-    else:
-        print(f"[YouTube] No API keys — using yt-dlp search for: {q}")
+    # Get current API key from rotation pool
+    api_key = _get_youtube_key()
+    if not api_key:
+        print(f"[YouTube] All API keys exhausted — using yt-dlp search for: {q}")
         return await _ytdlp_search(q, maxResults)
 
     try:
@@ -3258,18 +3292,14 @@ async def youtube_search(q: str, type: str = "video", maxResults: int = 10, orde
             print(f"[YouTube] Comprehensive search for: {q} ({len(search_queries)} queries, {day_label})")
             results = await asyncio.gather(*[run_query(sq[0], 10, sq[1]) for sq in search_queries])
 
-        # Check if any query hit quota limit — try secondary key, then yt-dlp
+        # Check if any query hit quota limit — rotate to next key in pool
         quota_hit = any(r == "QUOTA_EXCEEDED" for r in results)
         if quota_hit:
-            # Try secondary key if we were using primary
-            if api_key == primary and secondary and api_key != secondary:
-                print(f"[YouTube] Primary key quota exceeded — retrying with secondary key")
-                _youtube_active_key = "secondary"
-                api_key = secondary
-                # Re-run the queries with the secondary key (recursive call)
+            next_key = _rotate_youtube_key(api_key)
+            if next_key:
+                print(f"[YouTube] Quota exceeded — rotating to next key and retrying")
                 return await youtube_search(q, type, maxResults, order, days, meetingType)
-            print(f"[YouTube] All API keys exhausted — falling back to yt-dlp search")
-            _youtube_active_key = None
+            print(f"[YouTube] All {len(_youtube_key_pool)} API keys exhausted — falling back to yt-dlp search")
             return await _ytdlp_search(q, maxResults)
 
         for batch in results:
