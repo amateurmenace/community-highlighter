@@ -4,10 +4,10 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 
 ## Architecture
 
-- **Frontend**: React 19 + Vite + vite-plugin-pwa + recharts, built to `dist/`. Code-split into 4 chunks: ReelPlayer (4.5KB), App editor (330KB), recharts (384KB), React runtime (185KB). Monolithic `src/App.jsx` (~12400 lines) with 40+ inline sub-components (includes AnimatedTagline, TopicTrendsChart, EntityNetworkGraph, AboutPage, TranscriptUploadPrompt, GuidedTour, SectionPreviews, KnowledgeBasePanel, QuestionFlowDiagram, FramingPluralityMap, DisagreementTopology, IssueLifecycle). ReelPlayer extracted to `src/ReelPlayer.jsx` for code-splitting.
+- **Frontend**: React 19 + Vite + vite-plugin-pwa + recharts, built to `dist/`. Code-split into 4 chunks: ReelPlayer (6.7KB), App editor (343KB), recharts (384KB), React runtime (185KB). `src/App.jsx` (~11,500 lines) with inline sub-components. Extracted components in `src/components/`: AnimatedTagline, AboutPage, SummaryLoadingTerminal, SectionPreviews, GuidedTour, MeetingViz (QuestionFlowDiagram, FramingPluralityMap, DisagreementTopology, IssueLifecycle). ReelPlayer extracted to `src/ReelPlayer.jsx` for code-splitting.
 - **Backend**: FastAPI (`backend/app.py`, ~340KB monolith), served by Uvicorn on port 8000. 85+ API endpoints (includes SSE streaming, WebSocket job status)
 - **Desktop packaging**: PyInstaller bundles into macOS `.app` (signed+notarized) and Windows `.exe`
-- **Cloud deployment**: Render (https://community-highlighter.onrender.com/) — full video editor with Share Reel Link + Desktop Handoff (.chreel); video download/render disabled in cloud mode
+- **Cloud deployment**: Render (https://community-highlighter.onrender.com/) — full video editor with Share Reel Link + Desktop Handoff (.chreel); cloud rendering enabled for short reels (max 5 clips / 2 min); full video download requires desktop app
 - **GitHub**: https://github.com/amateurmenace/community-highlighter
 - **Latest release**: https://github.com/amateurmenace/community-highlighter/releases/latest
 
@@ -261,28 +261,33 @@ When a shared reel link is opened with `?mode=play`, `main.jsx` detects this and
 - ~~No cross-meeting visualizations~~ **FIXED** (v8.3): TopicTrendsChart (recharts LineChart) + EntityNetworkGraph (SVG radial layout)
 - ~~Mobile layout issues~~ **FIXED** (v8.3): Comprehensive responsive pass — word cloud, timeline, settings drawer, nav pills, toolbar, viz cards
 
-## New Data Visualizations (v8.2)
+## Data Visualizations (v8.2, upgraded v9.0)
 
-All new viz components work WITHOUT speaker attribution (YouTube transcripts rarely have speaker labels). They analyze text patterns, topic keywords, and structural indicators instead.
+All viz components work WITHOUT speaker attribution. They analyze text patterns, topic keywords, and structural indicators. Extracted to `src/components/MeetingViz.jsx`. All viz components link back to the video via clickable timestamps and "+ Clip" buttons.
 
-- **Question Flow Diagram** (`QuestionFlowDiagram`): Detects questions (sentences with `?`), classifies response quality of what follows (substantive/procedural/deflection/unanswered), classifies question type (budget/timeline/accountability/rationale/information). Recharts stacked bar chart showing question clusters over time + summary metrics.
-- **Framing Plurality Map** (`FramingPluralityMap`): For top topics in the meeting, shows how many times each framing lens was used (financial, safety, community, environmental, legal, equity, infrastructure, process). Radial burst SVG with spoke length proportional to mention count. No speaker detection needed — counts co-occurring framing keywords in topic-mentioning sentences.
-- **Disagreement Topology** (`DisagreementTopology`): Extracts position statements (sentences with opinion verbs: should/must/believe/support/oppose), classifies stance (support vs oppose) based on keyword analysis, groups by topic keyword, draws edges between opposing stances on the same topic. SVG node-link diagram.
-- **Issue Lifecycle** (`IssueLifecycle`): Tracks how topics progress through stages within a meeting (introduced → discussed → tabled → voted). Horizontal swimlane chart. Detects stage transitions via keyword matching on agenda/discussion/tabling/voting language.
+- **Question Flow Diagram** (`QuestionFlowDiagram`): Detects questions (sentences with `?`), classifies response quality (substantive/procedural/deflection/unanswered) and type (budget/timeline/accountability/rationale/information). Recharts stacked bar chart + visual timeline strip of colored dots. **Show Questions** toggle reveals a scrollable list of actual question text with clickable timestamps and + Clip buttons.
+- **Framing Plurality Map** (`FramingPluralityMap`): For top 6 topics, shows how each framing lens was used (financial, safety, community, environmental, legal, equity, infrastructure, process). Radial burst SVG (380x370) with background rings. **Clickable** — click any topic to expand detail table showing actual quote snippets with clickable timestamps for each framing lens. Includes "How to Read" primer explaining spokes, dot sizes, complexity interpretation.
+- **Disagreement Topology** (`DisagreementTopology`): Interactive SVG node-link diagram (750x420). Nodes show support (green) vs oppose (red) positions. **Hover** highlights connected edges, dims unrelated nodes, shows full text in floating tooltip with **Jump** and **+ Clip** buttons. Includes "How to Read" primer. Nodes 24px radius with 50-char text preview.
+- **Issue Lifecycle** (`IssueLifecycle`): Swimlane chart tracking topic progression (introduced → discussed → tabled → voted).
+- **Participation Tracker**: Dark-themed card with 4 metric boxes (public comments, questions, motions, duration), recharts BarChart activity timeline (click to jump), proportional stacked bar for discussion breakdown.
+- **Cross-Reference Network**: Client-side co-occurrence graph (entities + top keywords). Up to 25 draggable nodes, 40 edges. Color by type (person/place/org/keyword). Hover highlights connections. Drag nodes to rearrange.
+- **Moments of Disagreement** (`DisagreementTimeline`): Keyword scoring with 30s clustering, capped at 50 markers. Markers positioned on gradient track (16px height). Click marker for context + video jump + clip actions.
+- **Entities** (`MentionedEntitiesCard`): 16px entity names with type badge (PER/PLA/ORG colored indicators), 14px count badges.
 
-### Removed
+### Removed (v9.0)
+- **Interactive Timeline** — removed as redundant with Topic Heatmap + Moments of Disagreement
 - **Topic Distribution** (pie chart) — removed as redundant with Topic Heatmap
 
 ## Knowledge Base UI
 
 - **KnowledgeBasePanel** component in Meeting Analyzer section
-- Dark-themed panel (#0f172a background) with:
-  - "Add This Meeting to KB" button → calls `/api/knowledge/add_meeting`
-  - Cross-meeting search input → calls `/api/knowledge/search`
-  - "Find Related Meetings" button → calls `/api/knowledge/find_related`
-  - Stats display (meetings count, document chunks)
-  - Search results with relevance scores, excerpts, and "Open Meeting" links
-  - Related meetings with similarity scores
+- Dark-themed panel (#0f172a background) with detailed explanation, example usage, and clear button labels
+- "Add This Meeting to Knowledge Base" button (was "Add to KB") → calls `/api/knowledge/add_meeting`
+- Cross-meeting search input → calls `/api/knowledge/search`
+- "Find Related Meetings" button → calls `/api/knowledge/find_related`
+- Stats display (meetings count, document chunks)
+- Search results with relevance scores, excerpts, and "Open Meeting" links
+- Related meetings with similarity scores
 - Backend: ChromaDB with `all-MiniLM-L6-v2` embeddings, 500-char semantic chunks
 - All 4 KB API functions already existed in `api.js`; this wires them into the UI
 - **TopicTrendsChart** (v8.3): recharts LineChart showing top 8 topic frequencies across meetings over time. Requires 2+ meetings in KB. Uses `POST /api/knowledge/topic_trends` (5-min in-memory cache). Color-coded lines per topic, dark theme matching KBPanel.
@@ -306,6 +311,57 @@ All new viz components work WITHOUT speaker attribution (YouTube transcripts rar
 - **Civic Scoring**: Results scored by civic keyword density + channel/title matching for the queried municipality
 - **Tiered Sorting**: High civic relevance (3+ keywords) → medium (1-2) → low (0), then by date within tiers
 - **Quota management**: YouTube Data API v3 daily quota is 10,000 units. Each civic search costs ~500 units (5 queries x 100 units). ~20 searches/day exhausts quota. Resets at midnight Pacific
+
+## AI Chat Streaming (v9.0)
+
+- **Backend**: `POST /api/assistant/chat/stream` — SSE streaming endpoint. Streams AI response token by token.
+- **Backend**: `_build_chat_context()` helper shared by streaming and non-streaming chat endpoints. Builds transcript context, stats, system/user prompts.
+- **Backend**: AI generates inline `SUGGESTIONS:` follow-ups parsed by `_parse_chat_suggestions()`
+- **Backend**: Uses `call_ai_api_stream()` — works with both OpenAI and Gemini models. Gemini gets 200K char context (vs 30K for OpenAI)
+- **Frontend**: `streamChatWithMeeting()` in `api.js` for SSE chat streaming
+- **Frontend**: Rewritten `MeetingAssistant` component with streaming text display, conversation memory (passes full history), clickable `[MM:SS]` timestamp pills, auto-scroll, follow-up suggestion chips, clear chat, dark theme
+
+## YouTube Search Cache (v9.0)
+
+- Server-side search cache (`_youtube_search_cache`) with 24hr TTL, persisted to `cache/youtube_search_cache.json`
+- Keyed by `(query, days, meetingType, order)` via MD5. Max 200 entries with LRU eviction
+- Reduces YouTube API quota usage by ~10x for repeat searches
+
+## Cloud Video Rendering (v9.0)
+
+- `render_clips` allows cloud mode with limits: max 5 clips, max 120s total duration
+- `highlight_reel` allowed in cloud mode (auto-limited to 5 clips)
+- Frontend export button functional in cloud mode for <=5 clips, shows "Desktop only" for 6+
+
+## Subscription Persistence (v9.0)
+
+- Subscriptions persisted to `cache/subscriptions.json` (survives restarts)
+- Enhanced match checking: returns mention count, multiple contexts (up to 3), tracks last_match_video/title
+- Browser Notification API integration — sends desktop notifications when topics found
+
+## Multi-language Translation (v9.0)
+
+- Gemini translates up to 400K chars without truncation
+- OpenAI uses chunked parallel translation via ThreadPoolExecutor(3) for long transcripts
+- Returns `truncated` and `chunks` fields
+
+## Component Extraction (v9.0)
+
+Extracted from `src/App.jsx` into `src/components/`:
+- `AnimatedTagline.jsx` — landing page tagline animation + constants
+- `AboutPage.jsx` — full philosophy/technology page
+- `SummaryLoadingTerminal.jsx` — terminal typing animation
+- `SectionPreviews.jsx` — landing page preview cards
+- `GuidedTour.jsx` — onboarding spotlight walkthrough
+- `MeetingViz.jsx` — QuestionFlowDiagram, FramingPluralityMap, DisagreementTopology, IssueLifecycle
+
+## Accessibility (v9.0)
+
+- Skip-to-content link (visible on focus)
+- `role="dialog" aria-modal="true"` on all modals (CelebrationModal, shortcuts, export, entity popup, topic popup)
+- `role="region" aria-label` on settings drawer
+- `aria-label` on URL input, search input, clear button, language selector, subscription form inputs
+- Deprecated `onKeyPress` replaced with `onKeyDown`
 
 ## API Endpoints (78 total, Key Categories)
 
@@ -338,7 +394,8 @@ All new viz components work WITHOUT speaker attribution (YouTube transcripts rar
 - `POST /api/share/precompute` — Precompute and cache summary for shared video links (background thread)
 - `POST /api/analytics/extended` — Entity extraction (with truncated JSON repair for Gemini)
 - `POST /api/analytics/policy_impact`, `action_items`, `budget_impact`, `meeting_efficiency`
-- `POST /api/assistant/chat` — RAG-based meeting Q&A
+- `POST /api/assistant/chat` — Meeting Q&A (non-streaming, uses `call_ai_api`)
+- `POST /api/assistant/chat/stream` — **SSE streaming** meeting Q&A (streams token by token, returns suggestions + stats at end)
 - `POST /api/find-relevant-documents` — AI-powered document search (uses `call_ai_api` not direct OpenAI client)
 
 ### Transcript
@@ -478,8 +535,8 @@ gh workflow run build-windows.yml -f version=v8.1.0
 - All nested binaries (.dylib, .so) must be signed with entitlements AND `--timestamp` for notarization
 - PyInstaller specs must EXCLUDE `backend/venv/`, `.venv/`, `dist/`, `build/`, `cache/` — bundling these causes notarization failure (unsigned nested binaries) and massive app size
 - macOS code signing: `find` for `.so`/`.dylib` must use `sort -u` and `[ -f "$f" ]` guards to avoid duplicate/symlink errors
-- `backend/app.py` is a ~330KB monolith — changes require care
-- `src/App.jsx` is ~11500 lines — also monolithic, 35+ inline components
+- `backend/app.py` is a ~340KB monolith — changes require care
+- `src/App.jsx` is ~11500 lines — 6 components extracted to `src/components/` in v9.0, further extraction possible
 - PyInstaller bundles torch/scipy/sklearn (huge) — could exclude unused ML deps to shrink app further
 - yt-dlp download timeout (10 min) can fail on long videos
 - YouTube API key is optional — transcript fetching and civic meeting search fall back to yt-dlp without it
@@ -495,6 +552,6 @@ gh workflow run build-windows.yml -f version=v8.1.0
 
 ## Version
 
-Current: 8.3.0 (default AI: Gemini 2.5 Flash)
+Current: 9.0.0 (default AI: Gemini 2.5 Flash)
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)

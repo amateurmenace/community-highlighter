@@ -1041,10 +1041,9 @@ header .right {
 
 .viz-desc {
   font-size: 14px;
-  color: #64748b;
+  color: #475569;
   margin-bottom: 16px;
   line-height: 1.5;
-  background: rgba(255, 255, 255, 0.7);
   padding: 4px;
   border-radius: 4px;
 }
@@ -1092,8 +1091,17 @@ header .right {
 .timeline-container {
   position: relative;
   margin: 24px 0;
-  height: 50px;
+  height: 60px;
   overflow: visible;
+}
+
+.disagreement-timeline .timeline-track {
+  position: absolute !important;
+  height: 16px;
+  background: linear-gradient(90deg, #fef2f2 0%, #fee2e2 50%, #fef2f2 100%) !important;
+  border-radius: 8px;
+  top: 12px;
+  overflow: visible !important;
 }
 
 .timeline-track {
@@ -4631,7 +4639,7 @@ body::before {
 
 .disagreement-marker:hover,
 .highlight-marker:hover {
-  transform: scale(1.5);
+  transform: translateX(-50%) scale(1.5);
   z-index: 10;
 }
 

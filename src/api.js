@@ -247,6 +247,69 @@ export async function apiChatWithMeeting(data) {
 }
 
 /**
+ * Stream chat response via SSE — token by token
+ * @param {Object} data - { query, meetingId, conversationHistory, model }
+ * @param {Function} onChunk - Called with (chunk, fullTextSoFar)
+ * @param {Function} onDone - Called with { fullText, suggestions, stats }
+ * @param {Function} onError - Called with Error
+ * @returns {AbortController} - call .abort() to cancel
+ */
+export function streamChatWithMeeting(data, onChunk, onDone, onError) {
+  const controller = new AbortController();
+  fetch(`${BACKEND_URL}/api/assistant/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+    signal: controller.signal,
+  }).then(async (res) => {
+    if (!res.ok) {
+      const err = await res.text();
+      onError && onError(new Error(`Chat stream error ${res.status}: ${err}`));
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let fullText = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const payload = line.slice(6).trim();
+        if (payload === "[DONE]") {
+          return;
+        }
+        try {
+          const parsed = JSON.parse(payload);
+          if (parsed.error) {
+            onError && onError(new Error(parsed.error));
+            return;
+          }
+          if (parsed.done) {
+            // Final message with suggestions and stats
+            onDone && onDone({ fullText, suggestions: parsed.suggestions || [], stats: parsed.stats });
+            return;
+          }
+          if (parsed.text) {
+            fullText += parsed.text;
+            onChunk && onChunk(parsed.text, fullText);
+          }
+        } catch (e) { /* skip malformed */ }
+      }
+    }
+    // Stream ended without done signal
+    if (fullText) onDone && onDone({ fullText, suggestions: [], stats: {} });
+  }).catch((err) => {
+    if (err.name !== "AbortError") onError && onError(err);
+  });
+  return controller;
+}
+
+/**
  * Get suggested questions based on meeting content
  * @param {Object} data - { meetingId }
  * @returns {Promise<Object>} List of suggested questions

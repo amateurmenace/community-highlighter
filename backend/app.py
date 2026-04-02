@@ -1415,11 +1415,11 @@ async def health_check():
             "word_frequency": True,
             "sentiment_analysis": True,
             "knowledge_base": CHROMADB_AVAILABLE,
-            "video_clips": not CLOUD_MODE,
+            "video_clips": True,  # Cloud supports up to 5 clips / 2 min
             "video_download": not CLOUD_MODE,
             "live_mode": False
         },
-        "notes": "Video download features disabled in cloud mode (YouTube blocks cloud IPs)" if CLOUD_MODE else None
+        "notes": "Cloud mode: video export limited to 5 clips / 2 min. Full video download requires desktop app." if CLOUD_MODE else None
     }
 
 
@@ -1506,14 +1506,14 @@ async def system_status():
             "action_items": {"available": bool(OPENAI_API_KEY), "description": "Extract action items and decisions"},
             "knowledge_base": {"available": CHROMADB_AVAILABLE, "description": "Compare multiple meetings"},
             "video_clips": {
-                "available": not CLOUD_MODE,
+                "available": True,
                 "description": "Download and create video clips",
-                "cloud_note": "Requires desktop app - YouTube blocks cloud servers" if CLOUD_MODE else None
+                "cloud_note": "Cloud: max 5 clips, 2 min total. Desktop app for unlimited." if CLOUD_MODE else None
             },
             "highlight_reels": {
-                "available": not CLOUD_MODE,
+                "available": True,
                 "description": "Create highlight compilation videos",
-                "cloud_note": "Requires desktop app - YouTube blocks cloud servers" if CLOUD_MODE else None
+                "cloud_note": "Cloud: max 5 clips. Desktop app for unlimited." if CLOUD_MODE else None
             }
         },
         "desktop_app": {
@@ -2684,7 +2684,7 @@ Write a thorough, well-organized summary that captures the full scope of the mee
 
 @app.post("/api/translate")
 async def translate_transcript(req: Request):
-    """Translate transcript"""
+    """Translate transcript — uses chunked translation for long texts, Gemini for full-length."""
     data = await req.json()
     text = clean_text(data.get("text", ""))
     target_lang = data.get("target_lang", "Spanish")
@@ -2693,24 +2693,51 @@ async def translate_transcript(req: Request):
     if not text:
         raise HTTPException(400, "No text provided")
 
-    max_chars = 40000 if "gpt-4o" in model else 12000
-    if len(text) > max_chars:
-        text = text[:max_chars] + "..."
-
-    prompt = f"""Translate this civic meeting transcript to {target_lang}. 
+    translate_prompt = f"""Translate this civic meeting transcript to {target_lang}.
 Maintain formal tone appropriate for government proceedings.
 Preserve names of people, places, and organizations.
+Preserve all timestamps in their original format."""
 
-TRANSCRIPT:
-{text}
+    # Gemini can handle very long texts (up to 500K chars)
+    if model.startswith("gemini-"):
+        max_chars = 400000
+        truncated_text = text[:max_chars] if len(text) > max_chars else text
+        prompt = f"{translate_prompt}\n\nTRANSCRIPT:\n{truncated_text}\n\nTRANSLATION ({target_lang}):"
+        ai_result = call_ai_api(prompt, max_tokens=8000, model=model, temperature=0.3)
+        if ai_result:
+            return {"translation": ai_result, "target_language": target_lang, "truncated": len(text) > max_chars}
+        raise HTTPException(500, "Translation failed")
 
-TRANSLATION ({target_lang}):"""
+    # OpenAI: chunk long transcripts and translate in parallel
+    max_chunk = 30000
+    if len(text) <= max_chunk:
+        prompt = f"{translate_prompt}\n\nTRANSCRIPT:\n{text}\n\nTRANSLATION ({target_lang}):"
+        ai_result = call_ai_api(prompt, max_tokens=4000, model=model, temperature=0.3)
+        if ai_result:
+            return {"translation": ai_result, "target_language": target_lang, "truncated": False}
+        raise HTTPException(500, "Translation failed")
 
-    ai_result = call_ai_api(prompt, max_tokens=4000, model=model, temperature=0.3)
+    # Chunked translation for long transcripts
+    chunks = []
+    for i in range(0, len(text), max_chunk):
+        chunks.append(text[i:i + max_chunk])
 
-    if ai_result:
-        print(f" Translated to {target_lang}")
-        return {"translation": ai_result, "target_language": target_lang}
+    print(f"[translate] Splitting into {len(chunks)} chunks for {target_lang}")
+    translations = []
+
+    from concurrent.futures import ThreadPoolExecutor
+    def translate_chunk(chunk_text, chunk_idx):
+        p = f"{translate_prompt}\n\nThis is part {chunk_idx + 1} of {len(chunks)} of the transcript. Translate it completely.\n\nTRANSCRIPT:\n{chunk_text}\n\nTRANSLATION ({target_lang}):"
+        return call_ai_api(p, max_tokens=4000, model=model, temperature=0.3) or ""
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [executor.submit(translate_chunk, chunk, i) for i, chunk in enumerate(chunks)]
+        translations = [f.result() for f in futures]
+
+    combined = "\n\n".join(t for t in translations if t)
+    if combined:
+        print(f"[translate] Translated {len(chunks)} chunks to {target_lang}")
+        return {"translation": combined, "target_language": target_lang, "chunks": len(chunks), "truncated": False}
 
     raise HTTPException(500, "Translation failed")
 
@@ -2998,10 +3025,74 @@ async def _ytdlp_search(q: str, maxResults: int = 20):
     return {"items": all_items, "fallback": True, "fallback_reason": "yt-dlp search (YouTube API unavailable)"}
 
 
+# ============================================================================
+# YouTube Search Cache — reduces API quota usage by caching results server-side
+# ============================================================================
+_youtube_search_cache = {}  # key -> { "result": ..., "ts": float }
+_YOUTUBE_CACHE_TTL = 24 * 3600  # 24 hours
+_YOUTUBE_CACHE_FILE = os.path.join(BASE_DIR, "cache", "youtube_search_cache.json")
+
+def _yt_cache_key(q, days, meetingType, order):
+    """Generate cache key from search parameters."""
+    import hashlib
+    raw = f"{q.lower().strip()}|{days}|{meetingType}|{order}"
+    return hashlib.md5(raw.encode()).hexdigest()
+
+def _yt_cache_load():
+    """Load search cache from disk on startup."""
+    global _youtube_search_cache
+    try:
+        if os.path.exists(_YOUTUBE_CACHE_FILE):
+            with open(_YOUTUBE_CACHE_FILE, 'r') as f:
+                data = json.load(f)
+            now = time.time()
+            # Only load non-expired entries
+            _youtube_search_cache = {k: v for k, v in data.items() if now - v.get("ts", 0) < _YOUTUBE_CACHE_TTL}
+            print(f"[YouTube Cache] Loaded {len(_youtube_search_cache)} cached searches from disk")
+    except Exception as e:
+        print(f"[YouTube Cache] Load error: {e}")
+
+def _yt_cache_save():
+    """Persist search cache to disk."""
+    try:
+        os.makedirs(os.path.dirname(_YOUTUBE_CACHE_FILE), exist_ok=True)
+        with open(_YOUTUBE_CACHE_FILE, 'w') as f:
+            json.dump(_youtube_search_cache, f)
+    except Exception as e:
+        print(f"[YouTube Cache] Save error: {e}")
+
+def _yt_cache_get(key):
+    """Get cached result if not expired."""
+    entry = _youtube_search_cache.get(key)
+    if entry and time.time() - entry.get("ts", 0) < _YOUTUBE_CACHE_TTL:
+        print(f"[YouTube Cache] HIT for {key[:8]}...")
+        return entry["result"]
+    return None
+
+def _yt_cache_set(key, result):
+    """Cache a search result and persist."""
+    _youtube_search_cache[key] = {"result": result, "ts": time.time()}
+    # Evict old entries (keep max 200)
+    if len(_youtube_search_cache) > 200:
+        sorted_keys = sorted(_youtube_search_cache, key=lambda k: _youtube_search_cache[k]["ts"])
+        for old_key in sorted_keys[:len(_youtube_search_cache) - 200]:
+            del _youtube_search_cache[old_key]
+    _yt_cache_save()
+
+# Load cache on import
+_yt_cache_load()
+
+
 @app.get("/api/youtube-search")
 async def youtube_search(q: str, type: str = "video", maxResults: int = 10, order: str = "date",
                          days: int = 90, meetingType: str = "all"):
     """Search YouTube for videos (used by Civic Meeting Finder).
+    # Check server-side cache first
+    cache_key = _yt_cache_key(q, days, meetingType, order)
+    cached = _yt_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     Supports: municipality names, YouTube @handles, channel URLs.
     Filters: days (7/30/90/365/0=all), meetingType (all/council/board/planning/hearing/school).
     Falls back to secondary API key on quota exceeded, then to yt-dlp search."""
@@ -3159,7 +3250,9 @@ async def youtube_search(q: str, type: str = "video", maxResults: int = 10, orde
         all_items = all_items[:min(maxResults, 50)]
 
         print(f"[YouTube] Found {len(all_items)} unique results")
-        return {"items": all_items}
+        result = {"items": all_items}
+        _yt_cache_set(cache_key, result)
+        return result
 
     except Exception as e:
         print(f"[YouTube] Search exception: {e}")
@@ -5966,12 +6059,15 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
 async def render_clips(req: Request):
     """Render video clips in various formats with optional editing features"""
     check_rate_limit(req, _rate_render)
+    # Cloud mode: allow limited rendering (max 5 clips, max 120s total)
     if CLOUD_MODE:
-        return {
-            "error": "Video clip download is not available in cloud mode",
-            "message": "YouTube blocks video downloads from cloud servers. Run the desktop app for this feature.",
-            "jobId": None
-        }
+        data = await req.json()
+        clips = data.get("clips", data.get("selections", []))
+        total_duration = sum(max(0, (c.get("end", 0) - c.get("start", 0))) for c in clips)
+        if len(clips) > 5:
+            return {"error": "Cloud mode supports up to 5 clips. Download the desktop app for longer reels.", "jobId": None}
+        if total_duration > 120:
+            return {"error": "Cloud mode supports up to 2 minutes total. Download the desktop app for longer reels.", "jobId": None}
     
     data = await req.json()
     vid = data.get("videoId", "")
@@ -6885,12 +6981,8 @@ def find_quote_timestamp(quote: str, transcript_cache: dict, video_id: str) -> t
 async def highlight_reel(req: Request):
     check_rate_limit(req, _rate_ai)
     """Create highlight reel from quotes - finds actual timestamps in transcript"""
-    if CLOUD_MODE:
-        return {
-            "error": "Video clip download is not available in cloud mode",
-            "message": "YouTube blocks video downloads from cloud servers. Run the desktop app for this feature.",
-            "jobId": None
-        }
+    # Cloud mode: allow limited highlight reels (max 5 clips)
+    # The reel builder will auto-limit to 5 clips anyway
     
     data = await req.json()
     vid = data.get("videoId", "")
@@ -7744,138 +7836,92 @@ async def start_live_monitoring(req: Request):
 # ============================================================================
 
 
-@app.post("/api/assistant/chat")
-async def chat_with_meeting(req: Request):
-    """v5.1 ENHANCED: Conversational AI assistant with full context"""
-    check_rate_limit(req, _rate_ai)
-    data = await req.json()
-    query = data.get("query", "").strip()
-    meeting_id = data.get("meetingId")
-    conversation_history = data.get("conversationHistory", [])
+def _build_chat_context(meeting_id, query, conversation_history, model="gpt-4o"):
+    """Build transcript context, stats, system/user prompts for chat. Returns dict or error dict."""
+    if not meeting_id:
+        return {"error": "Please load a video first, then I can help answer questions about it!"}
 
-    if not query:
-        raise HTTPException(400, "No query provided")
+    # Get transcript
+    if meeting_id in STORED_TRANSCRIPTS:
+        transcript_data = STORED_TRANSCRIPTS[meeting_id]
+    else:
+        try:
+            transcript_data = ytt_api.fetch(meeting_id).to_raw_data()
+            STORED_TRANSCRIPTS[meeting_id] = transcript_data
+        except Exception:
+            return {"error": "I can't access the transcript for this video. Please make sure the video has captions enabled."}
 
-    if not OPENAI_API_KEY:
-        raise HTTPException(500, "OpenAI API key not configured")
+    # Build full transcript with timestamps
+    full_text_parts = []
+    for entry in transcript_data:
+        timestamp = f"{int(entry['start'] // 60)}:{int(entry['start'] % 60):02d}"
+        text = clean_text(entry.get("text", ""))
+        if text:
+            full_text_parts.append(f"[{timestamp}] {text}")
+    full_transcript = "\n".join(full_text_parts)
 
-    try:
-        full_transcript = ""
-        transcript_stats = {}
-        
-        if meeting_id:
-            # Get transcript from cache or fetch it
-            if meeting_id in STORED_TRANSCRIPTS:
-                transcript_data = STORED_TRANSCRIPTS[meeting_id]
-                print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Using cached transcript: {len(transcript_data)} segments")
-            else:
-                try:
-                    transcript_data = ytt_api.fetch(meeting_id).to_raw_data()
-                    STORED_TRANSCRIPTS[meeting_id] = transcript_data
-                    print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Fetched and cached {len(transcript_data)} segments")
-                except Exception as e:
-                    return {
-                        "answer": "I can't access the transcript for this video. Please make sure the video has captions enabled.",
-                        "sources": [],
-                        "suggestions": ["Try a different video", "Check if captions are available"]
-                    }
-            
-            # BUILD FULL TRANSCRIPT with timestamps
-            full_text_parts = []
-            for entry in transcript_data:
-                timestamp = f"{int(entry['start'] // 60)}:{int(entry['start'] % 60):02d}"
-                text = clean_text(entry.get("text", ""))
-                if text:
-                    full_text_parts.append(f"[{timestamp}] {text}")
-            
-            full_transcript = "\n".join(full_text_parts)
-            
-            # COMPUTE STATS for better answers
-            all_text = " ".join([clean_text(e.get("text", "")) for e in transcript_data])
-            
-            # Detect speakers (look for patterns like "Speaker:", names followed by colons, etc.)
-            speaker_patterns = re.findall(r'\b([A-Z][a-z]+ [A-Z][a-z]+)(?:\s*:|\s+said|\s+asked|\s+stated)', all_text)
-            speaker_patterns += re.findall(r'\b(Mr\.|Mrs\.|Ms\.|Dr\.|Mayor|Councillor|Commissioner|Chair|President)\s+([A-Z][a-z]+)', all_text)
-            speaker_patterns += re.findall(r'^([A-Z][A-Z\s]+):', all_text, re.MULTILINE)  # ALL CAPS names
-            
-            # Also look for ">> " pattern common in captions for speaker changes
-            speaker_changes = all_text.count(">>")
-            
-            # Look for first-person plural vs singular to estimate speakers
-            we_count = len(re.findall(r'\bwe\b', all_text.lower()))
-            i_count = len(re.findall(r'\bi\b', all_text.lower()))
-            
-            # Duration
-            if transcript_data:
-                duration_seconds = transcript_data[-1].get('start', 0) + transcript_data[-1].get('duration', 0)
-                duration_minutes = int(duration_seconds // 60)
-            else:
-                duration_minutes = 0
-            
-            transcript_stats = {
-                "duration_minutes": duration_minutes,
-                "word_count": len(all_text.split()),
-                "speaker_changes": speaker_changes,
-                "detected_names": list(set([s if isinstance(s, str) else " ".join(s) for s in speaker_patterns]))[:10],
-                "we_vs_i": "multiple speakers likely" if we_count > i_count * 2 else "possibly single speaker or interview",
-            }
-            
-            print(f"ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã…Â  Transcript stats: {transcript_stats}")
-        
-        else:
-            return {
-                "answer": "Please load a video first, then I can help answer questions about it!",
-                "sources": [],
-                "suggestions": ["Load a YouTube video", "Paste a video URL above"]
-            }
+    # Compute stats
+    all_text = " ".join([clean_text(e.get("text", "")) for e in transcript_data])
+    speaker_patterns = re.findall(r'\b([A-Z][a-z]+ [A-Z][a-z]+)(?:\s*:|\s+said|\s+asked|\s+stated)', all_text)
+    speaker_patterns += re.findall(r'\b(Mr\.|Mrs\.|Ms\.|Dr\.|Mayor|Councillor|Commissioner|Chair|President)\s+([A-Z][a-z]+)', all_text)
+    speaker_patterns += re.findall(r'^([A-Z][A-Z\s]+):', all_text, re.MULTILINE)
+    speaker_changes = all_text.count(">>")
+    we_count = len(re.findall(r'\bwe\b', all_text.lower()))
+    i_count = len(re.findall(r'\bi\b', all_text.lower()))
 
-        # SMART CONTEXT: For very long transcripts, summarize. For shorter ones, use full text.
-        MAX_CONTEXT_CHARS = 30000  # ~7500 tokens, fits in context window
-        
-        if len(full_transcript) > MAX_CONTEXT_CHARS:
-            # For long transcripts, take beginning, key sections, and end
-            third = MAX_CONTEXT_CHARS // 3
-            context_transcript = (
-                full_transcript[:third] + 
-                "\n\n[... middle of meeting ...]\n\n" +
-                full_transcript[len(full_transcript)//2 - third//2 : len(full_transcript)//2 + third//2] +
-                "\n\n[... end of meeting ...]\n\n" +
-                full_transcript[-third:]
-            )
-            print(f"ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â Using condensed transcript: {len(context_transcript)} chars (from {len(full_transcript)})")
-        else:
-            context_transcript = full_transcript
-            print(f"ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â Using full transcript: {len(context_transcript)} chars")
+    if transcript_data:
+        duration_seconds = transcript_data[-1].get('start', 0) + transcript_data[-1].get('duration', 0)
+        duration_minutes = int(duration_seconds // 60)
+    else:
+        duration_minutes = 0
 
-        # BUILD CONVERSATION CONTEXT
-        conv_context = ""
-        if conversation_history and len(conversation_history) > 0:
-            recent = conversation_history[-4:]  # Last 2 exchanges
-            conv_parts = []
-            for msg in recent:
-                role = "User" if msg.get("type") == "user" else "You"
-                conv_parts.append(f"{role}: {msg.get('text', '')[:150]}")
-            conv_context = "\n".join(conv_parts)
+    transcript_stats = {
+        "duration_minutes": duration_minutes,
+        "word_count": len(all_text.split()),
+        "speaker_changes": speaker_changes,
+        "detected_names": list(set([s if isinstance(s, str) else " ".join(s) for s in speaker_patterns]))[:10],
+        "we_vs_i": "multiple speakers likely" if we_count > i_count * 2 else "possibly single speaker or interview",
+    }
 
-        # THE KEY: A much better system prompt
-        system_prompt = """You are a friendly, helpful assistant who has watched this entire meeting. You answer questions conversationally - like a colleague who took great notes.
+    # Smart context — Gemini gets much more context
+    if model.startswith("gemini-"):
+        MAX_CONTEXT_CHARS = 200000
+    else:
+        MAX_CONTEXT_CHARS = 30000
+
+    if len(full_transcript) > MAX_CONTEXT_CHARS:
+        third = MAX_CONTEXT_CHARS // 3
+        context_transcript = (
+            full_transcript[:third] +
+            "\n\n[... middle of meeting ...]\n\n" +
+            full_transcript[len(full_transcript)//2 - third//2 : len(full_transcript)//2 + third//2] +
+            "\n\n[... end of meeting ...]\n\n" +
+            full_transcript[-third:]
+        )
+    else:
+        context_transcript = full_transcript
+
+    # Build conversation context from history
+    conv_context = ""
+    if conversation_history and len(conversation_history) > 0:
+        recent = conversation_history[-6:]  # Last 3 exchanges
+        conv_parts = []
+        for msg in recent:
+            role = "User" if msg.get("type") == "user" else "You"
+            conv_parts.append(f"{role}: {msg.get('text', '')[:200]}")
+        conv_context = "\n".join(conv_parts)
+
+    system_prompt = """You are a friendly, helpful assistant who has watched this entire meeting. You answer questions conversationally - like a colleague who took great notes.
 
 RULES:
 1. BE CONCISE: Answer in 1-3 sentences for simple questions. No bullet points unless asked.
 2. BE CONFIDENT: If you can answer from the transcript, just answer. Don't hedge with "based on the excerpts" or "it appears that".
 3. BE CONVERSATIONAL: End with a brief follow-up like "Want me to find the exact quote?" or "Should I look for more details?"
-4. USE TIMESTAMPS: When citing specific moments, mention the timestamp like "around 5:23".
+4. USE TIMESTAMPS: When citing specific moments, include the timestamp in brackets like [5:23] so the user can click to jump there. Always include at least one timestamp if you reference a specific moment.
 5. IF UNSURE: Just say "I didn't catch that in the meeting - could you ask another way?" Don't write paragraphs about what context you'd need.
+6. FOLLOW-UPS: At the very end of your response, on a new line starting with "SUGGESTIONS:", provide exactly 3 short follow-up questions (comma-separated) that the user might want to ask next, based on your answer. These should be specific to the topic just discussed."""
 
-GOOD EXAMPLE:
-User: "How many people spoke?"
-You: "At least 4 different speakers - I heard Mayor Johnson, Councillor Smith, a resident named Patricia, and someone from the planning department. Want me to list what each person discussed?"
-
-BAD EXAMPLE (too long, too uncertain):
-"Based on the provided transcript excerpts, it is difficult to determine exactly how many people spoke during the meeting. The excerpts are fragmented and do not provide clear indicators..." """
-
-        # Build the user prompt
-        user_prompt = f"""Here's the meeting transcript:
+    user_prompt = f"""Here's the meeting transcript:
 
 {context_transcript}
 
@@ -7887,52 +7933,115 @@ Meeting stats: {duration_minutes} minutes long, approximately {transcript_stats.
 
 User's question: {query}"""
 
-        # Call OpenAI
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
+    return {
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+        "transcript_stats": transcript_stats,
+        "model": model,
+    }
 
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.7,
-            max_tokens=300,  # Keep responses SHORT
-        )
 
-        answer = completion.choices[0].message.content
-        print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Generated response: {len(answer)} chars")
+def _parse_chat_suggestions(answer_text):
+    """Extract inline SUGGESTIONS: from chat response. Returns (clean_answer, suggestions_list)."""
+    suggestions = []
+    clean = answer_text
+    if "SUGGESTIONS:" in answer_text:
+        parts = answer_text.split("SUGGESTIONS:", 1)
+        clean = parts[0].strip()
+        raw = parts[1].strip()
+        suggestions = [s.strip().strip('"').strip("\'") for s in raw.split(",") if s.strip()]
+        suggestions = [s if s.endswith("?") else s + "?" for s in suggestions][:3]
+    return clean, suggestions
 
-        # Generate contextual follow-up suggestions
-        follow_ups = []
-        query_lower = query.lower()
-        
-        if "speak" in query_lower or "who" in query_lower:
-            follow_ups = ["What did they discuss?", "Any disagreements?", "Who spoke the most?"]
-        elif "decision" in query_lower or "vote" in query_lower:
-            follow_ups = ["What was the vote count?", "Any opposition?", "What happens next?"]
-        elif "summary" in query_lower or "about" in query_lower:
-            follow_ups = ["Any surprises?", "Key decisions?", "Who was there?"]
-        else:
-            follow_ups = ["Tell me more", "Any related decisions?", "What else was discussed?"]
 
-        return {
-            "answer": answer,
-            "sources": [],  # We're using full transcript now, not chunks
-            "suggestions": follow_ups,
-            "stats": transcript_stats
-        }
+@app.post("/api/assistant/chat")
+async def chat_with_meeting(req: Request):
+    """v9 ENHANCED: Conversational AI assistant with streaming support, model selection, conversation memory."""
+    check_rate_limit(req, _rate_ai)
+    data = await req.json()
+    query = data.get("query", "").strip()
+    meeting_id = data.get("meetingId")
+    conversation_history = data.get("conversationHistory", [])
+    model = data.get("model", "gpt-4o")
+
+    if not query:
+        raise HTTPException(400, "No query provided")
+
+    try:
+        ctx = _build_chat_context(meeting_id, query, conversation_history, model)
+        if "error" in ctx:
+            return {"answer": ctx["error"], "sources": [], "suggestions": ["Load a YouTube video"]}
+
+        answer = call_ai_api(ctx["user_prompt"], max_tokens=500, model=model, temperature=0.7, system_prompt=ctx["system_prompt"])
+        if not answer:
+            return {"answer": "Sorry, I couldn't generate a response. Please try again.", "sources": [], "suggestions": []}
+
+        answer = fix_brooklyn(answer)
+        clean_answer, suggestions = _parse_chat_suggestions(answer)
+
+        if not suggestions:
+            query_lower = query.lower()
+            if "speak" in query_lower or "who" in query_lower:
+                suggestions = ["What did they discuss?", "Any disagreements?", "Who spoke the most?"]
+            elif "decision" in query_lower or "vote" in query_lower:
+                suggestions = ["What was the vote count?", "Any opposition?", "What happens next?"]
+            else:
+                suggestions = ["Tell me more", "Any related decisions?", "What else was discussed?"]
+
+        return {"answer": clean_answer, "sources": [], "suggestions": suggestions, "stats": ctx["transcript_stats"]}
 
     except Exception as e:
-        print(f"ÃƒÂ¢Ã‚ÂÃ…â€™ Chat error: {e}")
+        print(f"Chat error: {e}")
         import traceback
-        print(traceback.format_exc())
-        return {
-            "answer": "Sorry, I hit a snag processing that. Could you try rephrasing your question?",
-            "sources": [],
-            "suggestions": ["Try a simpler question", "Ask about a specific topic"]
-        }
+        traceback.print_exc()
+        return {"answer": "Sorry, I hit a snag processing that. Could you try rephrasing your question?", "sources": [], "suggestions": ["Try a simpler question"]}
+
+
+@app.post("/api/assistant/chat/stream")
+async def chat_with_meeting_stream(req: Request):
+    """SSE streaming chat endpoint — streams AI response token by token."""
+    check_rate_limit(req, _rate_ai)
+    data = await req.json()
+    query = data.get("query", "").strip()
+    meeting_id = data.get("meetingId")
+    conversation_history = data.get("conversationHistory", [])
+    model = data.get("model", "gpt-4o")
+
+    if not query:
+        raise HTTPException(400, "No query provided")
+
+    ctx = _build_chat_context(meeting_id, query, conversation_history, model)
+    if "error" in ctx:
+        async def error_stream():
+            yield f"data: {json.dumps({'error': ctx['error']})}\n\n"
+        return StreamingResponse(error_stream(), media_type="text/event-stream")
+
+    def generate():
+        full_text = ""
+        try:
+            for chunk in call_ai_api_stream(ctx["user_prompt"], max_tokens=500, model=model, temperature=0.7, system_prompt=ctx["system_prompt"]):
+                full_text += chunk
+                yield f"data: {json.dumps({'text': chunk})}\n\n"
+
+            # Parse suggestions from the complete response
+            clean_answer, suggestions = _parse_chat_suggestions(full_text)
+            if not suggestions:
+                query_lower = query.lower()
+                if "speak" in query_lower or "who" in query_lower:
+                    suggestions = ["What did they discuss?", "Any disagreements?", "Who spoke the most?"]
+                elif "decision" in query_lower or "vote" in query_lower:
+                    suggestions = ["What was the vote count?", "Any opposition?", "What happens next?"]
+                else:
+                    suggestions = ["Tell me more", "Any related decisions?", "What else was discussed?"]
+
+            yield f"data: {json.dumps({'done': True, 'suggestions': suggestions, 'stats': ctx['transcript_stats']})}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            print(f"Chat stream error: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
 @app.post("/api/assistant/suggestions")
 async def get_chat_suggestions(req: Request):
     """Get AI-powered suggested questions based on meeting content"""
@@ -8805,6 +8914,29 @@ async def get_clip_preview(req: Request):
 
 # Data storage for new features (in-memory, use database for production)
 TOPIC_SUBSCRIPTIONS = {}  # {user_id: {topic: {email, frequency, created_at}}}
+_SUBSCRIPTIONS_FILE = os.path.join(BASE_DIR, "cache", "subscriptions.json")
+
+def _load_subscriptions():
+    """Load subscriptions from disk."""
+    global TOPIC_SUBSCRIPTIONS
+    try:
+        if os.path.exists(_SUBSCRIPTIONS_FILE):
+            with open(_SUBSCRIPTIONS_FILE, 'r') as f:
+                TOPIC_SUBSCRIPTIONS = json.load(f)
+            print(f"[Subscriptions] Loaded {sum(len(v) for v in TOPIC_SUBSCRIPTIONS.values())} subscriptions")
+    except Exception as e:
+        print(f"[Subscriptions] Load error: {e}")
+
+def _save_subscriptions():
+    """Persist subscriptions to disk."""
+    try:
+        os.makedirs(os.path.dirname(_SUBSCRIPTIONS_FILE), exist_ok=True)
+        with open(_SUBSCRIPTIONS_FILE, 'w') as f:
+            json.dump(TOPIC_SUBSCRIPTIONS, f, indent=2)
+    except Exception as e:
+        print(f"[Subscriptions] Save error: {e}")
+
+_load_subscriptions()
 ISSUE_TIMELINES = {}  # {issue_id: {name, meetings: [{video_id, date, summary}]}}
 JARGON_DICTIONARY = {
     "TIF": "Tax Increment Financing - A special zone where property tax increases fund local improvements. For example, when a city designates a blighted area as a TIF district, property tax growth in that area goes toward improving streets, utilities, and buildings rather than the general city budget.",
@@ -8856,6 +8988,7 @@ async def create_subscription(req: Request):
         "created_at": datetime.now().isoformat(),
         "match_count": 0
     }
+    _save_subscriptions()
     return {"status": "subscribed", "topic": topic}
 
 @app.get("/api/subscriptions/list")
@@ -8872,24 +9005,53 @@ async def delete_subscription(req: Request):
     
     if user_id in TOPIC_SUBSCRIPTIONS and topic in TOPIC_SUBSCRIPTIONS[user_id]:
         del TOPIC_SUBSCRIPTIONS[user_id][topic]
+        _save_subscriptions()
     return {"status": "unsubscribed", "topic": topic}
 
 @app.post("/api/subscriptions/check_matches")
 async def check_subscription_matches(req: Request):
     data = await req.json()
     transcript = data.get("transcript", "")
+    video_id = data.get("video_id", "")
+    video_title = data.get("video_title", "")
     user_id = "default_user"
-    
+
     matches = []
     subs = TOPIC_SUBSCRIPTIONS.get(user_id, {})
-    
+    transcript_lower = transcript.lower()
+
     for topic, sub_data in subs.items():
-        if topic.lower() in transcript.lower():
-            idx = transcript.lower().find(topic.lower())
-            context = transcript[max(0, idx-50):idx+len(topic)+50]
-            matches.append({"topic": topic, "context": f"...{context}..."})
+        topic_lower = topic.lower()
+        if topic_lower in transcript_lower:
+            # Find all occurrences and collect contexts
+            contexts = []
+            start = 0
+            while True:
+                idx = transcript_lower.find(topic_lower, start)
+                if idx == -1:
+                    break
+                context = transcript[max(0, idx-80):idx+len(topic)+80].strip()
+                contexts.append(f"...{context}...")
+                start = idx + len(topic)
+                if len(contexts) >= 3:  # Max 3 context excerpts per topic
+                    break
+
+            mention_count = transcript_lower.count(topic_lower)
+            matches.append({
+                "topic": topic,
+                "context": contexts[0] if contexts else "",
+                "all_contexts": contexts,
+                "mention_count": mention_count,
+                "video_id": video_id,
+                "video_title": video_title,
+            })
             TOPIC_SUBSCRIPTIONS[user_id][topic]["match_count"] = sub_data.get("match_count", 0) + 1
-    
+            TOPIC_SUBSCRIPTIONS[user_id][topic]["last_match_video"] = video_id
+            TOPIC_SUBSCRIPTIONS[user_id][topic]["last_match_title"] = video_title
+
+    if matches:
+        _save_subscriptions()
+
     return {"matches": matches}
 
 # Issue Timeline
