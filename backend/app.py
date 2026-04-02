@@ -531,28 +531,65 @@ live_manager = LiveMeetingManager()
 
 
 async def get_transcript_via_api(video_id):
-    """Use YouTube API for caption tracks"""
-    if not YOUTUBE_API_KEY:
-        return None
-
+    """Use YouTube's public timedtext API to fetch captions (works from cloud IPs)."""
     try:
-        url = f"https://www.googleapis.com/youtube/v3/captions?videoId={video_id}&key={YOUTUBE_API_KEY}&part=snippet"
+        # Step 1: Get the video page to find caption track info
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            # Try the innertube API — works without cookies
+            innertube_url = "https://www.youtube.com/youtubei/v1/player"
+            payload = {
+                "context": {
+                    "client": {
+                        "hl": "en",
+                        "gl": "US",
+                        "clientName": "WEB",
+                        "clientVersion": "2.20240101.00.00"
+                    }
+                },
+                "videoId": video_id
+            }
+            resp = await client.post(innertube_url, json=payload, headers={"Content-Type": "application/json"})
+            if resp.status_code != 200:
+                print(f"   innertube API returned {resp.status_code}")
+                return None
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url)
-            data = response.json()
+            data = resp.json()
+            captions = data.get("captions", {}).get("playerCaptionsTracklistRenderer", {}).get("captionTracks", [])
 
-            if "items" in data and len(data["items"]) > 0:
-                caption_id = data["items"][0]["id"]
-                caption_url = f"https://www.googleapis.com/youtube/v3/captions/{caption_id}?key={YOUTUBE_API_KEY}&tfmt=vtt"
-                caption_response = await client.get(caption_url)
+            if not captions:
+                print(f"   No caption tracks found via innertube")
+                return None
 
-                if caption_response.status_code == 200:
-                    return caption_response.text
+            # Find English caption track
+            caption_url = None
+            for track in captions:
+                lang = track.get("languageCode", "")
+                if lang.startswith("en"):
+                    caption_url = track.get("baseUrl", "")
+                    break
+            # Fallback: first available track
+            if not caption_url and captions:
+                caption_url = captions[0].get("baseUrl", "")
 
-        return None
+            if not caption_url:
+                return None
+
+            # Append format parameter for VTT
+            if "fmt=" not in caption_url:
+                caption_url += "&fmt=vtt"
+            else:
+                caption_url = caption_url.replace("fmt=srv3", "fmt=vtt").replace("fmt=json3", "fmt=vtt")
+
+            print(f"   Fetching captions from timedtext URL...")
+            caption_resp = await client.get(caption_url)
+            if caption_resp.status_code == 200 and caption_resp.text.strip().startswith("WEBVTT"):
+                print(f"   Got VTT via innertube API ({len(caption_resp.text)} chars)")
+                return caption_resp.text
+
+            print(f"   Caption fetch failed: status={caption_resp.status_code}")
+            return None
     except Exception as e:
-        print(f"YouTube API error: {e}")
+        print(f"   innertube transcript error: {e}")
         return None
 
 

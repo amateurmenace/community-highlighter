@@ -2987,7 +2987,10 @@ function CivicMeetingFinder({ onSelectVideo }) {
 
       // Cache results in localStorage (15 min TTL)
       try {
-        localStorage.setItem(cacheKey, JSON.stringify({ items, ts: Date.now(), fallback: !!data.fallback }));
+        // Only cache successful API results, not fallback/error results
+        if (!data.fallback) {
+          localStorage.setItem(cacheKey, JSON.stringify({ items, ts: Date.now() }));
+        }
       } catch (e) { /* localStorage full — ignore */ }
 
       // Save to recent searches
