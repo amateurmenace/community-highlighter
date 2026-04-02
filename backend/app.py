@@ -20,7 +20,7 @@ from fastapi import (
     Form,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from youtube_transcript_api import YouTubeTranscriptApi
 try:
@@ -53,7 +53,7 @@ LIVE_CHAT_AVAILABLE = False
 
 
 def fix_brooklyn(text):
-    """Replace Brooklyn with Brookline AND fix Martin Luther -> Martin Luther King"""
+    """Replace Brooklyn with Brookline, fix Martin Luther, and fix encoding artifacts."""
     if not text:
         return text
     import re
@@ -62,12 +62,38 @@ def fix_brooklyn(text):
     text = re.sub(r'\bbrooklyn\b', 'brookline', text)
     # v6.0: Fix Martin Luther truncation - always use full name
     text = re.sub(r'\bMartin Luther\b(?! King)', 'Martin Luther King', text, flags=re.IGNORECASE)
+    # v8.0: Fix UTF-8 double-encoding artifacts (â€", â€™, â€œ, etc.)
+    text = text.replace('\u00e2\u0080\u0094', '\u2014')  # em dash —
+    text = text.replace('\u00e2\u0080\u0093', '\u2013')  # en dash –
+    text = text.replace('\u00e2\u0080\u0099', '\u2019')  # right single quote '
+    text = text.replace('\u00e2\u0080\u009c', '\u201c')  # left double quote "
+    text = text.replace('\u00e2\u0080\u009d', '\u201d')  # right double quote "
+    text = text.replace('\u00c3\u00a2', '\u00e2')        # â
+    text = text.replace('\u00e2\u0080\u00a6', '\u2026')  # ellipsis …
+    # Common mojibake patterns (visible as garbled text in browser)
+    text = text.replace('â€"', '\u2014')   # em dash
+    text = text.replace('â€"', '\u2013')   # en dash
+    text = text.replace('â€™', '\u2019')   # right single quote
+    text = text.replace('â€œ', '\u201c')   # left double quote
+    text = text.replace('â€\x9d', '\u201d') # right double quote
+    text = text.replace('â€˜', '\u2018')   # left single quote
+    text = text.replace('â€¦', '\u2026')   # ellipsis
+    text = text.replace('â\x80\x94', '\u2014')
+    text = text.replace('â\x80\x93', '\u2013')
+    text = text.replace('â\x80\x99', '\u2019')
+    # Catch any remaining standalone â (mojibake artifact, not a real word character)
+    # Replace â followed by space/punctuation with em dash
+    text = re.sub(r'â\s', '\u2014 ', text)
+    # Replace â at end of string
+    text = re.sub(r'â$', '\u2014', text)
+    # Replace â between punctuation/words (e.g., "MA â March")
+    text = re.sub(r'(?<=\S)\s*â\s*(?=\S)', ' \u2014 ', text)
     return text
 
 
 # AI Optimization Support (optional)
 try:
-    from ai_cache import cached_ai_analysis, get_cache_stats, clear_cache
+    from ai_cache import cached_ai_analysis, get_cache_stats, clear_cache, get_cached_result, save_to_cache
     from smart_sampling import smart_sample_transcript, should_use_sampling
     from hybrid_rules import extract_all_structured_data
     from optimized_prompts import (
@@ -79,6 +105,11 @@ try:
     OPTIMIZATIONS_AVAILABLE = False  # Disabled for now
 except ImportError:
     OPTIMIZATIONS_AVAILABLE = False
+    # Provide no-op fallbacks for cache functions used by summary endpoint
+    def get_cached_result(*args, **kwargs):
+        return None
+    def save_to_cache(*args, **kwargs):
+        pass
     print("  AI optimizations not installed (app runs in standard mode)")
 
 try:
@@ -101,7 +132,22 @@ except:
     pass
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
+YOUTUBE_API_KEY_SECONDARY = os.getenv("YOUTUBE_API_KEY_SECONDARY", "")
+_youtube_active_key = None  # Tracks which key to use (None = primary first)
+
+# Auto-detect yt-dlp path (check venv, homebrew, then PATH)
+YT_DLP_PATH = None
+for _candidate in [
+    os.path.join(os.path.dirname(__file__), 'venv', 'bin', 'yt-dlp'),
+    os.path.join(os.path.dirname(__file__), '.venv', 'bin', 'yt-dlp'),
+    shutil.which('yt-dlp'),
+]:
+    if _candidate and os.path.isfile(_candidate):
+        YT_DLP_PATH = _candidate
+        break
+print(f"[startup] yt-dlp path: {YT_DLP_PATH or 'not found (will use yt_dlp module)'}")
 
 # Webshare Residential Proxy Configuration
 # Sign up at https://www.webshare.io/ and get rotating residential proxy credentials
@@ -561,9 +607,9 @@ def extract_key_points_from_chunk(chunk, chunk_num, total_chunks, model="gpt-4o"
     if not OPENAI_API_KEY:
         return None
 
-    # Delay between chunks to avoid rate limiting
-    if chunk_num > 1:
-        time.sleep(3)
+    # Small delay for later chunks to stagger parallel requests
+    if chunk_num > 2:
+        time.sleep(0.5)
 
     system_prompt = """You are an expert analyst specializing in civic and government meetings. 
 Your task is to extract the most important information from this segment of a meeting transcript."""
@@ -726,12 +772,56 @@ Respond in this EXACT JSON format with EXACTLY 10 items in the highlights array:
 
         max_tokens = 4000  # Increased for 10 full highlights
 
+    elif strategy == "report":
+        system_prompt = """You are a local government reporter writing for a community newspaper.
+Write in journalistic style: inverted pyramid, active voice, specific details.
+Use subheadings to organize sections. Include direct quotes from speakers when available."""
+
+        user_prompt = f"""Write a news article about this civic meeting based on the extracted information.
+
+KEY INFORMATION FROM MEETING:
+
+DECISIONS & VOTES:
+{chr(10).join(f" {d}" for d in combined_decisions[:20])}
+
+MAJOR DISCUSSIONS:
+{chr(10).join(f" {d}" for d in combined_discussions[:20])}
+
+ACTION ITEMS:
+{chr(10).join(f" {a}" for a in combined_actions[:15])}
+
+NOTABLE QUOTES:
+{chr(10).join(f' "{q}"' for q in combined_quotes[:15])}
+
+Write the article with:
+1. A headline (on its own line, prefixed with "HEADLINE: ")
+2. A lede paragraph summarizing the most important outcome
+3. 2-4 body sections with **bold subheadings** covering different topics
+4. Direct quotes from speakers woven into the narrative
+5. A closing paragraph on next steps or upcoming dates
+6. Active voice, specific names/numbers, no bullet points"""
+        max_tokens = 2000
+
     else:
         system_prompt = """You are an expert at writing executive summaries for civic and government meetings.
 Your summaries are conversational, clear, factual, and focus on outcomes that matter to residents.
 Write in flowing paragraphs, NOT bullet points or quote fragments."""
 
-        if strategy == "concise":
+        if strategy == "executive":
+            user_prompt = f"""Based on the key information extracted from a civic meeting, write a 2-sentence executive brief.
+
+DECISIONS MADE:
+{chr(10).join(f" {d}" for d in combined_decisions[:10])}
+
+MAJOR DISCUSSIONS:
+{chr(10).join(f" {d}" for d in combined_discussions[:10])}
+
+Sentence 1: What was discussed (main topics).
+Sentence 2: What was decided or what happens next.
+
+Start with "At this meeting," and keep it under 60 words total."""
+            max_tokens = 150
+        elif strategy == "concise":
             user_prompt = f"""Based on the key information extracted from a civic meeting, write a concise executive summary.
 
 KEY INFORMATION FROM MEETING:
@@ -790,6 +880,74 @@ CRITICAL: Always begin with "At this meeting," and write in complete, flowing pa
     )
 
     return result
+
+
+def call_gemini_api(
+    prompt,
+    max_tokens=400,
+    model="gemini-2.5-flash",
+    temperature=0.3,
+    system_prompt=None,
+    response_format=None,
+    retry_on_rate_limit=True,
+):
+    """Call Google Gemini API. Supports 1M token context — no chunking needed for most transcripts."""
+    if not GOOGLE_API_KEY:
+        print("[Gemini] No GOOGLE_API_KEY configured, falling back to OpenAI")
+        return call_openai_api(prompt, max_tokens, "gpt-4o", temperature, system_prompt, response_format, retry_on_rate_limit)
+
+    import requests as req
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GOOGLE_API_KEY}"
+
+    contents = [{"role": "user", "parts": [{"text": prompt}]}]
+
+    # Gemini tokenizes differently — needs ~4x the maxOutputTokens for equivalent output length
+    gemini_max_tokens = max(max_tokens * 4, 2048)
+
+    body = {
+        "contents": contents,
+        "generationConfig": {
+            "maxOutputTokens": gemini_max_tokens,
+            "temperature": temperature,
+        }
+    }
+
+    if system_prompt:
+        body["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+
+    if response_format == "json_object":
+        body["generationConfig"]["responseMimeType"] = "application/json"
+
+    try:
+        print(f"[Gemini] Calling {model} (max_tokens={max_tokens})")
+        response = req.post(url, json=body, timeout=120)
+
+        if response.status_code == 429 and retry_on_rate_limit:
+            print("[Gemini] Rate limited, waiting 2s...")
+            time.sleep(2)
+            response = req.post(url, json=body, timeout=120)
+
+        if response.status_code != 200:
+            print(f"[Gemini] Error {response.status_code}: {response.text[:200]}")
+            return None
+
+        data = response.json()
+        text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        if text:
+            print(f"[Gemini] Response: {len(text)} chars")
+            return text
+        return None
+    except Exception as e:
+        print(f"[Gemini] Exception: {e}")
+        return None
+
+
+def call_ai_api(prompt, max_tokens=400, model="gpt-4o", temperature=0.3,
+                system_prompt=None, response_format=None, retry_on_rate_limit=True):
+    """Smart router: sends Gemini models to Gemini API, everything else to OpenAI."""
+    if model.startswith("gemini-"):
+        return call_gemini_api(prompt, max_tokens, model, temperature, system_prompt, response_format, retry_on_rate_limit)
+    return call_openai_api(prompt, max_tokens, model, temperature, system_prompt, response_format, retry_on_rate_limit)
 
 
 def call_openai_api(
@@ -919,6 +1077,93 @@ def call_openai_api(
 
     print("[OpenAI] All models failed")
     return None
+
+
+def call_openai_api_stream(prompt, max_tokens=2000, model="gpt-4o", temperature=0.3, system_prompt=None):
+    """Streaming version of call_openai_api. Yields text chunks."""
+    if not OPENAI_API_KEY:
+        return
+    if system_prompt is None:
+        system_prompt = "You are a helpful assistant that analyzes meeting transcripts."
+
+    data = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": temperature,
+        "stream": True,
+    }
+    if model.startswith("gpt-5"):
+        data["max_completion_tokens"] = max_tokens
+    else:
+        data["max_tokens"] = max_tokens
+
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    try:
+        with httpx.Client(timeout=180.0) as client:
+            with client.stream("POST", "https://api.openai.com/v1/chat/completions", headers=headers, json=data) as resp:
+                if resp.status_code != 200:
+                    print(f"[OpenAI Stream] Error {resp.status_code}")
+                    return
+                for line in resp.iter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:]
+                    if payload.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(payload)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        if delta:
+                            yield delta
+                    except json.JSONDecodeError:
+                        continue
+    except Exception as e:
+        print(f"[OpenAI Stream] Exception: {e}")
+
+
+def call_gemini_api_stream(prompt, max_tokens=2000, model="gemini-2.5-flash", temperature=0.3, system_prompt=None):
+    """Streaming version of call_gemini_api. Yields text chunks."""
+    if not GOOGLE_API_KEY:
+        yield from call_openai_api_stream(prompt, max_tokens, "gpt-4o", temperature, system_prompt)
+        return
+
+    import requests as req_lib
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse&key={GOOGLE_API_KEY}"
+    gemini_max_tokens = max(max_tokens * 4, 2048)
+    body = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"maxOutputTokens": gemini_max_tokens, "temperature": temperature},
+    }
+    if system_prompt:
+        body["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+    try:
+        resp = req_lib.post(url, json=body, timeout=120, stream=True)
+        if resp.status_code != 200:
+            print(f"[Gemini Stream] Error {resp.status_code}")
+            return
+        for line in resp.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data: "):
+                continue
+            try:
+                chunk = json.loads(line[6:])
+                text = chunk.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                if text:
+                    yield text
+            except (json.JSONDecodeError, IndexError):
+                continue
+    except Exception as e:
+        print(f"[Gemini Stream] Exception: {e}")
+
+
+def call_ai_api_stream(prompt, max_tokens=2000, model="gpt-4o", temperature=0.3, system_prompt=None):
+    """Smart router for streaming: Gemini models to Gemini stream, else OpenAI stream."""
+    if model.startswith("gemini-"):
+        yield from call_gemini_api_stream(prompt, max_tokens, model, temperature, system_prompt)
+    else:
+        yield from call_openai_api_stream(prompt, max_tokens, model, temperature, system_prompt)
 
 
 def generate_fallback_summary(transcript):
@@ -1803,7 +2048,20 @@ async def summary_ai(req: Request):
     """Smart map-reduce strategy for long transcripts - FIXED duplication"""
     check_rate_limit(req, _rate_ai)
     try:
-        return await _summary_ai_impl(req)
+        result = await _summary_ai_impl(req)
+        # Post-process: fix Brooklyn→Brookline and other common AI mistakes
+        if isinstance(result, dict) and "summarySentences" in result:
+            ss = result["summarySentences"]
+            if isinstance(ss, str):
+                result["summarySentences"] = fix_brooklyn(ss)
+            elif isinstance(ss, list):
+                # Timestamped sentences array — fix text in each sentence
+                for s in ss:
+                    if isinstance(s, dict) and "text" in s and isinstance(s["text"], str):
+                        s["text"] = fix_brooklyn(s["text"])
+        if isinstance(result, dict) and "headline" in result:
+            result["headline"] = fix_brooklyn(result.get("headline", ""))
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -1824,8 +2082,9 @@ async def _summary_ai_impl(req: Request):
     reel_style = data.get("reelStyle", None)  # Optional: key_decisions, public_comments, controversial, budget, action_items
     force_refresh = data.get("forceRefresh", False)  # New: bypass cache and get fresh results
 
-    # Validate and normalize model name - ensure we use a valid OpenAI model
-    valid_models = ["gpt-5.1", "gpt-5.1-chat-latest", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
+    # Validate and normalize model name
+    valid_models = ["gpt-5.1", "gpt-5.1-chat-latest", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo",
+                    "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
     if model not in valid_models:
         print(f"[summary_ai] Invalid model '{model}', defaulting to gpt-4o")
         model = "gpt-4o"
@@ -1833,19 +2092,156 @@ async def _summary_ai_impl(req: Request):
     if not transcript:
         raise HTTPException(400, "No transcript provided")
 
+    video_id = data.get("video_id", "")
     print(f"[summary_ai] Processing transcript: {len(transcript):,} characters, strategy={strategy}, model={model}, force_refresh={force_refresh}")
 
-    chunks, needs_processing = chunk_transcript_with_overlap(transcript, model)
+    # Check cache first (if video_id provided)
+    if video_id and not force_refresh:
+        try:
+            # Check timestamped cache first for executive strategy
+            if strategy == "executive":
+                cached_ts = get_cached_result(video_id, f"summary_{strategy}_ts", {"model": model})
+                if cached_ts is not None:
+                    print(f"[summary_ai] Cache hit for {strategy}_ts (video: {video_id[:8]}...)")
+                    return cached_ts
+            cached = get_cached_result(video_id, f"summary_{strategy}", {"model": model})
+            if cached is not None:
+                print(f"[summary_ai] Cache hit for {strategy} (video: {video_id[:8]}...)")
+                return cached
+        except Exception as e:
+            print(f"[summary_ai] Cache read error: {e}")
+
+    # Route Gemini models to Gemini API
+    use_gemini = model.startswith("gemini-")
+
+    # Executive brief: single fast call, no chunking needed
+    if strategy == "executive":
+        # Build timestamped transcript for AI
+        segments = data.get("segments", None)
+        timestamped_transcript = ""
+        if segments and isinstance(segments, list):
+            for seg in segments[:3000]:
+                s = seg.get("start", 0)
+                mins, secs = int(s) // 60, int(s) % 60
+                timestamped_transcript += f"[{mins:02d}:{secs:02d}] {seg.get('text', '')}\n"
+        if not timestamped_transcript:
+            timestamped_transcript = transcript[:30000]
+
+        system_prompt = """You are an expert civic meeting summarizer. Write clear, specific executive briefs for community stakeholders. You MUST return valid JSON."""
+        user_prompt = f"""Summarize this civic meeting in 4-5 sentences. Each sentence should reference the approximate timestamp where the topic occurs.
+
+Requirements:
+1. Start with "At this meeting,"
+2. Cover the main topics discussed
+3. Mention key decisions or votes with specifics (vote counts, dollar amounts)
+4. Note any notable public comments or community concerns
+5. End with next steps or upcoming dates
+6. For each sentence, include the timestamp (in seconds) of the most relevant part of the transcript
+
+Keep it factual and specific — include names and numbers when available.
+
+Return ONLY valid JSON in this format:
+{{
+  "sentences": [
+    {{"text": "At this meeting, ...", "timestamp_seconds": 120}},
+    {{"text": "The board voted ...", "timestamp_seconds": 540}},
+    {{"text": "Several residents ...", "timestamp_seconds": 1200}},
+    {{"text": "A budget of ...", "timestamp_seconds": 1800}},
+    {{"text": "Next steps include ...", "timestamp_seconds": 2400}}
+  ]
+}}
+
+TRANSCRIPT:
+{timestamped_transcript[:30000]}"""
+
+        ai_result = call_ai_api(
+            prompt=user_prompt,
+            max_tokens=1000,
+            model=model,
+            temperature=0.2,
+            system_prompt=system_prompt,
+            response_format="json_object",
+        )
+
+        if ai_result:
+            try:
+                # Attempt to fix truncated JSON (Gemini often cuts off)
+                cleaned = ai_result.strip()
+                if not cleaned.endswith("}"):
+                    open_brackets = cleaned.count("[") - cleaned.count("]")
+                    open_braces = cleaned.count("{") - cleaned.count("}")
+                    # Try to close the last sentence object if it's cut mid-field
+                    if '"timestamp_seconds"' in cleaned and not cleaned.rstrip().endswith("}"):
+                        # Find last complete sentence object
+                        last_brace = cleaned.rfind("}")
+                        if last_brace > 0:
+                            cleaned = cleaned[:last_brace + 1]
+                            open_brackets = cleaned.count("[") - cleaned.count("]")
+                            open_braces = cleaned.count("{") - cleaned.count("}")
+                    cleaned += "]" * max(0, open_brackets) + "}" * max(0, open_braces)
+
+                parsed = json.loads(cleaned)
+                sentences = parsed.get("sentences", [])
+                if isinstance(sentences, list) and len(sentences) > 0:
+                    # Filter to only complete sentence objects and fix Brooklyn→Brookline
+                    valid = [s for s in sentences if isinstance(s, dict) and s.get("text") and len(s["text"]) > 10]
+                    for s in valid:
+                        s["text"] = fix_brooklyn(s["text"])
+                    if valid:
+                        result = {"summarySentences": valid, "strategy": strategy, "hasTimestamps": True}
+                        if video_id:
+                            try:
+                                save_to_cache(video_id, f"summary_{strategy}_ts", result, {"model": model})
+                            except Exception:
+                                pass
+                        return result
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                print(f"[summary_ai] Executive JSON parse failed: {e}, falling back to plain text")
+
+            # Fallback: extract plain text from the AI result (strip JSON artifacts)
+            plain_text = ai_result
+            try:
+                # Try to extract just the text values from partial JSON
+                import re as _re
+                texts = _re.findall(r'"text"\s*:\s*"([^"]+)"', ai_result)
+                if texts and len(texts) >= 2:
+                    plain_text = " ".join(texts)
+            except Exception:
+                pass
+            plain_text = fix_brooklyn(plain_text)
+            result = {"summarySentences": plain_text, "strategy": strategy}
+            if video_id:
+                try:
+                    save_to_cache(video_id, f"summary_{strategy}", result, {"model": model})
+                except Exception:
+                    pass
+            return result
+
+        return {"summarySentences": "", "strategy": "error", "error": "Executive brief generation failed."}
+
+    # Gemini has 1M token context — skip chunking entirely
+    if use_gemini:
+        chunks, needs_processing = [transcript], False
+    else:
+        chunks, needs_processing = chunk_transcript_with_overlap(transcript, model)
 
     if needs_processing and len(chunks) > 1:
-        print(f"[summary_ai] Using map-reduce for {len(chunks)} chunks")
+        print(f"[summary_ai] Using map-reduce for {len(chunks)} chunks (parallel)")
 
+        # Parallel chunk processing via ThreadPoolExecutor
         all_key_points = []
-        for i, chunk in enumerate(chunks):
-            print(f"   Analyzing chunk {i+1}/{len(chunks)}...")
-            key_points = extract_key_points_from_chunk(chunk, i + 1, len(chunks), model)
-            if key_points:
-                all_key_points.append(key_points)
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {
+                executor.submit(extract_key_points_from_chunk, chunk, i + 1, len(chunks), model): i
+                for i, chunk in enumerate(chunks)
+            }
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    if result:
+                        all_key_points.append(result)
+                except Exception as e:
+                    print(f"   Chunk extraction error: {e}")
 
         if not all_key_points:
             print("Ãƒâ€šÃ‚Â  Key point extraction failed, using fallback")
@@ -1866,28 +2262,56 @@ async def _summary_ai_impl(req: Request):
 
                     if isinstance(highlights, list) and len(highlights) > 0:
                         print(f"[summary_ai] Generated {len(highlights)} highlights")
-                        return {
+                        resp = {
                             "summarySentences": json.dumps(highlights),
                             "strategy": strategy,
                         }
+                        if video_id:
+                            try:
+                                save_to_cache(video_id, f"summary_{strategy}", resp, {"model": model})
+                            except Exception:
+                                pass
+                        return resp
                 except json.JSONDecodeError:
                     print("Ãƒâ€šÃ‚Â  JSON parsing failed")
+            elif strategy == "report":
+                headline = ""
+                body = ai_result
+                if ai_result.startswith("HEADLINE:"):
+                    parts = ai_result.split("\n", 1)
+                    headline = parts[0].replace("HEADLINE:", "").strip()
+                    body = parts[1].strip() if len(parts) > 1 else ai_result
+                resp = {"summarySentences": body, "strategy": strategy, "headline": headline}
+                if video_id:
+                    try:
+                        save_to_cache(video_id, f"summary_{strategy}", resp, {"model": model})
+                    except Exception:
+                        pass
+                return resp
             else:
                 print(f"[summary_ai] Generated summary ({len(ai_result)} chars)")
-                return {"summarySentences": ai_result, "strategy": strategy}
+                resp = {"summarySentences": ai_result, "strategy": strategy}
+                if video_id:
+                    try:
+                        save_to_cache(video_id, f"summary_{strategy}", resp, {"model": model})
+                    except Exception:
+                        pass
+                return resp
 
     else:
         print("[summary_ai] Transcript fits in one chunk")
 
         if strategy == "highlights_with_quotes":
-            system_prompt = """You are an expert at analyzing civic and government meetings. 
+            system_prompt = """You are an expert at analyzing civic and government meetings.
 You identify the most important moments, decisions, and discussions that matter to residents.
 You ALWAYS return exactly 10 highlights, no more, no less."""
 
+            # Gemini supports much larger context
+            max_transcript = 500000 if use_gemini else 80000
             user_prompt = f"""Analyze this civic meeting transcript and create EXACTLY 10 key highlights with direct quotes.
 
 TRANSCRIPT:
-{transcript[:80000]}
+{transcript[:max_transcript]}
 
 MANDATORY: Return EXACTLY 10 highlights. The highlights array MUST have 10 items.
 
@@ -1915,7 +2339,8 @@ Respond in this EXACT JSON format with EXACTLY 10 items:
   ]
 }}"""
 
-            ai_result = call_openai_api(
+            _call = call_gemini_api if use_gemini else call_openai_api
+            ai_result = _call(
                 prompt=user_prompt,
                 max_tokens=4000,
                 model=model,
@@ -1930,14 +2355,60 @@ Respond in this EXACT JSON format with EXACTLY 10 items:
                     highlights = parsed.get("highlights", [])
                     print(f"[summary_ai] Single chunk returned {len(highlights)} highlights")
                     if isinstance(highlights, list) and len(highlights) > 0:
-                        # Don't pad - if GPT-5.1 returns fewer than 10, show what it returned
-                        # Quality over quantity - no placeholder text
-                        return {
+                        resp = {
                             "summarySentences": json.dumps(highlights[:10]),
                             "strategy": strategy,
                         }
+                        if video_id:
+                            try:
+                                save_to_cache(video_id, f"summary_{strategy}", resp, {"model": model})
+                            except Exception:
+                                pass
+                        return resp
                 except Exception as e:
                     print(f"[summary_ai] JSON parse error: {e}")
+
+        elif strategy == "report":
+            system_prompt = """You are a local government reporter writing for a community newspaper.
+Write in journalistic style: inverted pyramid, active voice, specific details.
+Use subheadings to organize sections. Include direct quotes from speakers when available."""
+
+            user_prompt = f"""Write a news article about this civic meeting.
+
+TRANSCRIPT:
+{transcript[:80000]}
+
+Write the article with:
+1. A headline (on its own line, prefixed with "HEADLINE: ")
+2. A lede paragraph summarizing the most important outcome
+3. 2-4 body sections with **bold subheadings** covering different topics
+4. Direct quotes from speakers woven into the narrative
+5. A closing paragraph on next steps or upcoming dates
+6. Active voice, specific names/numbers, no bullet points"""
+
+            _call = call_gemini_api if use_gemini else call_openai_api
+            ai_result = _call(
+                prompt=user_prompt,
+                max_tokens=2000,
+                model=model,
+                temperature=0.4,
+                system_prompt=system_prompt,
+            )
+
+            if ai_result:
+                headline = ""
+                body = ai_result
+                if ai_result.startswith("HEADLINE:"):
+                    parts = ai_result.split("\n", 1)
+                    headline = parts[0].replace("HEADLINE:", "").strip()
+                    body = parts[1].strip() if len(parts) > 1 else ai_result
+                resp = {"summarySentences": body, "strategy": strategy, "headline": headline}
+                if video_id:
+                    try:
+                        save_to_cache(video_id, f"summary_{strategy}", resp, {"model": model})
+                    except Exception:
+                        pass
+                return resp
 
         else:
             system_prompt = """You are an expert at summarizing civic and government meetings.
@@ -1974,7 +2445,8 @@ Requirements:
 
 Write a comprehensive 2-3 paragraph summary."""
 
-            ai_result = call_openai_api(
+            _call = call_gemini_api if use_gemini else call_openai_api
+            ai_result = _call(
                 prompt=user_prompt,
                 max_tokens=800 if strategy == "detailed" else 500,
                 model=model,
@@ -1983,7 +2455,13 @@ Write a comprehensive 2-3 paragraph summary."""
             )
 
             if ai_result:
-                return {"summarySentences": ai_result, "strategy": strategy}
+                resp = {"summarySentences": ai_result, "strategy": strategy}
+                if video_id:
+                    try:
+                        save_to_cache(video_id, f"summary_{strategy}", resp, {"model": model})
+                    except Exception:
+                        pass
+                return resp
 
     print("[summary_ai] All AI methods failed, using improved fallback")
     return {
@@ -1991,6 +2469,158 @@ Write a comprehensive 2-3 paragraph summary."""
         "strategy": "error",
         "error": "AI summary generation failed. Try refreshing or using a different AI model.",
     }
+
+
+@app.post("/api/summary_ai/stream")
+async def summary_ai_stream(req: Request):
+    """SSE streaming endpoint for report and highlights strategies."""
+    check_rate_limit(req, _rate_ai)
+    data = await req.json()
+    transcript = clean_text(data.get("transcript", ""))
+    language = data.get("language", "en")
+    model = data.get("model", "gpt-4o")
+    strategy = data.get("strategy", "report")
+    video_id = data.get("video_id", "")
+    force_refresh = data.get("forceRefresh", False)
+
+    if strategy not in ("report", "highlights_with_quotes", "executive"):
+        raise HTTPException(400, "Streaming only supports 'report', 'highlights_with_quotes', and 'executive' strategies")
+    if not transcript:
+        raise HTTPException(400, "No transcript provided")
+
+    valid_models = ["gpt-5.1", "gpt-5.1-chat-latest", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo",
+                    "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
+    if model not in valid_models:
+        model = "gpt-4o"
+
+    # Check cache first — stream cached result instantly
+    if video_id and not force_refresh:
+        try:
+            # For executive, check timestamped cache first
+            if strategy == "executive":
+                cached_ts = get_cached_result(video_id, f"summary_{strategy}_ts", {"model": model})
+                if cached_ts is not None:
+                    cached_data = cached_ts.get("summarySentences", "")
+                    if isinstance(cached_data, list):
+                        cached_data = json.dumps({"sentences": cached_data})
+                    async def cached_ts_stream():
+                        yield f"data: {json.dumps({'text': cached_data, 'cached': True})}\n\n"
+                        yield "data: [DONE]\n\n"
+                    return StreamingResponse(cached_ts_stream(), media_type="text/event-stream")
+            cached = get_cached_result(video_id, f"summary_{strategy}", {"model": model})
+            if cached is not None:
+                cached_text = cached.get("summarySentences", "")
+                if isinstance(cached_text, list):
+                    cached_text = json.dumps({"sentences": cached_text})
+                async def cached_stream():
+                    yield f"data: {json.dumps({'text': cached_text, 'cached': True})}\n\n"
+                    yield "data: [DONE]\n\n"
+                return StreamingResponse(cached_stream(), media_type="text/event-stream")
+        except Exception:
+            pass
+
+    use_gemini = model.startswith("gemini-")
+
+    if strategy == "executive":
+        system_prompt = "You are an expert civic meeting summarizer. Write clear, specific executive briefs for community stakeholders."
+        user_prompt = f"""Summarize this civic meeting in 4-5 sentences.
+
+Requirements:
+1. Start with "At this meeting,"
+2. Cover the main topics discussed
+3. Mention key decisions or votes with specifics (vote counts, dollar amounts)
+4. Note any notable public comments or community concerns
+5. End with next steps or upcoming dates
+
+Keep it factual and specific — include names and numbers when available.
+
+TRANSCRIPT:
+{transcript[:30000]}"""
+        max_tokens = 500
+    elif strategy == "report":
+        system_prompt = "You are an expert civic meeting reporter. Write clear, detailed reports for community stakeholders."
+        user_prompt = f"""Write a news-article-style report about this civic meeting.
+
+Start with HEADLINE: followed by a compelling headline on the first line.
+Then write the report body using the inverted pyramid style:
+- Lead with the most important decisions/outcomes
+- Use bold subheadings (**Topic**)
+- Include direct quotes where relevant
+- Cover all major topics discussed
+- End with next steps or upcoming dates
+
+TRANSCRIPT:
+{transcript[:100000 if use_gemini else 30000]}"""
+        max_tokens = 2000
+    else:
+        system_prompt = """You are an expert at analyzing civic and government meetings.
+You identify the most important moments, decisions, and discussions that matter to residents.
+You ALWAYS return exactly 10 highlights, no more, no less."""
+        max_transcript = 500000 if use_gemini else 80000
+        user_prompt = f"""Analyze this civic meeting transcript and create EXACTLY 10 key highlights with direct quotes.
+
+TRANSCRIPT:
+{transcript[:max_transcript]}
+
+MANDATORY: Return EXACTLY 10 highlights. The highlights array MUST have 10 items.
+
+For each highlight:
+1. Write a brief summary of the key point
+2. Include a COMPLETE quote (full sentence) from the transcript supporting it
+3. Assign a category: "vote", "budget", "public_comment", "announcement", "controversy", or "action_item"
+4. Rate importance 1-5 (5 = most critical)
+5. Identify the speaker if possible
+
+Cover DIFFERENT topics - don't repeat similar highlights.
+Include: votes/decisions, budget items, public comments, announcements.
+
+Respond in this EXACT JSON format with EXACTLY 10 items:
+{{
+  "highlights": [
+    {{
+      "highlight": "Summary of key point",
+      "quote": "Complete direct quote from transcript",
+      "category": "vote",
+      "importance": 5,
+      "speaker": "Speaker name or Unknown"
+    }}
+  ]
+}}"""
+        max_tokens = 4000
+
+    def generate_sse():
+        full_text = []
+        try:
+            for chunk in call_ai_api_stream(user_prompt, max_tokens, model, temperature=0.3 if strategy == "report" else 0.5, system_prompt=system_prompt):
+                full_text.append(chunk)
+                yield f"data: {json.dumps({'text': chunk})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+        # Cache the complete result
+        complete = "".join(full_text)
+        complete = fix_brooklyn(complete)
+        if video_id and complete:
+            try:
+                if strategy == "report":
+                    headline = ""
+                    body = complete
+                    if complete.startswith("HEADLINE:"):
+                        parts = complete.split("\n", 1)
+                        headline = parts[0].replace("HEADLINE:", "").strip()
+                        body = parts[1].strip() if len(parts) > 1 else complete
+                    save_to_cache(video_id, f"summary_{strategy}", {"summarySentences": body, "strategy": strategy, "headline": headline}, {"model": model})
+                else:
+                    parsed = json.loads(complete)
+                    highlights = parsed.get("highlights", [])
+                    if isinstance(highlights, list) and len(highlights) > 0:
+                        save_to_cache(video_id, f"summary_{strategy}", {"summarySentences": json.dumps(highlights), "strategy": strategy}, {"model": model})
+            except Exception as e:
+                print(f"[stream] Cache save error: {e}")
+
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generate_sse(), media_type="text/event-stream")
 
 
 @app.post("/api/summary_full")
@@ -2032,7 +2662,7 @@ COMPLETE TRANSCRIPT:
 
 Write a thorough, well-organized summary that captures the full scope of the meeting."""
 
-    ai_result = call_openai_api(
+    ai_result = call_ai_api(
         prompt=user_prompt,
         max_tokens=3000,  # More tokens for comprehensive summary
         model=model,
@@ -2076,7 +2706,7 @@ TRANSCRIPT:
 
 TRANSLATION ({target_lang}):"""
 
-    ai_result = call_openai_api(prompt, max_tokens=4000, model=model, temperature=0.3)
+    ai_result = call_ai_api(prompt, max_tokens=4000, model=model, temperature=0.3)
 
     if ai_result:
         print(f" Translated to {target_lang}")
@@ -2191,9 +2821,9 @@ Return valid JSON:
 Be strict - fewer high-quality entities is better than many low-quality ones."""
 
     try:
-        ai_result = call_openai_api(
+        ai_result = call_ai_api(
             prompt=user_prompt,
-            max_tokens=2000,
+            max_tokens=800,
             model=model,
             temperature=0.1,
             system_prompt=system_prompt,
@@ -2203,7 +2833,14 @@ Be strict - fewer high-quality entities is better than many low-quality ones."""
         if not ai_result:
             raise Exception("No API response")
 
-        result_data = json.loads(ai_result)
+        # Attempt to fix truncated JSON from Gemini (missing closing brackets)
+        cleaned = ai_result.strip()
+        if not cleaned.endswith("}"):
+            # Try to close any open JSON arrays/objects
+            open_brackets = cleaned.count("[") - cleaned.count("]")
+            open_braces = cleaned.count("{") - cleaned.count("}")
+            cleaned += "]" * max(0, open_brackets) + "}" * max(0, open_braces)
+        result_data = json.loads(cleaned)
         entities_list = result_data.get("entities", [])
 
         if not entities_list:
@@ -2308,11 +2945,9 @@ async def _ytdlp_search(q: str, maxResults: int = 20):
 
     def _run_single_search(query, limit):
         try:
-            result = subprocess.run(
-                [YT_DLP_PATH or 'yt-dlp', f'ytsearch{limit}:{query}',
-                 '--dump-json', '--flat-playlist', '--no-warnings', '--quiet'],
-                capture_output=True, text=True, timeout=30
-            )
+            # Use discovered path, fallback to sys.executable -m yt_dlp
+            cmd = [YT_DLP_PATH, f'ytsearch{limit}:{query}', '--dump-json', '--flat-playlist', '--no-warnings', '--quiet'] if YT_DLP_PATH else [sys.executable, '-m', 'yt_dlp', f'ytsearch{limit}:{query}', '--dump-json', '--flat-playlist', '--no-warnings', '--quiet']
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             items = []
             for line in result.stdout.strip().split('\n'):
                 if not line:
@@ -2360,7 +2995,7 @@ async def _ytdlp_search(q: str, maxResults: int = 20):
     all_items = all_items[:maxResults]
 
     print(f"[yt-dlp search] Found {len(all_items)} results for: {q}")
-    return {"items": all_items}
+    return {"items": all_items, "fallback": True, "fallback_reason": "yt-dlp search (YouTube API unavailable)"}
 
 
 @app.get("/api/youtube-search")
@@ -2369,11 +3004,21 @@ async def youtube_search(q: str, type: str = "video", maxResults: int = 10, orde
     """Search YouTube for videos (used by Civic Meeting Finder).
     Supports: municipality names, YouTube @handles, channel URLs.
     Filters: days (7/30/90/365/0=all), meetingType (all/council/board/planning/hearing/school).
-    Falls back to yt-dlp search if no YouTube API key is configured."""
+    Falls back to secondary API key on quota exceeded, then to yt-dlp search."""
+    global _youtube_active_key
     import re
-    api_key = os.environ.get("YOUTUBE_API_KEY", "") or YOUTUBE_API_KEY
-    if not api_key:
-        print(f"[YouTube] No API key — using yt-dlp search for: {q}")
+
+    # Key selection: use previously working key, or try primary first
+    primary = os.environ.get("YOUTUBE_API_KEY", "") or YOUTUBE_API_KEY
+    secondary = os.environ.get("YOUTUBE_API_KEY_SECONDARY", "") or YOUTUBE_API_KEY_SECONDARY
+    if _youtube_active_key == "secondary" and secondary:
+        api_key = secondary
+    elif primary:
+        api_key = primary
+    elif secondary:
+        api_key = secondary
+    else:
+        print(f"[YouTube] No API keys — using yt-dlp search for: {q}")
         return await _ytdlp_search(q, maxResults)
 
     try:
@@ -2432,6 +3077,14 @@ async def youtube_search(q: str, type: str = "video", maxResults: int = 10, orde
                     )
                 if resp.status_code == 200:
                     return resp.json().get("items", [])
+                elif resp.status_code == 403:
+                    error_body = resp.json() if resp.headers.get('content-type', '').startswith('application/json') else {}
+                    reason = error_body.get("error", {}).get("errors", [{}])[0].get("reason", "")
+                    if reason == "quotaExceeded":
+                        print(f"[YouTube] QUOTA EXCEEDED — will fall back to yt-dlp")
+                        return "QUOTA_EXCEEDED"
+                    print(f"[YouTube] 403 Forbidden: {reason or 'unknown'}")
+                    return []
                 else:
                     print(f"[YouTube] Query failed ({resp.status_code}): {query[:60]}")
                     return []
@@ -2477,7 +3130,23 @@ async def youtube_search(q: str, type: str = "video", maxResults: int = 10, orde
             print(f"[YouTube] Comprehensive search for: {q} ({len(search_queries)} queries, {day_label})")
             results = await asyncio.gather(*[run_query(sq[0], 10, sq[1]) for sq in search_queries])
 
+        # Check if any query hit quota limit — try secondary key, then yt-dlp
+        quota_hit = any(r == "QUOTA_EXCEEDED" for r in results)
+        if quota_hit:
+            # Try secondary key if we were using primary
+            if api_key == primary and secondary and api_key != secondary:
+                print(f"[YouTube] Primary key quota exceeded — retrying with secondary key")
+                _youtube_active_key = "secondary"
+                api_key = secondary
+                # Re-run the queries with the secondary key (recursive call)
+                return await youtube_search(q, type, maxResults, order, days, meetingType)
+            print(f"[YouTube] All API keys exhausted — falling back to yt-dlp search")
+            _youtube_active_key = None
+            return await _ytdlp_search(q, maxResults)
+
         for batch in results:
+            if not isinstance(batch, list):
+                continue
             for item in batch:
                 video_id = item.get("id", {}).get("videoId", "")
                 if video_id and video_id not in seen_ids:
@@ -2680,27 +3349,29 @@ Respond in this exact JSON format (no markdown):
   ]
 }}"""
 
-            response = openai_client.chat.completions.create(
-                model="gpt-4o-mini",  # Use fast model for this
-                messages=[
-                    {"role": "system", "content": "You are an expert at finding public government documents. Generate specific, targeted search queries. Always respond with valid JSON only."},
-                    {"role": "user", "content": prompt}
-                ],
+            # Use call_ai_api instead of direct OpenAI client
+            ai_response = call_ai_api(
+                prompt=prompt,
                 max_tokens=800,
-                temperature=0.3
+                model="gpt-4o-mini",
+                temperature=0.3,
+                system_prompt="You are an expert at finding public government documents. Generate specific, targeted search queries. Always respond with valid JSON only.",
+                response_format="json_object"
             )
             
-            ai_response = response.choices[0].message.content.strip()
-            
+            if not ai_response:
+                raise Exception("No AI response for document search")
+
             # Clean up response if needed
-            if ai_response.startswith("```"):
-                ai_response = ai_response.split("```")[1]
-                if ai_response.startswith("json"):
-                    ai_response = ai_response[4:]
-            ai_response = ai_response.strip()
-            
+            cleaned_resp = ai_response.strip()
+            if cleaned_resp.startswith("```"):
+                cleaned_resp = cleaned_resp.split("```")[1]
+                if cleaned_resp.startswith("json"):
+                    cleaned_resp = cleaned_resp[4:]
+            cleaned_resp = cleaned_resp.strip()
+
             try:
-                search_data = json.loads(ai_response)
+                search_data = json.loads(cleaned_resp)
             except json.JSONDecodeError:
                 # Fallback: generate basic searches from title
                 search_data = {
@@ -5781,6 +6452,26 @@ async def job_status_by_path(job_id: str):
     return JOBS.get(job_id, {"status": "error", "message": f"Unknown job: {job_id}"})
 
 
+@app.websocket("/ws/job/{job_id}")
+async def websocket_job_status(websocket: WebSocket, job_id: str):
+    """WebSocket endpoint for real-time job status push notifications."""
+    await websocket.accept()
+    try:
+        while True:
+            status = JOBS.get(job_id)
+            if status is None:
+                await websocket.send_json({"status": "error", "message": f"Unknown job: {job_id}"})
+                break
+            await websocket.send_json(status)
+            if status.get("status") in ("done", "error"):
+                break
+            await asyncio.sleep(0.5)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+
+
 @app.get("/api/video_capabilities")
 async def video_capabilities():
     """Get available video editing capabilities"""
@@ -8128,6 +8819,58 @@ async def generate_meeting_scorecard(req: Request):
             "engagement_score": min(100, (public_comments * 3) + (vote_count * 5) + len(hot_topics) * 2)
         }
     }
+
+
+@app.post("/api/share/precompute")
+async def share_precompute(req: Request):
+    """Precompute and cache summary/highlights for a shared video link."""
+    check_rate_limit(req, _rate_ai)
+    data = await req.json()
+    video_id = data.get("video_id", "")
+    transcript = clean_text(data.get("transcript", ""))
+
+    if not video_id or not transcript:
+        return {"status": "missing_data"}
+
+    # Check if already cached
+    already_cached = True
+    try:
+        if get_cached_result(video_id, "summary_executive_ts", {"model": "gpt-4o"}) is None:
+            if get_cached_result(video_id, "summary_executive", {"model": "gpt-4o"}) is None:
+                already_cached = False
+    except Exception:
+        already_cached = False
+
+    if already_cached:
+        return {"status": "already_cached"}
+
+    # Fire background precomputation
+    def precompute_task():
+        try:
+            system_prompt = "You are an expert civic meeting summarizer. Write clear, specific executive briefs for community stakeholders."
+            user_prompt = f"""Summarize this civic meeting in 4-5 sentences.
+
+Requirements:
+1. Start with "At this meeting,"
+2. Cover the main topics discussed
+3. Mention key decisions or votes with specifics (vote counts, dollar amounts)
+4. Note any notable public comments or community concerns
+5. End with next steps or upcoming dates
+
+Keep it factual and specific — include names and numbers when available.
+
+TRANSCRIPT:
+{transcript[:30000]}"""
+
+            ai_result = call_ai_api(user_prompt, 350, "gpt-4o", 0.2, system_prompt)
+            if ai_result:
+                save_to_cache(video_id, "summary_executive", {"summarySentences": ai_result, "strategy": "executive"}, {"model": "gpt-4o"})
+                print(f"[precompute] Cached executive brief for {video_id[:8]}...")
+        except Exception as e:
+            print(f"[precompute] Error: {e}")
+
+    threading.Thread(target=precompute_task, daemon=True).start()
+    return {"status": "precomputing"}
 
 
 @app.post("/api/share/moment")

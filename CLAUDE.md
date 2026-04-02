@@ -4,8 +4,8 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 
 ## Architecture
 
-- **Frontend**: React 19 + Vite + vite-plugin-pwa, built to `dist/`. Monolithic `src/App.jsx` (~11500 lines) with 35+ inline sub-components (includes ReelPlayer, AboutPage, TranscriptUploadPrompt)
-- **Backend**: FastAPI (`backend/app.py`, ~330KB monolith), served by Uvicorn on port 8000. 80+ API endpoints
+- **Frontend**: React 19 + Vite + vite-plugin-pwa, built to `dist/`. Monolithic `src/App.jsx` (~11800 lines) with 35+ inline sub-components (includes ReelPlayer, AboutPage, TranscriptUploadPrompt, GuidedTour, SectionPreviews)
+- **Backend**: FastAPI (`backend/app.py`, ~340KB monolith), served by Uvicorn on port 8000. 85+ API endpoints (includes SSE streaming, WebSocket job status)
 - **Desktop packaging**: PyInstaller bundles into macOS `.app` (signed+notarized) and Windows `.exe`
 - **Cloud deployment**: Render (https://community-highlighter.onrender.com/) — full video editor with Share Reel Link + Desktop Handoff (.chreel); video download/render disabled in cloud mode
 - **GitHub**: https://github.com/amateurmenace/community-highlighter
@@ -26,20 +26,30 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 
 1. Paste YouTube URL → Load Video
 2. Transcript auto-extracted (YouTubeTranscriptApi → YouTube Data API → yt-dlp fallback chain)
-3. AI generates summary + 10 key highlights with direct quotes (GPT-4o default, GPT-5.1 optional for deep analysis; map-reduce for long transcripts)
+3. AI auto-generates a 4-5 sentence executive brief with **clickable timestamps** (fast, cached). Terminal-style loading animation shows progress. "Generate Full Report" button **streams text in real-time** via SSE
+3b. "Generate AI Highlights with Quotes" produces 10 highlights AND auto-loads top 5 into the editor timeline
+3c. Clicking any timestamp pill: scrolls to Highlight section, opens Full Transcript, seeks search player, highlights active transcript cue with auto-tracking as video plays
 4. **Hero "Make AI Highlight Reel" button** — prominent green CTA directly below video, one-click with sensible defaults
 5. User selects reel style from collapsible "Choose Reel Style" panel: Decisions, Comments, Controversial, Budget, Actions, Social (with descriptions)
 6. **Top 5 of 10 AI highlights auto-load into dark timeline editor** — user can add remaining 5 from the Highlights panel (shows "✓ In timeline" / "+ Add" per highlight)
 7. User can also: search transcript (rich result cards with Watch/+Timeline/Context/Investigate), view analytics, build clips manually
-8. Export via labeled "Export N Clips as Video" button + "Download Full Video" button (orange, with resolution picker) in toolbar → backend renders via ffmpeg → MP4/ZIP download
+8. Export via labeled "Export N Clips as Video" button + "Download Full Video" button (muted, inline in secondary toolbar row next to Import) → backend renders via ffmpeg → MP4/ZIP download
 9. **Celebration modal** with confetti animation on render completion, download history tracking
+10. **Share Reel Link** triggers background summary precomputation (`/api/share/precompute`) so viewers get instant cached results
 
 ## UI Layout (Video Editor — Dark Workspace Design)
 
 Both desktop and cloud users get the same full video editor. Cloud users can build and preview reels, then share via link or export as `.chreel` file for desktop rendering. The interface uses a unified dark editing workspace inspired by professional NLEs (Premiere Pro / DaVinci Resolve):
 
+0. **Section Navigation Bar** — appears after video loads, 3 pill-style buttons with icons that smooth-scroll to each section:
+   - **Highlight** (search icon) — "Search & discover key moments"
+   - **Edit** (play icon) — "Build & export highlight reels"
+   - **Analyze** (bar chart icon) — "Entities, topics & trends"
+   - Each section divider has a description subtitle below the title
+   - **Model selector** visible on landing page before video loads (GPT-4o, GPT-4o Mini, Gemini 2.5 Flash, GPT-5.1)
+   - **Logo click** reloads the homepage
 1. **Search & Discover Zone** — appears ABOVE the editor, white card with neo-brutalist borders:
-   - **Search Bar** — full-width, large input (15px), 🔬 Investigate, 🌐 Translate, ⬇️ Download, language selector (8 languages)
+   - **Search Bar** — full-width, green-highlighted input (green border, light green gradient bg), "Investigate" text button (no emoji), Translate, Download, Full Transcript toggle, language selector (8 languages)
    - **Search Sparkline** — timeline distribution bar (50 bins) when searching
    - **Two-column grid**:
      - **Left**: Word Cloud Hero (420px min-height, dark blueprint bg, 80 words logarithmic sizing, top 3 glow) OR Full Transcript overlay OR Search Result Cards (when searching). "View Full Transcript" button overlays word cloud with scrollable transcript (text selection creates clips)
@@ -51,10 +61,9 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
    - **Collapsible Reel Styles** — "🎬 Choose Reel Style" toggle reveals 6 cards with descriptions
    - **Compact Toolbar** — two-row layout adapts to environment:
      - **Row 1 (primary)**: clip count + zoom | Export/Share button | Settings
-     - **Row 2 (secondary, when clips exist)**: Shuffle | Regenerate | Clear | Titles ON/OFF | Import .chreel (desktop)
-     - **Download Full Video** — own compact row below toolbar (desktop only)
+     - **Row 2 (secondary, when clips exist)**: Shuffle | Regenerate | Clear | Titles ON/OFF | Download Full Video + resolution picker | Import .chreel (desktop)
      - **Cloud**: Share Reel Link (blue), Render in Desktop App (green, downloads `.chreel`)
-   - **Timeline Editor** — dark-themed NLE track with drag-to-reorder, trim handles, loading animation, tooltips, per-clip thumbnails (backend 360p segment extraction with YouTube fallback)
+   - **Timeline Editor** — dark-themed NLE track with drag-to-reorder, trim handles, loading animation, tooltips, per-clip thumbnails (backend 360p segment extraction with YouTube fallback). Track min-height 200px, clip height 150px for comfortable viewing without scroll
    - **Highlights Panel** — always-visible panel under timeline showing all 10 AI highlights with "✓ In timeline" / "+ Add" status
    - **Clip Inspector** — dark-themed panel when clip selected
    - **Job Status** — progress bar during render
@@ -74,17 +83,33 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
 
 ## Onboarding & First-Visit Experience
 
-- **Onboarding Wizard**: 3-step first-visit overlay introducing key features
-- **HowToGuide**: 4-step guide shown before video loads (hidden after):
-  1. Search a Meeting — search words across transcript, word cloud
-  2. Talk to a Meeting — AI agent answers questions with citations
-  3. Remix a Meeting — AI selects moments, video editor, export reels
-  4. Share Highlights — export clips, share reel links, download transcript
+- **Guided Tour** (replaced OnboardingWizard + HowToGuide): SVG spotlight overlay with floating tooltip bubbles. 4 steps:
+  1. Welcome — "Paste any YouTube meeting URL above to get started"
+  2. Search & Highlight — targets `#preview-highlight` card
+  3. Edit & Export Reels — targets `#preview-edit` card
+  4. Deep Analysis — targets `#preview-analyze` card
+  - Keyboard nav: Arrow keys, Enter to advance, Escape to close
+  - Spotlight cutout animates between targets with `cubic-bezier` transitions
+  - Recalculates position on scroll/resize
+- **Section Preview Cards** (`SectionPreviews` component): 3-column grid on landing page (above URL input) showing skeleton mockups:
+  - Search & Highlight: dark word cloud skeleton with shimmer blocks + search bar
+  - Edit & Export: dark timeline editor with colored clip blocks
+  - Analyze & Discover: bar chart skeletons with stats row
+  - Responsive: `auto-fit, minmax(160px, 1fr)` — stacks on mobile
 - **First-clip tooltip**: When AI loads clips into timeline, first clip shows tip: "Click to edit, drag edges to trim, drag to reorder, click Customize Settings for effects"
-- **.chreel Import Zone** (desktop only): Dark drag-and-drop zone on landing page for importing cloud-exported reel plans
+- **.chreel Import Zone** (desktop only): Dark drag-and-drop zone on landing page, positioned BELOW the Civic Meeting Finder
 - **Batch Processing** (landing page): Collapsible multi-URL textarea for queuing up to 20 videos
 - Tracked via localStorage (`ch_onboarding_done`) — only shows once
-- Steps: (1) Paste a YouTube URL, (2) AI generates highlights, (3) Build and export reels
+
+## Landing Page Layout (Before Video Loaded)
+
+1. **Section Preview Cards** — 3-column grid at top (Highlight, Edit, Analyze)
+2. **URL Input Hero** — green highlighter effect (`.url-input-hero`): green border, green-tinted gradient background, `::before` highlighter stroke, 16px font, green placeholder
+3. **Bridge Text** — "Don't have the link? Use our AI search tool to find the most recent civic meetings near you."
+4. **Civic Meeting Finder** — integrated inline (no longer a separate section), with search, filters, channel import
+5. **Tip Text** — styled card with border, visible text: "Tip: This app works best with YouTube videos that have captions..." + "Learn more about how Community Highlighter works" link to About page
+6. **.chreel Import Zone** — dark drag-and-drop (desktop only)
+7. **Batch Processing** — collapsible
 
 ## Reel Player Mode
 
@@ -157,15 +182,37 @@ When a shared reel link is opened with `?mode=play`, the app renders a cinematic
 - **Music ducking**: `sidechaincompress` filter auto-lowers background music during speech
 - **Progress tracking**: `run_ffmpeg_with_progress()` provides real-time per-clip percentage updates via `-progress pipe:1`
 
-### Map-Reduce AI Pipeline
-- **Default model**: GPT-4o — fast, concise executive summaries. GPT-5.1 available in dropdown for deep analysis but is ~10x slower and more verbose.
-- **Model selector**: Dropdown in settings with GPT-4o (Recommended), GPT-4o Mini (Faster), GPT-5.1 (Deep Analysis), GPT-5.1 Instant
-- Long transcripts (>40K chars) are split into 2-4 chunks
+### AI Summary Pipeline (Two-Tier + Streaming)
+- **Executive Brief** (auto-loads): 4-5 sentence summary with clickable timestamps, uses user's selected model, 1000 max tokens, cached by `(video_id, strategy_ts, model)` via `ai_cache.py`
+  - **Timestamp-aware**: Sends transcript segments with `[MM:SS]` prefixes, AI returns JSON `{sentences: [{text, timestamp_seconds}]}`. Frontend renders clickable green `[MM:SS]` timestamp pills that seek the YouTube player
+  - **Truncation repair**: Backend fixes Gemini's truncated JSON (closes open brackets, extracts last complete sentence). Frontend fallback also parses partial JSON via regex
+  - **Backward-compatible**: Handles both old plain-text cache and new structured JSON format
+- **Full Report** (on-demand, **streaming**): News-article style with headline, inverted pyramid, bold subheadings, direct quotes. 2000 max tokens. Text streams progressively via SSE with shimmer cursor. Collapsible with Share (copies URL) and Export (downloads .md) buttons
+- **SSE Streaming** (`POST /api/summary_ai/stream`): `StreamingResponse` for report and highlights strategies. Backend functions: `call_openai_api_stream()` (parses OpenAI SSE delta chunks), `call_gemini_api_stream()` (uses `:streamGenerateContent?alt=sse`), `call_ai_api_stream()` (smart router). Frontend: `streamSummaryAI()` in api.js uses `fetch()` + `getReader()` (POST body needed, can't use EventSource). Cached results stream in one chunk.
+- **Highlights**: 10 AI-generated highlights with quotes, collapsible display, auto-loads top 5 into editor timeline
+- **Model selector**: Dropdown visible on landing page (before video loads) AND in settings. Default: **Gemini 2.5 Flash (Recommended)**. Options: Gemini 2.5 Flash (Recommended), GPT-4o, GPT-4o Mini (Faster), GPT-5.1 (Deep Analysis). Users can change model at any time.
+- **Gemini provider**: `call_gemini_api()` in `backend/app.py` — REST API (no SDK dependency), uses `systemInstruction` field. 1M token context means NO chunking needed. `maxOutputTokens` auto-scaled 4x for Gemini (different tokenization). Falls back to OpenAI if no `GOOGLE_API_KEY`
+- **Smart routing**: `call_ai_api()` wrapper auto-routes Gemini models to `call_gemini_api()`, everything else to `call_openai_api()`. Used by entity extraction, translation, full summary, and all analytics endpoints that accept user model selection
+- **Response caching**: All summary results cached to disk via `ai_cache.py` — `get_cached_result()` / `save_to_cache()` keyed by `(video_id, strategy, model)`. Instant response on repeat views
+- **Share precompute**: `POST /api/share/precompute` — spawns background thread to generate executive brief when user creates a share link. Fire-and-forget from frontend via `apiSharePrecompute()`
+- **Brooklyn→Brookline fix**: `fix_brooklyn()` applied to all AI summary/highlight output at the endpoint level
+- **Loading terminal** (`SummaryLoadingTerminal`): macOS-style dark terminal window with typewriter animation (35ms/char). Shows immediately when user clicks Load Video. 10 lines from "Fetching transcript from YouTube..." through "Finalizing...", ~26s total. Green prompt icons, blinking cursor on active line. Appears in the summary card area.
+- **Loading feedback**: Rotating progress messages in the green progress bar every 3s with progressive percent updates (60%→90%)
+- **Timestamp click** (`jumpToTimestamp`): Clicking any timestamp pill scrolls to Highlight section, opens Full Transcript, seeks `searchPlayerRef` to that time, finds closest transcript cue and highlights it with green left-border accent. Auto-tracks playback (updates highlighted cue every 1s for 2 minutes).
+- **Report timestamps** (`renderLineWithTimestamps`): Parses `(MM:SS)` and `(H:MM:SS)` patterns in report text, replaces with clickable green timestamp pills. Works in both final and streaming report display.
+- **Encoding fix**: `fix_brooklyn()` now also repairs UTF-8 mojibake (`â€"` → `—`, `â€™` → `'`, etc.)
+
+### Map-Reduce Pipeline (for OpenAI long transcripts)
+- Long transcripts (>40K chars) split into 2-4 chunks
+- **Parallel chunk processing**: `ThreadPoolExecutor(max_workers=3)` — all chunks fire simultaneously (was sequential)
+- Inter-chunk delay: 0.5s for chunk 3+ only (was 3s per chunk)
 - Each chunk: key point extraction via GPT with JSON response format (decisions, discussions, action items, quotes)
-- Chunk prompt truncated to 30K chars max for reliable extraction
-- 3-second delay between chunks to avoid rate limiting
 - Results synthesized into unified summary or highlights
 - If all chunks fail: returns error state (no fallback dummy text)
+- **Gemini skips chunking entirely** — sends full transcript in one call (up to 500K chars)
+
+### Frontend Performance
+- **Parallel API calls**: `loadAll` fires metadata + wordfreq + executive summary + entity extraction simultaneously via `Promise.allSettled`
 - Word frequency: 150+ stopwords including civic meeting title words (council, board, committee, etc.)
 
 ### Quote-to-Timestamp Matching
@@ -181,16 +228,25 @@ When a shared reel link is opened with `?mode=play`, the app renders a cinematic
 - ~~Per-clip segment downloads~~ **FIXED**: Adjacent clips within 30s merged into single download groups
 - ~~Hardware acceleration unused~~ **FIXED**: Auto-detects VideoToolbox (macOS) / NVENC (NVIDIA), falls back to libx264
 - ~~Large PyInstaller bundle~~ **FIXED**: Excludes torch/scipy/sklearn/matplotlib/tkinter/jupyter (~500MB savings)
-- ~~Fixed polling interval~~ **FIXED**: Adaptive backoff (1s → 5s) with reset on progress changes
+- ~~Fixed polling interval~~ **FIXED**: WebSocket-first (`/ws/job/{job_id}`) with HTTP polling fallback. Adaptive backoff (1s → 5s) with reset on progress changes
+- ~~No streaming for AI responses~~ **FIXED**: SSE streaming endpoint (`/api/summary_ai/stream`) for Full Report and Highlights. Progressive text display with shimmer cursor
+- ~~Summary lacks timestamps~~ **FIXED**: Executive brief returns structured `{sentences: [{text, timestamp_seconds}]}`. Clickable green timestamp pills seek YouTube player
+- ~~Gemini JSON truncation~~ **FIXED**: Truncation repair (closes open brackets), regex text extraction fallback, increased max_tokens to 1000
+- ~~openai_client undefined in find_relevant_documents~~ **FIXED**: Replaced with `call_ai_api()` wrapper
 
 ## Civic Meeting Finder
 
+- **Integrated into landing page**: No longer a separate section — merged inline below the URL input with bridge text "Don't have the link? Use our AI search tool..."
+- **Clear button**: Red "Clear" button appears when filters are active or results exist — resets search, results, and all filters to defaults
+- **No emoji in heading**: "Find Civic Meetings" (castle emoji removed from all instances)
 - **YouTube Search**: Multi-query strategy searches 5 civic-focused queries in parallel via YouTube Data API
-- **yt-dlp Fallback**: When no YouTube API key is configured, falls back to yt-dlp search (no API key required)
+- **yt-dlp Fallback**: Automatic fallback when no YouTube API key is configured OR when quota is exceeded (403 `quotaExceeded`). Backend detects `"QUOTA_EXCEEDED"` sentinel from failed queries and switches to `_ytdlp_search()` transparently
+- **Fallback user notice**: Yellow warning banner shown in results area: "Using direct YouTube search (API quota exceeded). Results may be less comprehensive." Response includes `fallback: true` and `fallback_reason` fields
 - **Civic Scoring**: Results scored by civic keyword density + channel/title matching for the queried municipality
 - **Tiered Sorting**: High civic relevance (3+ keywords) → medium (1-2) → low (0), then by date within tiers
+- **Quota management**: YouTube Data API v3 daily quota is 10,000 units. Each civic search costs ~500 units (5 queries x 100 units). ~20 searches/day exhausts quota. Resets at midnight Pacific
 
-## API Endpoints (73 total, Key Categories)
+## API Endpoints (78 total, Key Categories)
 
 ### Video/Clips
 - `POST /api/download_mp4` — Download full YouTube video
@@ -200,7 +256,8 @@ When a shared reel link is opened with `?mode=play`, the app renders a cinematic
 - `POST /api/import_chreel` — Import .chreel file, returns parsed reel data
 - `GET /api/video_formats/{video_id}` — List available resolutions
 - `POST /api/clip_thumbnails` — Generate timeline preview thumbnails
-- `GET /api/job_status` — Poll render job progress
+- `GET /api/job_status` — Poll render job progress (HTTP fallback)
+- `WS /ws/job/{job_id}` — **WebSocket** real-time job status push (500ms intervals)
 - `GET /api/video_capabilities` — Available editing features
 - `POST /api/cache/cleanup` — Manual cache cleanup
 
@@ -215,10 +272,13 @@ When a shared reel link is opened with `?mode=play`, the app renders a cinematic
 - `GET /api/youtube-playlist` — Get videos from a YouTube playlist
 
 ### AI Analysis
-- `POST /api/summary_ai` — Map-reduce summary (concise/detailed/highlights_with_quotes)
-- `POST /api/analytics/extended` — Entity extraction
+- `POST /api/summary_ai` — Map-reduce summary (concise/detailed/executive/highlights_with_quotes/report)
+- `POST /api/summary_ai/stream` — **SSE streaming** for report and highlights (StreamingResponse, text/event-stream)
+- `POST /api/share/precompute` — Precompute and cache summary for shared video links (background thread)
+- `POST /api/analytics/extended` — Entity extraction (with truncated JSON repair for Gemini)
 - `POST /api/analytics/policy_impact`, `action_items`, `budget_impact`, `meeting_efficiency`
 - `POST /api/assistant/chat` — RAG-based meeting Q&A
+- `POST /api/find-relevant-documents` — AI-powered document search (uses `call_ai_api` not direct OpenAI client)
 
 ### Transcript
 - `POST /api/transcript` — Fetch with 3-layer fallback
@@ -242,14 +302,14 @@ When a shared reel link is opened with `?mode=play`, the app renders a cinematic
 
 - All React hooks (useState/useRef), no Redux/Context
 - ~35+ top-level state variables in App.jsx
-- 25+ inline sub-components (CelebrationModal, OnboardingWizard, SharePanel, TemplatePresets, ExportModal, FeedbackModal, ProgressIndicator, etc.)
+- 25+ inline sub-components (CelebrationModal, GuidedTour, SectionPreviews, SharePanel, TemplatePresets, ExportModal, FeedbackModal, ProgressIndicator, etc.)
 - YouTube embedded via iframe (no programmatic play/pause control)
-- Job polling: `setInterval` every 1.5s, no exponential backoff
+- Job status: **WebSocket-first** (`/ws/job/{job_id}`) with HTTP polling fallback. `connectJobWebSocket()` in api.js, `pollJobStatus()` tries WS then falls back to adaptive setTimeout
 - Timeline editor state: `clipBasket` array with per-clip start/end/title/thumbnail
 - Settings drawer state: `showSettingsDrawer` — slides from right, closes on Escape
 - Two-column analysis grid: layout adapts based on search state (results left + word cloud right, or word cloud left + insights right)
 - Download history: persisted in localStorage (`ch_downloads`), max 20 entries
-- Onboarding: first-visit wizard tracked via localStorage (`ch_onboarding_done`)
+- Onboarding: first-visit guided tour tracked via localStorage (`ch_onboarding_done`)
 - Toast notifications: auto-dismiss after 4s, fixed bottom-right
 - Job polling: adaptive backoff (1s → 5s), resets on progress changes, uses `setTimeout` chain instead of `setInterval`
 - Keyboard shortcuts: Ctrl+Z/Y (undo/redo), Delete/Backspace, Arrow keys (nudge), S (split), Space (preview), I/O (in/out), J/K/L (seek/pause playback)
@@ -326,7 +386,9 @@ gh workflow run build-windows.yml -f version=v7.2.0
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `OPENAI_API_KEY` | Yes | OpenAI API key for analysis |
+| `GOOGLE_API_KEY` | No | Google Gemini API key — enables Gemini 2.5 Flash model option (1M context, no chunking) |
 | `YOUTUBE_API_KEY` | No | Improves transcript fetching and civic meeting search (optional — falls back to yt-dlp without it) |
+| `YOUTUBE_API_KEY_SECONDARY` | No | Backup YouTube API key — auto-failover when primary quota is exceeded |
 | `CLOUD_MODE` | Auto | `true` on Render, `false` for desktop |
 | `DESKTOP_MODE` | Auto | Set by app_launcher.py |
 | `FFMPEG_PATH` | Auto | Auto-detected from Homebrew (macOS) or PATH (Windows) |
@@ -359,6 +421,6 @@ gh workflow run build-windows.yml -f version=v7.2.0
 
 ## Version
 
-Current: 7.4.2
+Current: 8.0.0 (default AI: Gemini 2.5 Flash)
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)

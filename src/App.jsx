@@ -21,7 +21,9 @@ import {
   apiBuildKnowledgeGraph,
   // v6.1: New feature API calls
   apiMeetingScorecard, apiShareMoment, apiGetSharedMoment,
-  apiSimplifyText, apiTranslateSummary
+  apiSimplifyText, apiTranslateSummary,
+  // v8.0: Streaming, WebSocket job status, share precompute
+  streamSummaryAI, connectJobWebSocket, apiSharePrecompute
 } from "./api";
 
 // v5.2: Use relative URLs for deployment compatibility
@@ -35,6 +37,19 @@ function getWebSocketUrl(path) {
 }
 
 // Utility functions
+// Fix mojibake encoding artifacts (â€" → —, â€™ → ', etc.)
+const fixEncoding = (text) => {
+  if (!text) return text;
+  return text
+    .replace(/â€"/g, '\u2014').replace(/â€"/g, '\u2013')
+    .replace(/â€™/g, '\u2019').replace(/â€œ/g, '\u201c')
+    .replace(/â€˜/g, '\u2018').replace(/â€¦/g, '\u2026')
+    .replace(/â€[^\w]/g, '\u201d')
+    .replace(/â\s/g, '\u2014 ')
+    .replace(/(?<=\S)\s*â\s*(?=\S)/g, ' \u2014 ')
+    .replace(/â$/g, '\u2014');
+};
+
 const toSec = (t) => {
   const s = String(t);
   const p = s.split(":");
@@ -677,41 +692,262 @@ function AboutPage({ onClose }) {
   );
 }
 
-function HowToGuide({ onOpenAssistant }) {
-  const scrollToElement = (id) => {
-    const element = document.getElementById(id);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      element.style.transition = 'box-shadow 0.3s';
-      element.style.boxShadow = '0 0 20px rgba(30, 127, 99, 0.5)';
-      setTimeout(() => { element.style.boxShadow = 'none'; }, 1500);
-    }
-  };
+// ============================================================================
+// Summary Loading Terminal — animated typing simulation while AI works
+// ============================================================================
+const TERMINAL_LINES = [
+  { delay: 0, text: "Fetching transcript from YouTube...", icon: ">" },
+  { delay: 2500, text: "Downloading captions and parsing segments", icon: " " },
+  { delay: 5500, text: "Reading transcript...", icon: ">" },
+  { delay: 8000, text: "Parsing words across transcript segments", icon: " " },
+  { delay: 11000, text: "Identifying speakers and topics...", icon: ">" },
+  { delay: 14000, text: "Found key topics — extracting decisions and votes", icon: " " },
+  { delay: 17000, text: "Generating executive summary...", icon: ">" },
+  { delay: 20000, text: "Matching timestamps to key moments", icon: " " },
+  { delay: 23000, text: "Composing brief with specifics...", icon: ">" },
+  { delay: 26000, text: "Finalizing...", icon: ">" },
+];
 
-  const steps = [
-    { num: 1, color: '#059669', icon: '🔍', title: 'Search a Meeting', desc: 'Search any word or phrase across the full transcript. Click words in the word cloud to instantly find every mention.', target: 'search-section' },
-    { num: 2, color: '#0891b2', icon: '💬', title: 'Talk to a Meeting', desc: 'Ask an AI agent questions about the meeting. It reads the full transcript and gives you answers with citations.', action: 'assistant' },
-    { num: 3, color: '#7c3aed', icon: '🎬', title: 'Remix a Meeting', desc: 'AI selects the best moments and loads them into a video editor. Trim, reorder, and export highlight reels in one click.', target: 'editing-workspace' },
-    { num: 4, color: '#db2777', icon: '🔗', title: 'Share Highlights', desc: 'Export clips as video, share reel links with timestamps, or download the full transcript in multiple languages.', target: 'clip-basket-section' },
-  ];
+function SummaryLoadingTerminal() {
+  const [visibleLines, setVisibleLines] = useState([]);
+  const [typingIdx, setTypingIdx] = useState(0);
+  const [typedChars, setTypedChars] = useState(0);
+
+  useEffect(() => {
+    const timers = TERMINAL_LINES.map((line, i) =>
+      setTimeout(() => setVisibleLines(prev => [...prev, { ...line, charCount: 0 }]), line.delay)
+    );
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  // Typewriter effect for the latest line
+  useEffect(() => {
+    if (visibleLines.length === 0) return;
+    const lastIdx = visibleLines.length - 1;
+    const lastLine = TERMINAL_LINES[lastIdx];
+    if (!lastLine) return;
+    const fullText = lastLine.text;
+    let charIdx = 0;
+    const interval = setInterval(() => {
+      charIdx++;
+      if (charIdx > fullText.length) {
+        clearInterval(interval);
+        return;
+      }
+      setVisibleLines(prev => {
+        const updated = [...prev];
+        if (updated[lastIdx]) updated[lastIdx] = { ...updated[lastIdx], charCount: charIdx };
+        return updated;
+      });
+    }, 35);
+    return () => clearInterval(interval);
+  }, [visibleLines.length]);
 
   return (
-    <section className="how-to-permanent" style={{ background: 'white', padding: '16px 0', borderBottom: '1px solid #e2e8f0' }}>
-      <div className="howto" style={{ gap: '12px' }}>
-        {steps.map(step => (
-          <div key={step.num} className="step step-clickable"
-            onClick={() => step.action === 'assistant' ? (onOpenAssistant && onOpenAssistant(true)) : scrollToElement(step.target)}
-            style={{ cursor: 'pointer', padding: '18px', minHeight: '85px', border: '2px solid #000', background: 'white', borderRadius: '12px' }}
-          >
-            <div className="num" style={{ background: step.color, fontSize: '18px', width: '40px', height: '40px' }}>{step.num}</div>
-            <div>
-              <div style={{ fontSize: '22px', fontWeight: '900', color: '#1e7f63', letterSpacing: '-0.5px' }}>{step.title}</div>
-              <div className="step-subtitle" style={{ marginTop: '4px' }}>{step.desc}</div>
-            </div>
-          </div>
-        ))}
+    <div className="summary-terminal">
+      <div className="summary-terminal-header">
+        <div className="summary-terminal-dots"><span /><span /><span /></div>
+        <span className="summary-terminal-title">AI Analysis</span>
       </div>
-    </section>
+      <div className="summary-terminal-body">
+        {visibleLines.map((line, i) => {
+          const fullText = TERMINAL_LINES[i]?.text || "";
+          const isLast = i === visibleLines.length - 1;
+          const displayText = isLast ? fullText.slice(0, line.charCount || 0) : fullText;
+          const isDone = !isLast || (line.charCount || 0) >= fullText.length;
+          return (
+            <div key={i} className={`summary-terminal-line ${isDone ? 'done' : 'typing'}`}>
+              <span className="summary-terminal-icon">{line.icon === ">" ? "\u276F" : " "}</span>
+              <span>{displayText}</span>
+              {isLast && !isDone && <span className="streaming-cursor" style={{ height: 14, width: 6 }} />}
+            </div>
+          );
+        })}
+        {visibleLines.length > 0 && visibleLines.length < TERMINAL_LINES.length && (
+          <div className="summary-terminal-line typing">
+            <span className="summary-terminal-icon">{"\u276F"}</span>
+            <span className="streaming-cursor" style={{ height: 14, width: 6 }} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Section Preview Cards — shown on landing page before video loads
+// ============================================================================
+function SectionPreviews() {
+  return (
+    <div className="section-previews-grid">
+      {/* Highlight Preview */}
+      <div className="section-preview-card" id="preview-highlight">
+        <div className="section-preview-badge" style={{ background: '#059669' }}>
+          <span style={{ fontSize: 18 }}>{'\u2315'}</span>
+        </div>
+        <div className="section-preview-title">Search & Highlight</div>
+        <div className="section-preview-sub">Search any word across the full transcript. Click words in the word cloud to find every mention.</div>
+        <div className="section-preview-mockup" style={{ background: '#0f172a', borderRadius: 8, padding: 16, marginTop: 12 }}>
+          {/* Word cloud skeleton */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', minHeight: 80 }}>
+            {[52, 36, 28, 44, 20, 32, 40, 24, 48, 16, 30, 22, 38, 26, 34].map((w, i) => (
+              <div key={i} className="shimmer-block" style={{ width: w, height: 14, borderRadius: 3, opacity: 0.15 + (i % 3) * 0.1, animationDelay: `${i * 0.08}s` }} />
+            ))}
+          </div>
+          {/* Search bar skeleton */}
+          <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+            <div className="shimmer-block" style={{ flex: 1, height: 28, borderRadius: 6 }} />
+            <div className="shimmer-block" style={{ width: 60, height: 28, borderRadius: 6, opacity: 0.4 }} />
+          </div>
+        </div>
+      </div>
+
+      {/* Edit Preview */}
+      <div className="section-preview-card" id="preview-edit">
+        <div className="section-preview-badge" style={{ background: '#7c3aed' }}>
+          <span style={{ fontSize: 16 }}>{'\u25B6'}</span>
+        </div>
+        <div className="section-preview-title">Edit & Export</div>
+        <div className="section-preview-sub">AI selects the best moments and loads them into a video editor. Trim, reorder, and export reels.</div>
+        <div className="section-preview-mockup" style={{ background: '#0f1419', borderRadius: 8, padding: 16, marginTop: 12 }}>
+          {/* Video player skeleton */}
+          <div className="shimmer-block" style={{ width: '100%', height: 60, borderRadius: 4, marginBottom: 10 }} />
+          {/* Timeline track */}
+          <div style={{ background: '#1a1f26', borderRadius: 4, padding: '8px 6px', display: 'flex', gap: 4, alignItems: 'center' }}>
+            {[{ w: '28%', c: '#22C55E' }, { w: '18%', c: '#3b82f6' }, { w: '24%', c: '#22C55E' }, { w: '14%', c: '#f59e0b' }, { w: '16%', c: '#3b82f6' }].map((clip, i) => (
+              <div key={i} style={{ width: clip.w, height: 22, background: clip.c, opacity: 0.25, borderRadius: 3, animation: `shimmer 2s ease-in-out ${i * 0.15}s infinite` }} />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Analyze Preview */}
+      <div className="section-preview-card" id="preview-analyze">
+        <div className="section-preview-badge" style={{ background: '#0891b2' }}>
+          <span style={{ fontSize: 18 }}>{'\u2261'}</span>
+        </div>
+        <div className="section-preview-title">Analyze & Discover</div>
+        <div className="section-preview-sub">Entities, topics, participation, disagreements, and cross-references in one view.</div>
+        <div className="section-preview-mockup" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 16, marginTop: 12 }}>
+          {/* Chart skeleton */}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', height: 60, marginBottom: 10 }}>
+            {[55, 80, 40, 65, 30, 72, 48, 58].map((h, i) => (
+              <div key={i} className="shimmer-block" style={{ flex: 1, height: `${h}%`, borderRadius: '3px 3px 0 0', background: i % 2 === 0 ? '#1E7F63' : '#0891b2', opacity: 0.2, animationDelay: `${i * 0.1}s` }} />
+            ))}
+          </div>
+          {/* Stats row */}
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[1, 2, 3].map(i => (
+              <div key={i} className="shimmer-block" style={{ flex: 1, height: 18, borderRadius: 4 }} />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Guided Tour — animated tooltip walkthrough for first-time visitors
+// ============================================================================
+const TOUR_STEPS = [
+  { targetId: null, title: 'Welcome to Community Highlighter', desc: 'Paste any YouTube meeting URL above to get started. AI will extract the transcript and analyze the full meeting for you.', position: 'center' },
+  { targetId: 'preview-highlight', title: 'Search & Highlight', desc: 'Search any word across the transcript. Explore the interactive word cloud to spot the most-discussed topics instantly.', position: 'bottom' },
+  { targetId: 'preview-edit', title: 'Edit & Export Reels', desc: 'AI picks the best moments and loads them into a timeline editor. Drag to reorder, trim clips, and export highlight reels.', position: 'bottom' },
+  { targetId: 'preview-analyze', title: 'Deep Analysis', desc: 'See who spoke, what was decided, budget impacts, disagreements, and more — all extracted automatically by AI.', position: 'bottom' },
+];
+
+function GuidedTour({ onClose }) {
+  const [step, setStep] = useState(0);
+  const [targetRect, setTargetRect] = useState(null);
+
+  const currentStep = TOUR_STEPS[step];
+
+  const measureTarget = useCallback(() => {
+    if (!currentStep.targetId) { setTargetRect(null); return; }
+    const el = document.getElementById(currentStep.targetId);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => {
+        const r = el.getBoundingClientRect();
+        setTargetRect({ x: r.x - 8, y: r.y - 8, w: r.width + 16, h: r.height + 16 });
+      }, 350);
+    }
+  }, [currentStep.targetId]);
+
+  useEffect(() => { measureTarget(); }, [measureTarget]);
+
+  useEffect(() => {
+    const handleResize = () => measureTarget();
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('scroll', handleResize, true);
+    return () => { window.removeEventListener('resize', handleResize); window.removeEventListener('scroll', handleResize, true); };
+  }, [measureTarget]);
+
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === 'Escape') onClose();
+      if (e.key === 'ArrowRight' || e.key === 'Enter') { if (step < TOUR_STEPS.length - 1) setStep(s => s + 1); else onClose(); }
+      if (e.key === 'ArrowLeft' && step > 0) setStep(s => s - 1);
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [step, onClose]);
+
+  const isCenter = currentStep.position === 'center' || !targetRect;
+
+  // Tooltip position
+  let tooltipStyle = {};
+  if (isCenter) {
+    tooltipStyle = { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' };
+  } else {
+    const tx = targetRect.x + targetRect.w / 2;
+    const ty = currentStep.position === 'bottom' ? targetRect.y + targetRect.h + 16 : targetRect.y - 16;
+    tooltipStyle = {
+      position: 'fixed',
+      left: Math.max(16, Math.min(tx - 180, window.innerWidth - 376)),
+      top: currentStep.position === 'bottom' ? ty : undefined,
+      bottom: currentStep.position === 'top' ? (window.innerHeight - ty) : undefined,
+    };
+  }
+
+  return (
+    <div className="guided-tour-overlay" onClick={onClose}>
+      {/* SVG spotlight mask */}
+      <svg className="guided-tour-svg" width="100%" height="100%">
+        <defs>
+          <mask id="tour-mask">
+            <rect width="100%" height="100%" fill="white" />
+            {targetRect && (
+              <rect x={targetRect.x} y={targetRect.y} width={targetRect.w} height={targetRect.h} rx="12" fill="black" className="guided-tour-cutout" />
+            )}
+          </mask>
+        </defs>
+        <rect width="100%" height="100%" fill="rgba(0,0,0,0.65)" mask="url(#tour-mask)" />
+        {targetRect && (
+          <rect x={targetRect.x} y={targetRect.y} width={targetRect.w} height={targetRect.h} rx="12" fill="none" stroke="#22C55E" strokeWidth="2" className="guided-tour-ring" />
+        )}
+      </svg>
+
+      {/* Tooltip */}
+      <div className="guided-tour-tooltip" style={tooltipStyle} onClick={e => e.stopPropagation()} key={step}>
+        <div className="guided-tour-step-num">Step {step + 1} of {TOUR_STEPS.length}</div>
+        <div className="guided-tour-title">{currentStep.title}</div>
+        <div className="guided-tour-desc">{currentStep.desc}</div>
+        <div className="guided-tour-dots">
+          {TOUR_STEPS.map((_, i) => (
+            <div key={i} className={`guided-tour-dot ${i === step ? 'guided-tour-dot-active' : ''} ${i < step ? 'guided-tour-dot-done' : ''}`} />
+          ))}
+        </div>
+        <div className="guided-tour-actions">
+          {step > 0 && <button className="guided-tour-btn-back" onClick={() => setStep(s => s - 1)}>Back</button>}
+          <button className="guided-tour-btn-next" onClick={() => step < TOUR_STEPS.length - 1 ? setStep(s => s + 1) : onClose()}>
+            {step < TOUR_STEPS.length - 1 ? 'Next' : 'Get Started'}
+          </button>
+          <button className="guided-tour-btn-skip" onClick={onClose}>Skip</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -3040,6 +3276,18 @@ function CivicMeetingFinder({ onSelectVideo }) {
     setError(null);
 
     try {
+      // Check client-side cache first (15 min TTL)
+      const cacheKey = `civic_search_${searchQuery.trim().toLowerCase()}_${dateRange}_${meetingType}_${sortBy}`;
+      try {
+        const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+        if (cached && Date.now() - cached.ts < 15 * 60 * 1000) {
+          setResults(cached.items || []);
+          if (cached.fallback) setError('Using cached results (API quota was exceeded).');
+          setLoading(false);
+          return;
+        }
+      } catch (e) { /* ignore corrupt cache */ }
+
       // Send the raw municipality name with filters — backend handles multi-query strategy
       const params = new URLSearchParams({
         q: searchQuery.trim(),
@@ -3053,10 +3301,15 @@ function CivicMeetingFinder({ onSelectVideo }) {
       const data = await response.json();
 
       // Check for API error in response
-      if (data.error) {
+      if (data.error && !data.items?.length) {
         setError(data.error);
         setResults([]);
         return;
+      }
+
+      // Show fallback notice if using yt-dlp instead of YouTube API
+      if (data.fallback) {
+        setError(`Using direct YouTube search (API quota exceeded). Results may be less comprehensive.`);
       }
 
       // Score and sort results to prioritize civic/government content
@@ -3118,6 +3371,11 @@ function CivicMeetingFinder({ onSelectVideo }) {
 
       setResults(items);
 
+      // Cache results in localStorage (15 min TTL)
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify({ items, ts: Date.now(), fallback: !!data.fallback }));
+      } catch (e) { /* localStorage full — ignore */ }
+
       // Save to recent searches
       if (!recentSearches.includes(searchQuery)) {
         setRecentSearches(prev => [searchQuery, ...prev.slice(0, 4)]);
@@ -3169,7 +3427,7 @@ function CivicMeetingFinder({ onSelectVideo }) {
 
   return (
     <div className="viz-card" style={{ marginTop: '20px' }}>
-      <h3>🏛️ Find Civic Meetings</h3>
+      <h3>Find Civic Meetings</h3>
       <p className="viz-desc">Search for government and civic meetings by city, town, or YouTube channel name. Click any result to analyze it.</p>
 
 
@@ -3228,6 +3486,12 @@ function CivicMeetingFinder({ onSelectVideo }) {
             <option value="newest">Sort: Newest First</option>
             <option value="oldest">Sort: Oldest First</option>
           </select>
+          {(searchQuery || results.length > 0 || dateRange !== '90' || meetingType !== 'all') && (
+            <button onClick={() => { setSearchQuery(''); setResults([]); setError(null); setDateRange('90'); setMeetingType('all'); setSortBy('relevance'); }}
+              style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', background: '#fef2f2', cursor: 'pointer', color: '#dc2626', fontWeight: 500 }}>
+              Clear
+            </button>
+          )}
         </div>
         <div style={{ marginTop: '8px' }}>
           <button
@@ -3302,7 +3566,12 @@ function CivicMeetingFinder({ onSelectVideo }) {
       )}
 
       {error && (
-        <div style={{ padding: '12px', background: '#fef2f2', borderRadius: '8px', color: '#dc2626', fontSize: '13px', marginBottom: '12px' }}>
+        <div style={{
+          padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '12px',
+          background: error.includes('quota') || error.includes('fallback') || error.includes('direct YouTube') ? '#fffbeb' : '#fef2f2',
+          color: error.includes('quota') || error.includes('fallback') || error.includes('direct YouTube') ? '#92400e' : '#dc2626',
+          border: `1px solid ${error.includes('quota') || error.includes('fallback') || error.includes('direct YouTube') ? '#fde68a' : '#fecaca'}`,
+        }}>
           {error}
         </div>
       )}
@@ -3398,21 +3667,11 @@ function CivicMeetingFinder({ onSelectVideo }) {
           </>
         ) : !loading && searchQuery && (
           <div style={{ textAlign: 'center', padding: '30px', color: '#64748b' }}>
-            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🏛️</div>
             <div>No meetings found. Try a different city or town name.</div>
           </div>
         )}
         
-        {!searchQuery && results.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '30px', color: '#64748b', background: '#f8fafc', borderRadius: '12px' }}>
-            <div style={{ fontSize: '40px', marginBottom: '12px' }}>🔍</div>
-            <div style={{ fontSize: '15px', fontWeight: 500 }}>Enter your city or town name above</div>
-            <div style={{ fontSize: '13px', marginTop: '6px' }}>We'll find recent government meetings for you to analyze</div>
-            <div style={{ fontSize: '11px', marginTop: '12px', color: '#94a3b8', lineHeight: '1.4' }}>
-              Tip: This app works with meetings that have YouTube captions. If a video doesn't have captions, you can upload a transcript file after loading.
-            </div>
-          </div>
-        )}
+        {/* Empty state removed — tip text lives in parent landing page section */}
       </div>
     </div>
   );
@@ -3903,7 +4162,7 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
             border: '2px solid #22c55e'
           }}>
             <div style={{ fontSize: '16px', fontWeight: 700, color: '#166534', marginBottom: '12px' }}>
-              🏛️ Find Civic Meetings on YouTube
+              Find Civic Meetings on YouTube
             </div>
             <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
               <input
@@ -4048,7 +4307,6 @@ function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTransc
 
           {finderResults.length === 0 && !finderLoading && (
             <div style={{ textAlign: 'center', padding: '40px', background: '#f8fafc', borderRadius: '16px' }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>🏛️</div>
               <div style={{ color: '#64748b', fontSize: '15px' }}>
                 Search for a city to find their public meeting recordings
               </div>
@@ -5024,35 +5282,7 @@ function ExportModal({ onSelect, onClose, clipCount }) {
   );
 }
 
-const ONBOARDING_STEPS = [
-  { icon: '\uD83C\uDFA5', title: 'Paste a YouTube URL', desc: 'Start by pasting any civic meeting or public hearing video URL into the search bar above.' },
-  { icon: '\uD83E\uDD16', title: 'AI Analyzes the Meeting', desc: 'Our AI automatically extracts the transcript, identifies key moments, speakers, and decisions.' },
-  { icon: '\u2728', title: 'Get Your Highlights', desc: 'Review AI-generated highlights, build custom clips, and export professional highlight reels in one click.' },
-];
-
-function OnboardingWizard({ onClose }) {
-  const [step, setStep] = useState(0);
-  return (
-    <div className="onboarding-overlay" onClick={onClose}>
-      <div className="onboarding-card" onClick={e => e.stopPropagation()}>
-        <div className="onboarding-step-icon">{ONBOARDING_STEPS[step].icon}</div>
-        <div className="onboarding-title">{ONBOARDING_STEPS[step].title}</div>
-        <div className="onboarding-desc">{ONBOARDING_STEPS[step].desc}</div>
-        <div className="onboarding-dots">
-          {ONBOARDING_STEPS.map((_, i) => (
-            <div key={i} className={`onboarding-dot ${i === step ? 'onboarding-dot-active' : ''}`} />
-          ))}
-        </div>
-        {step < ONBOARDING_STEPS.length - 1 ? (
-          <button className="onboarding-btn" onClick={() => setStep(step + 1)}>Next</button>
-        ) : (
-          <button className="onboarding-btn" onClick={onClose}>Get Started</button>
-        )}
-        <div><button className="onboarding-skip" onClick={onClose}>Skip</button></div>
-      </div>
-    </div>
-  );
-}
+// OnboardingWizard replaced by GuidedTour (see line ~680)
 
 function SharePanel({ videoId, videoTitle }) {
   const [copied, setCopied] = useState(false);
@@ -6831,6 +7061,12 @@ export default function App() {
   const [actions, setActions] = useState({ reel: "", sum: "", dl: "", tr: "" });
   const [summary, setSummary] = useState({ para: "", bullets: [] });
   const [summaryError, setSummaryError] = useState(false);
+  const [fullReport, setFullReport] = useState({ text: "", headline: "" });
+  const [loadingReport, setLoadingReport] = useState(false);
+  const [streamingReportText, setStreamingReportText] = useState("");
+  const [streamingSummaryText, setStreamingSummaryText] = useState("");
+  const [reportCollapsed, setReportCollapsed] = useState(false);
+  const [highlightsCollapsed, setHighlightsCollapsed] = useState(false);
   const [highlightsWithQuotes, setHighlightsWithQuotes] = useState([]);
   const [reelCaptionsEnabled, setReelCaptionsEnabled] = useState(false);
   
@@ -6914,7 +7150,7 @@ export default function App() {
   const [expanded, setExpanded] = useState({ open: false, focusIdx: null });
   const [clipBasket, setClipBasket] = useState([]);
   const [lang, setLang] = useState("en");
-  const [aiModel, setAiModel] = useState("gpt-4o");
+  const [aiModel, setAiModel] = useState("gemini-2.5-flash");
   const [processStatus, setProcessStatus] = useState({ active: false, message: "", percent: 0, estimatedTime: null, isVideoDownload: false });
   const [translation, setTranslation] = useState({ text: "", lang: "", show: false });
   const [translateLang, setTranslateLang] = useState("Spanish");
@@ -6935,6 +7171,9 @@ export default function App() {
   const [showFullTranscript, setShowFullTranscript] = useState(false); // Full transcript overlay on word cloud
   const [transitionPickerIdx, setTransitionPickerIdx] = useState(null); // which clip transition to edit
   const desktopTranscriptRef = useRef(null);
+  const sectionHighlightRef = useRef(null);
+  const sectionEditRef = useRef(null);
+  const sectionAnalyzeRef = useRef(null);
 
   const debQuery = useDebounce(query, 220);
   const playerRef = useRef(null);
@@ -6942,6 +7181,100 @@ export default function App() {
   const transcriptRef = useRef(null);
   const pollIntervalRef = useRef(null);
   const previewTimerRef = useRef(null);
+
+  // Active transcript cue tracking (for auto-highlight during playback)
+  const [activeCueIdx, setActiveCueIdx] = useState(-1);
+  const activeCueTimerRef = useRef(null);
+
+  // Jump to timestamp: scrolls to Highlight section, opens transcript, seeks player, highlights cue
+  const jumpToTimestamp = useCallback((seconds) => {
+    if (!videoId || !sents.length) return;
+
+    // 1. Open the full transcript view
+    setShowFullTranscript(true);
+
+    // 2. Scroll to the Highlight section
+    if (sectionHighlightRef.current) {
+      sectionHighlightRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // 3. Seek the search player
+    setTimeout(() => {
+      if (searchPlayerRef.current) {
+        searchPlayerRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(seconds)}&autoplay=1&mute=0&playsinline=1&enablejsapi=1`;
+      }
+    }, 400);
+
+    // 4. Find the matching cue and scroll to it
+    setTimeout(() => {
+      let bestIdx = 0;
+      let bestDist = Infinity;
+      for (let i = 0; i < sents.length; i++) {
+        const dist = Math.abs(sents[i].start - seconds);
+        if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+      }
+      setActiveCueIdx(bestIdx);
+
+      const el = document.getElementById(`sent-${bestIdx}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      // 5. Start auto-tracking: update highlighted cue as video plays
+      if (activeCueTimerRef.current) clearInterval(activeCueTimerRef.current);
+      let currentTime = seconds;
+      activeCueTimerRef.current = setInterval(() => {
+        currentTime += 1;
+        let newIdx = bestIdx;
+        for (let i = bestIdx; i < sents.length; i++) {
+          if (sents[i].start <= currentTime && (i === sents.length - 1 || sents[i + 1].start > currentTime)) {
+            newIdx = i;
+            break;
+          }
+        }
+        if (newIdx !== bestIdx) {
+          setActiveCueIdx(newIdx);
+          const cueEl = document.getElementById(`sent-${newIdx}`);
+          if (cueEl) cueEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        bestIdx = newIdx;
+      }, 1000);
+
+      // Stop after 2 minutes
+      setTimeout(() => { if (activeCueTimerRef.current) clearInterval(activeCueTimerRef.current); }, 120000);
+    }, 600);
+  }, [videoId, sents]);
+
+  // Cleanup cue timer
+  useEffect(() => {
+    return () => { if (activeCueTimerRef.current) clearInterval(activeCueTimerRef.current); };
+  }, []);
+
+  // Render text with clickable timestamp pills — matches (MM:SS), (H:MM:SS), (HH:MM:SS)
+  const renderLineWithTimestamps = useCallback((text) => {
+    if (!text) return text;
+    const tsRegex = /\((\d{1,2}):(\d{2})(?::(\d{2}))?\)/g;
+    const parts = [];
+    let lastIdx = 0;
+    let match;
+    while ((match = tsRegex.exec(text)) !== null) {
+      if (match.index > lastIdx) parts.push(text.slice(lastIdx, match.index));
+      const hrs = match[3] ? parseInt(match[1]) : 0;
+      const mins = match[3] ? parseInt(match[2]) : parseInt(match[1]);
+      const secs = match[3] ? parseInt(match[3]) : parseInt(match[2]);
+      const totalSec = hrs * 3600 + mins * 60 + secs;
+      const display = hrs > 0 ? `${hrs}:${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}` : `${mins}:${String(secs).padStart(2,'0')}`;
+      parts.push(
+        <button key={match.index} className="timestamp-pill" onClick={() => jumpToTimestamp(totalSec)} title={`Jump to ${display} — opens video + transcript`}>
+          {display}
+        </button>
+      );
+      lastIdx = match.index + match[0].length;
+    }
+    if (lastIdx === 0) return text; // no timestamps found
+    if (lastIdx < text.length) parts.push(text.slice(lastIdx));
+    return parts;
+  }, [jumpToTimestamp]);
 
   // Undo/redo stacks for clip basket
   const undoStackRef = useRef([]);
@@ -7316,7 +7649,8 @@ export default function App() {
     setCues([]);
     setSents([]);
     setFullText("");
-    setSummary({ para: "", bullets: [] });
+    setSummary({ para: "", bullets: [], sentences: [] });
+    setFullReport({ text: "", headline: "" });
     setWords([]);
     setEntities([]);
     setHighlightsWithQuotes([]);
@@ -7332,6 +7666,7 @@ export default function App() {
     setLoadingEntities(true);
 
     setProcessStatus({ active: true, message: "Loading transcript...", percent: 10, isVideoDownload: false });
+    setStreamingSummaryText("loading"); // Show terminal animation early
 
     let vttText = "";
     try {
@@ -7382,91 +7717,126 @@ export default function App() {
     // Cache transcript in IndexedDB for offline access
     cacheTranscript(vid, cc.map(c => ({ start: c.start, duration: c.end - c.start, text: c.text }))).catch(() => {});
 
-    try {
-      const meta = await apiMetadata(vid);
-      if (meta && meta.title) {
-        setVideoTitle(meta.title);
-      }
-    } catch (e) {
-      console.log("Could not get video metadata");
+    // Fire metadata, wordfreq, executive summary, and entity extraction in parallel
+    const cleanTranscript = all.trim();
+    setProcessStatus({ active: true, message: "AI is reading the transcript and generating your summary, word cloud, and entity analysis...", percent: 60, isVideoDownload: false });
+
+    // Rotate progress messages while waiting for AI
+    const progressMessages = [
+      "AI is reading the full transcript...",
+      "Identifying key topics and speakers...",
+      "Extracting decisions and action items...",
+      "Building word frequency analysis...",
+      "Generating executive summary...",
+      "Almost there — finalizing analysis...",
+    ];
+    let msgIdx = 0;
+    const progressTimer = setInterval(() => {
+      msgIdx = Math.min(msgIdx + 1, progressMessages.length - 1);
+      setProcessStatus(prev => ({ ...prev, message: progressMessages[msgIdx], percent: Math.min(60 + msgIdx * 6, 90) }));
+    }, 3000);
+
+    // Show summary loading indicator
+    setStreamingSummaryText("loading");
+
+    const [metaResult, wfResult, summaryResult, analyticsResult] = await Promise.allSettled([
+      apiMetadata(vid),
+      apiWordfreq({ transcript: all }),
+      cleanTranscript && cleanTranscript.length >= 10
+        ? apiSummaryAI({
+            transcript: cleanTranscript.slice(0, aiModel.startsWith('gemini') ? 100000 : 30000),
+            segments: ss.slice(0, 3000).map(s => ({ start: s.start, text: s.text })),
+            language: lang === "es" ? "es" : "en",
+            model: aiModel,
+            strategy: "executive",
+            video_id: vid
+          })
+        : Promise.resolve(null),
+      apiExtendedAnalytics({ transcript: all, model: aiModel, video_id: vid })
+    ]);
+
+    // Process metadata
+    if (metaResult.status === 'fulfilled' && metaResult.value?.title) {
+      setVideoTitle(metaResult.value.title);
     }
 
-    try {
-      const wf = await apiWordfreq({ transcript: all });
+    // Process word frequency
+    if (wfResult.status === 'fulfilled') {
+      const wf = wfResult.value;
       const filtered = (wf.words || [])
         .filter(w => !civicStopwords.has(w.text.toLowerCase()) && w.text.length > 3)
-        .slice(0, 80); // More words for denser, more impactful word cloud
+        .slice(0, 80);
       setWords(filtered);
-
       const maxT = (cc[cc.length - 1]?.end || 0);
       const buckets = Math.max(20, Math.floor(maxT / 60));
       setHits(new Array(buckets).fill(0));
-    } catch (e) {
-      console.error("Word frequency error:", e);
     }
 
-    setProcessStatus({ active: true, message: "Generating AI summary...", percent: 70, isVideoDownload: false });
-    try {
-      const cleanTranscript = all.trim();
-
-      if (!cleanTranscript || cleanTranscript.length < 10) {
-        console.warn("Transcript too short, skipping auto-summary.");
-        setSummary({ para: "", bullets: [] });
-      } else {
-        const res = await apiSummaryAI({
-          transcript: cleanTranscript,
-          language: lang === "es" ? "es" : "en",
-          model: aiModel,
-          strategy: "concise",
-          video_id: vid
-        });
-
-        if (res.strategy === 'error' || res.error) {
-          console.warn("AI summary returned error:", res.error);
-          setSummary({ para: "", bullets: [] });
-          setSummaryError(true);
+    // Process executive summary (supports both plain text and timestamped array)
+    if (summaryResult.status === 'fulfilled' && summaryResult.value) {
+      const res = summaryResult.value;
+      if (res.strategy === 'error' || res.error) {
+        setSummary({ para: "", bullets: [], sentences: [] });
+        setSummaryError(true);
+      } else if (res.hasTimestamps && Array.isArray(res.summarySentences)) {
+        // New format: array of {text, timestamp_seconds}
+        const sentences = res.summarySentences.filter(s => s.text && s.text.length > 5);
+        if (sentences.length > 0) {
+          setSummary({ para: "", bullets: [], sentences });
+          setSummaryError(false);
         } else {
-          let summaryText = "";
-          if (res.summarySentences) {
-            summaryText = res.summarySentences;
-            summaryText = summaryText.replace(/^(Here's a concise 3-sentence summary:|Here is your summary:)\s*/i, '');
-          }
-          if (!summaryText || summaryText.length < 20) {
-            setSummary({ para: "", bullets: [] });
-            setSummaryError(true);
-          } else {
-            setSummary({ para: summaryText, bullets: [] });
-            setSummaryError(false);
+          setSummary({ para: "", bullets: [], sentences: [] });
+          setSummaryError(true);
+        }
+      } else {
+        let summaryText = (typeof res.summarySentences === 'string' ? res.summarySentences : "") || "";
+        // Try to parse JSON string that backend returned as plain text (truncation fallback)
+        if (summaryText.trim().startsWith('{') || summaryText.trim().startsWith('[')) {
+          try {
+            const parsed = JSON.parse(summaryText);
+            const sArr = parsed.sentences || (Array.isArray(parsed) ? parsed : []);
+            const valid = sArr.filter(s => s && s.text && s.text.length > 10);
+            if (valid.length > 0) {
+              setSummary({ para: "", bullets: [], sentences: valid });
+              setSummaryError(false);
+              return; // handled via frontend JSON parse
+            }
+          } catch (e) {
+            // Extract text values from partial JSON via regex
+            const textMatches = [...summaryText.matchAll(/"text"\s*:\s*"([^"]+)"/g)].map(m => m[1]);
+            if (textMatches.length >= 2) {
+              summaryText = textMatches.join(' ');
+            }
           }
         }
+        summaryText = summaryText.replace(/^(Here's a concise|Here is your summary:)\s*/i, '');
+        if (!summaryText || summaryText.length < 20) {
+          setSummary({ para: "", bullets: [], sentences: [] });
+          setSummaryError(true);
+        } else {
+          setSummary({ para: summaryText, bullets: [], sentences: [] });
+          setSummaryError(false);
+        }
       }
-
-      setProcessStatus({ active: true, message: "Complete!", percent: 100, isVideoDownload: false });
-      setTimeout(() => setProcessStatus({ active: false, message: "", percent: 0, isVideoDownload: false }), 2000);
-
-    } catch (e) {
-      console.error("Summary API error:", e);
-      setSummary({ para: "", bullets: [] });
+    } else if (summaryResult.status === 'rejected') {
+      console.error("Summary API error:", summaryResult.reason);
+      setSummary({ para: "", bullets: [], sentences: [] });
       setSummaryError(true);
-      setProcessStatus({ active: false, message: "", percent: 0, isVideoDownload: false });
     }
+    setStreamingSummaryText(""); // Clear loading indicator
 
-    try {
-      setProcessStatus({ active: true, message: "Extracting entities...", percent: 85, isVideoDownload: false });
-      const analyticsData = await apiExtendedAnalytics({
-        transcript: all,
-        model: aiModel,
-        video_id: vid
-      });
-      setEntities(analyticsData.topEntities || []);
-      setProcessStatus({ active: true, message: "Complete!", percent: 100, isVideoDownload: false });
-      setTimeout(() => setProcessStatus({ active: false, message: "", percent: 0, isVideoDownload: false }), 2000);
-    } catch (e) {
-      console.error("Analytics API error:", e);
+    // Process entity extraction
+    if (analyticsResult.status === 'fulfilled') {
+      setEntities(analyticsResult.value?.topEntities || []);
+    } else {
+      console.error("Analytics API error:", analyticsResult.reason);
       setEntities([]);
-    } finally {
-      setLoadingEntities(false);
     }
+    setLoadingEntities(false);
+
+    clearInterval(progressTimer);
+    setProcessStatus({ active: true, message: "Complete!", percent: 100, isVideoDownload: false });
+    setTimeout(() => setProcessStatus({ active: false, message: "", percent: 0, isVideoDownload: false }), 2000);
 
   };
 
@@ -7574,6 +7944,37 @@ export default function App() {
     }
   };
 
+  const generateFullReport = () => {
+    if (!fullText) return;
+    setLoadingReport(true);
+    setStreamingReportText("");
+    setFullReport({ text: "", headline: "" });
+
+    streamSummaryAI(
+      { transcript: fullText.trim(), language: lang === "es" ? "es" : "en", model: aiModel, strategy: "report", video_id: videoId },
+      (chunk, fullSoFar) => { setStreamingReportText(fixEncoding(fullSoFar)); },
+      (completeText) => {
+        const cleaned = fixEncoding(completeText);
+        let headline = "";
+        let body = cleaned;
+        if (cleaned.startsWith("HEADLINE:")) {
+          const parts = cleaned.split("\n", 2);
+          headline = parts[0].replace("HEADLINE:", "").trim();
+          body = parts.length > 1 ? cleaned.slice(parts[0].length + 1).trim() : cleaned;
+        }
+        setFullReport({ text: body, headline });
+        setStreamingReportText("");
+        setLoadingReport(false);
+      },
+      (err) => {
+        console.error("Full report streaming error:", err);
+        addToast("Failed to generate full report. Try again.");
+        setStreamingReportText("");
+        setLoadingReport(false);
+      }
+    );
+  };
+
   useEffect(() => {
     if (!debQuery) {
       setMatches([]);
@@ -7605,14 +8006,57 @@ export default function App() {
     }
   }, [debQuery, sents, cues]);
 
+  const jobWsRef = useRef(null);
+
+  const handleJobUpdate = (status, isComplete) => {
+    const currentPercent = status.percent || 0;
+    setJob({
+      id: status.jobId || '',
+      percent: isComplete ? 100 : currentPercent,
+      message: status.message || "",
+      status: status.status || "running",
+      zip: status.zip || status.file || null
+    });
+    if (!isComplete) {
+      setProcessStatus(prev => ({ ...prev, percent: currentPercent, message: status.message || prev.message }));
+    } else {
+      setProcessStatus(prev => ({ ...prev, percent: 100, message: status.status === "done" ? "Complete! ✓" : "Error occurred" }));
+      setLoading(l => ({ ...l, clips: false, reel: false }));
+      if (status.status === "done") {
+        const fileUrl = status.zip || status.file || status.output;
+        if (fileUrl) setShowCelebration({ file: fileUrl });
+      }
+      setTimeout(() => setProcessStatus({ active: false, message: "", percent: 0, estimatedTime: null, isVideoDownload: false }), status.status === "done" ? 2500 : 3500);
+    }
+  };
+
   const pollJobStatus = async (jid) => {
     if (!jid) return;
 
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
+    // Cleanup previous
+    if (pollIntervalRef.current) clearTimeout(pollIntervalRef.current);
+    if (jobWsRef.current) { try { jobWsRef.current.close(); } catch(e) {} }
+
+    // Try WebSocket first
+    let wsFailed = false;
+    try {
+      const ws = connectJobWebSocket(
+        jid,
+        (status) => handleJobUpdate(status, false),
+        (status) => { handleJobUpdate(status, true); jobWsRef.current = null; },
+        () => { wsFailed = true; startHttpPolling(jid); }
+      );
+      jobWsRef.current = ws;
+      // If WS opens successfully, we're done — updates come via callbacks
+      return;
+    } catch (e) {
+      console.log("WebSocket unavailable, falling back to HTTP polling");
     }
 
-    // Exponential backoff: start at 1s, increase to max 5s when idle, reset on progress changes
+    startHttpPolling(jid);
+  };
+
+  const startHttpPolling = (jid) => {
     let pollInterval = 1000;
     let lastPercent = 0;
 
@@ -7622,47 +8066,21 @@ export default function App() {
         const isComplete = status.status === "done" || status.status === "error";
         const currentPercent = status.percent || 0;
 
-        setJob({
-          id: jid,
-          percent: isComplete ? 100 : currentPercent,
-          message: status.message || "",
-          status: status.status || "running",
-          zip: status.zip || status.file || null
-        });
+        handleJobUpdate(status, isComplete);
 
         if (!isComplete) {
-          setProcessStatus(prev => ({
-            ...prev,
-            percent: currentPercent,
-            message: status.message || prev.message
-          }));
-          // Adaptive interval: fast when progress is changing, slow when stalled
           if (currentPercent !== lastPercent) {
-            pollInterval = 1000;  // Reset to fast when progress moves
+            pollInterval = 1000;
           } else {
-            pollInterval = Math.min(pollInterval * 1.3, 5000);  // Back off to 5s max
+            pollInterval = Math.min(pollInterval * 1.3, 5000);
           }
           lastPercent = currentPercent;
           pollIntervalRef.current = setTimeout(doPoll, pollInterval);
         } else {
-          setProcessStatus(prev => ({
-            ...prev,
-            percent: 100,
-            message: status.status === "done" ? "Complete! ✓" : "Error occurred"
-          }));
           pollIntervalRef.current = null;
-          setLoading(l => ({ ...l, clips: false, reel: false }));
-          if (status.status === "done") {
-            const fileUrl = status.zip || status.file || status.output;
-            if (fileUrl) setShowCelebration({ file: fileUrl });
-          }
-          setTimeout(() => {
-            setProcessStatus({ active: false, message: "", percent: 0, estimatedTime: null, isVideoDownload: false });
-          }, status.status === "done" ? 2500 : 3500);
         }
       } catch (e) {
         console.error("Poll error:", e);
-        // On error, retry with backoff
         pollInterval = Math.min(pollInterval * 2, 8000);
         pollIntervalRef.current = setTimeout(doPoll, pollInterval);
       }
@@ -7672,9 +8090,8 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      if (pollIntervalRef.current) {
-        clearTimeout(pollIntervalRef.current);
-      }
+      if (pollIntervalRef.current) clearTimeout(pollIntervalRef.current);
+      if (jobWsRef.current) { try { jobWsRef.current.close(); } catch(e) {} }
     };
   }, []);
 
@@ -8006,7 +8423,32 @@ export default function App() {
         console.warn("[Highlights] No highlights returned from API");
       }
 
-      setHighlightsWithQuotes(highlights.slice(0, 10));
+      const finalHighlights = highlights.slice(0, 10);
+      setHighlightsWithQuotes(finalHighlights);
+
+      // Also load top 5 highlights into the editor timeline
+      if (finalHighlights.length > 0 && sents.length > 0) {
+        const pad = videoOptions.clipPadding || 4;
+        const clips = [];
+        for (const h of finalHighlights.slice(0, 5)) {
+          const match = findQuoteTimestamp(h.quote || h.highlight, sents);
+          if (match) {
+            const label = (h.highlight || h.summary || '').slice(0, 80) || 'Highlight';
+            clips.push({
+              start: Math.max(0, match.start - pad),
+              end: match.end + pad,
+              label,
+              highlight: label,
+              text: h.quote || '',
+            });
+          }
+        }
+        if (clips.length > 0) {
+          updateClipBasket(clips);
+          addToast(`${clips.length} highlights loaded into editor timeline`);
+        }
+      }
+
       setProcessStatus({ active: false, message: "", percent: 0 });
     } catch (e) {
       console.error("Highlights error:", e);
@@ -8344,7 +8786,7 @@ export default function App() {
         <div className="container">
           <div className="wrap">
             <div className="brand">
-              <img src="/logo.png" alt="Community Highlighter" className="logo-main" />
+              <img src="/logo.png" alt="Community Highlighter" className="logo-main" style={{ cursor: 'pointer' }} onClick={() => { window.location.href = window.location.pathname; }} />
               <div className="subtitle-large">{t.appSubtitle}</div>
               <button onClick={() => setShowAboutPage(true)} style={{
                 background: 'none', border: '2px solid #1e7f63', color: '#1e7f63', fontSize: '15px',
@@ -8419,9 +8861,10 @@ export default function App() {
         )}
 
         <section className="card section animate-fadeIn">
-          {!videoId && <HowToGuide onOpenAssistant={() => { setShowAssistant(true); setForceAssistantOpen(prev => prev + 1); }} />}
+          {/* Section previews at top of landing page */}
+          {!videoId && <SectionPreviews />}
 
-          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: videoId ? '0' : '20px' }}>
+          <div className={!videoId ? 'url-input-hero' : ''} style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: videoId ? '0' : '20px' }}>
             <input
               className="input url-input"
               placeholder="To Get Started, Paste a Youtube URL Here."
@@ -8509,6 +8952,20 @@ export default function App() {
             >
               {loading.transcript ? "Loading..." : t.loadVideo}
             </button>
+            {!videoId && (
+              <select
+                value={aiModel}
+                onChange={e => setAiModel(e.target.value)}
+                className="select-input"
+                style={{ fontSize: 12, padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1', color: '#334155', minWidth: 160 }}
+                title="Choose AI model before loading"
+              >
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash (Recommended)</option>
+                <option value="gpt-4o">GPT-4o</option>
+                <option value="gpt-4o-mini">GPT-4o Mini (Faster)</option>
+                <option value="gpt-5.1">GPT-5.1 (Deep Analysis)</option>
+              </select>
+            )}
             {videoId && (
               <>
                 <div style={{ fontSize: 12, color: "#64748b" }}>{t.padding}:</div>
@@ -8528,7 +8985,8 @@ export default function App() {
                   onChange={e => setAiModel(e.target.value)}
                   className="select-input"
                 >
-                  <option value="gpt-4o">GPT-4o (Recommended)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Recommended)</option>
+                  <option value="gpt-4o">GPT-4o</option>
                   <option value="gpt-4o-mini">GPT-4o Mini (Faster)</option>
                   <option value="gpt-5.1">GPT-5.1 (Deep Analysis)</option>
                   <option value="gpt-5.1-chat-latest">GPT-5.1 Instant</option>
@@ -8537,9 +8995,33 @@ export default function App() {
             )}
           </div>
           {!videoId && (
-            <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '10px', lineHeight: '1.5' }}>
-              Works best with YouTube videos that have captions or closed captioning enabled. No captions? You can upload your own transcript file (.vtt, .srt, or .txt).
-            </div>
+            <>
+              <div style={{ margin: '20px 0 12px', textAlign: 'center', fontSize: '14px', color: '#475569', fontWeight: 500 }}>
+                Don't have the link? Use our AI search tool to find the most recent civic meetings near you.
+              </div>
+              <CivicMeetingFinder
+                onSelectVideo={(selectedUrl) => {
+                  setUrl(selectedUrl);
+                  const input = document.querySelector('.url-input');
+                  if (input) input.value = selectedUrl;
+                  setTimeout(() => {
+                    const vid = selectedUrl.match(/(?:v=|\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1];
+                    if (vid) {
+                      setVideoId(vid);
+                      const loadBtn = document.querySelector('.btn-primary');
+                      if (loadBtn && loadBtn.textContent.includes('Load')) loadBtn.click();
+                      else loadAll();
+                    }
+                  }, 150);
+                }}
+              />
+              <div style={{ fontSize: '13px', color: '#475569', marginTop: '14px', lineHeight: '1.6', background: '#f8fafc', padding: '10px 14px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                Tip: This app works best with YouTube videos that have captions or closed captioning enabled. No captions? You can upload your own transcript file (.vtt, .srt, or .txt).{' '}
+                <a href="?page=about" onClick={(e) => { e.preventDefault(); setShowAboutPage(true); }} style={{ color: '#1e7f63', fontWeight: 600, textDecoration: 'underline' }}>
+                  Learn more about how Community Highlighter works
+                </a>
+              </div>
+            </>
           )}
         </section>
 
@@ -8570,7 +9052,9 @@ export default function App() {
           </section>
         )}
 
-        {/* .chreel Import Zone — desktop landing page */}
+        {/* Civic Meeting Finder now merged into main input section above */}
+
+        {/* .chreel Import Zone — desktop landing page, below civic meetings */}
         {!videoId && !isCloudMode && (
           <section className="card section animate-fadeIn" style={{
             marginTop: 16,
@@ -8658,35 +9142,6 @@ export default function App() {
           </section>
         )}
 
-        {/* Civic Meeting Finder - Show on landing page when no video loaded */}
-        {!videoId && (
-          <section className="card section animate-fadeIn" style={{ marginTop: 16 }}>
-            <CivicMeetingFinder 
-              onSelectVideo={(selectedUrl) => {
-                // Set URL in state and input field, then trigger load
-                setUrl(selectedUrl);
-                const input = document.querySelector('.url-input');
-                if (input) input.value = selectedUrl;
-                // Use a slightly longer delay to ensure state update
-                setTimeout(() => {
-                  // Extract video ID and load directly
-                  const vid = selectedUrl.match(/(?:v=|\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1];
-                  if (vid) {
-                    setVideoId(vid);
-                    // Trigger a click on the load button for reliable loading
-                    const loadBtn = document.querySelector('.btn-primary');
-                    if (loadBtn && loadBtn.textContent.includes('Load')) {
-                      loadBtn.click();
-                    } else {
-                      loadAll();
-                    }
-                  }
-                }, 150);
-              }}
-            />
-          </section>
-        )}
-
         {/* Why Desktop App — cloud mode only, below Civic Meeting Finder */}
         {!videoId && isCloudMode && (
           <section id="why-desktop" className="card section animate-fadeIn" style={{
@@ -8701,7 +9156,7 @@ export default function App() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px' }}>
               <div style={{ flex: 1, minWidth: '280px' }}>
                 <h3 style={{ margin: '0 0 10px 0', fontSize: '20px', fontWeight: 700 }}>
-                  Why do I need the Desktop App?
+                  What are the advantages of the desktop version?
                 </h3>
                 <p style={{ margin: '0 0 12px 0', fontSize: '14px', color: 'rgba(255,255,255,0.85)', maxWidth: '560px', lineHeight: '1.5' }}>
                   YouTube blocks video downloads from cloud server IP addresses (like the ones hosting this web app).
@@ -8801,13 +9256,47 @@ export default function App() {
           </section>
         )}
 
+        {/* Section Navigation Bar */}
+        {videoId && fullText && (
+          <div style={{
+            display: 'flex', justifyContent: 'center', gap: 8, padding: '16px 0 8px',
+          }}>
+            {[
+              { label: 'Highlight', sub: 'Search & discover key moments', ref: sectionHighlightRef, iconChar: '\u2315' },
+              { label: 'Edit', sub: 'Build & export highlight reels', ref: sectionEditRef, iconChar: '\u25B6' },
+              { label: 'Analyze', sub: 'Entities, topics & trends', ref: sectionAnalyzeRef, iconChar: '\u2261' },
+            ].map((s, i) => (
+              <button key={s.label} onClick={() => s.ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                className="section-nav-btn"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 20px', border: '1.5px solid #e2e8f0', borderRadius: 10,
+                  background: '#fff', cursor: 'pointer', transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)',
+                  opacity: 0, animation: `slideUp 0.5s ease-out ${i * 0.12}s forwards`,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = '#1e7f63'; e.currentTarget.style.transform = 'translateY(-3px) scale(1.02)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(30,127,99,0.12)'; e.currentTarget.style.background = '#f0fdf4'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.transform = 'translateY(0) scale(1)'; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.background = '#fff'; }}
+              >
+                <span style={{ color: '#1e7f63', fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, background: '#f0fdf4', flexShrink: 0 }}>{s.iconChar}</span>
+                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a', letterSpacing: '0.01em' }}>{s.label}</span>
+                  <span style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.2 }}>{s.sub}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Section 1: Meeting Highlighter — above AI summary */}
         {videoId && (
-          <div className="section-divider">
+          <div className="section-divider" ref={sectionHighlightRef}>
             <div className="section-divider-line" />
             <div className="section-divider-title">
               <span className="section-divider-icon">🔍</span>
               Meeting Highlighter
+            </div>
+            <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>
+              Search the transcript, explore the word cloud, and let AI surface the most important moments with direct quotes.
             </div>
           </div>
         )}
@@ -8833,11 +9322,10 @@ export default function App() {
         )}
 
         {/* AI Summary */}
-        {summary.para && (
+        {(summary.para || (summary.sentences && summary.sentences.length > 0) || streamingSummaryText) && (
           <section className="card section summary-card animate-slideUp" style={{ marginTop: 16 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
               <div style={{ fontWeight: 700, fontSize: 18 }}>
-                {/* UPDATED: Added permanent-highlight class */}
                 <span className="summary-title-permanent">{t.aiSummary}</span>
               </div>
               <button
@@ -8859,62 +9347,179 @@ export default function App() {
                 </button>
               )}
             </div>
-            <p style={{ margin: "8px 0", lineHeight: 1.7, fontSize: 15, color: "#334155" }}>
-              {summary.para}
-            </p>
+            {/* Animated AI terminal — simulated typing while summary generates */}
+            {streamingSummaryText === "loading" && !summary.para && !(summary.sentences && summary.sentences.length > 0) && (
+              <SummaryLoadingTerminal />
+            )}
+            {/* Streaming text — shows words appearing in real-time (for Full Report) */}
+            {streamingSummaryText && streamingSummaryText !== "loading" && !summary.para && !(summary.sentences && summary.sentences.length > 0) && (
+              <div style={{ margin: "8px 0", lineHeight: 1.7, fontSize: 15, color: "#334155" }}>
+                {streamingSummaryText}
+                <span className="streaming-cursor" />
+              </div>
+            )}
+            {/* Executive brief — with clickable timestamps when available */}
+            {summary.sentences && summary.sentences.length > 0 ? (
+              <div style={{ margin: "8px 0", lineHeight: 1.7, fontSize: 15, color: "#334155" }}>
+                {summary.sentences.map((s, i) => (
+                  <span key={i}>
+                    {s.timestamp_seconds != null && (
+                      <button
+                        onClick={() => jumpToTimestamp(s.timestamp_seconds)}
+                        className="timestamp-pill"
+                        title={`Jump to ${Math.floor(s.timestamp_seconds / 60)}:${String(Math.floor(s.timestamp_seconds % 60)).padStart(2, '0')} — opens video + transcript`}
+                      >
+                        {Math.floor(s.timestamp_seconds / 60)}:{String(Math.floor(s.timestamp_seconds % 60)).padStart(2, '0')}
+                      </button>
+                    )}
+                    {s.text}{' '}
+                  </span>
+                ))}
+              </div>
+            ) : summary.para ? (
+              <p style={{ margin: "8px 0", lineHeight: 1.7, fontSize: 15, color: "#334155" }}>
+                {summary.para}
+              </p>
+            ) : null}
 
+            {/* Generate Full Report button + streaming + collapsible report display */}
+            {!fullReport.text ? (
+              <>
+                <button
+                  onClick={generateFullReport}
+                  disabled={loadingReport}
+                  style={{
+                    margin: '12px 0 4px',
+                    padding: '8px 18px',
+                    background: loadingReport ? '#94a3b8' : '#1e7f63',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: loadingReport ? 'not-allowed' : 'pointer',
+                    transition: 'background 0.2s'
+                  }}
+                >
+                  {loadingReport ? 'Generating report...' : 'Generate Full Report'}
+                </button>
+                {streamingReportText && (
+                  <div style={{ marginTop: 12, background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0', padding: '16px 20px', fontSize: 14, lineHeight: 1.8, color: '#334155', maxHeight: 400, overflowY: 'auto' }}>
+                    {streamingReportText.split('\n').map((line, i) => {
+                      if (line.startsWith('**') && line.endsWith('**')) return <h4 key={i} style={{ margin: '16px 0 8px', fontSize: 15, fontWeight: 700, color: '#1e293b' }}>{renderLineWithTimestamps(line.replace(/\*\*/g, ''))}</h4>;
+                      if (line.trim()) return <p key={i} style={{ margin: '0 0 10px' }}>{renderLineWithTimestamps(line)}</p>;
+                      return null;
+                    })}
+                    <span className="shimmer-block" style={{ display: 'inline-block', width: 12, height: 16, verticalAlign: 'middle', borderRadius: 2 }} />
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ marginTop: 16, background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderBottom: reportCollapsed ? 'none' : '1px solid #e2e8f0', cursor: 'pointer' }}
+                  onClick={() => setReportCollapsed(p => !p)}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ display: 'inline-block', fontSize: 12, color: '#64748b', transform: reportCollapsed ? 'rotate(-90deg)' : 'rotate(0)', transition: 'transform 0.2s' }}>{'\u25BC'}</span>
+                    <span style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>{fullReport.headline || 'Full Report'}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={(e) => {
+                      e.stopPropagation();
+                      const u = new URL(window.location);
+                      u.searchParams.set('mode', 'report');
+                      u.searchParams.set('v', videoId);
+                      navigator.clipboard.writeText(u.toString());
+                      addToast('Report link copied!');
+                    }} style={{ padding: '4px 10px', background: '#1e7f63', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                      Share
+                    </button>
+                    <button onClick={(e) => {
+                      e.stopPropagation();
+                      const content = '# ' + (fullReport.headline || 'Report') + '\n\n' + fullReport.text;
+                      const blob = new Blob([content], { type: 'text/markdown' });
+                      const a = document.createElement('a');
+                      a.href = URL.createObjectURL(blob);
+                      a.download = 'report-' + videoId + '.md';
+                      a.click();
+                      URL.revokeObjectURL(a.href);
+                    }} style={{ padding: '4px 10px', background: '#334155', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                      Export
+                    </button>
+                  </div>
+                </div>
+                {!reportCollapsed && (
+                  <div style={{ padding: '16px 20px' }}>
+                    <div style={{ fontSize: 14, lineHeight: 1.8, color: '#334155' }}>
+                      {fullReport.text.split('\n').map((line, i) => {
+                        if (line.startsWith('**') && line.endsWith('**')) {
+                          return <h4 key={i} style={{ margin: '16px 0 8px', fontSize: 15, fontWeight: 700, color: '#1e293b' }}>{renderLineWithTimestamps(line.replace(/\*\*/g, ''))}</h4>;
+                        }
+                        if (line.trim()) return <p key={i} style={{ margin: '0 0 10px' }}>{renderLineWithTimestamps(line)}</p>;
+                        return null;
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Collapsible Highlights */}
             {highlightsWithQuotes.length > 0 && (
               <div className="highlights-display" style={{ marginTop: 24, paddingTop: 24, borderTop: '2px solid #e5e7eb' }}>
-                <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 12 }}>
-                  {t.keyHighlights}:
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: highlightsCollapsed ? 0 : 12 }}
+                  onClick={() => setHighlightsCollapsed(p => !p)}>
+                  <span style={{ display: 'inline-block', fontSize: 12, color: '#64748b', transform: highlightsCollapsed ? 'rotate(-90deg)' : 'rotate(0)', transition: 'transform 0.2s' }}>{'\u25BC'}</span>
+                  <span style={{ fontWeight: 700, fontSize: 16 }}>{t.keyHighlights} ({highlightsWithQuotes.length})</span>
                 </div>
-                <div className="highlights-list">
-                  {highlightsWithQuotes.map((item, i) => (
-                    <div key={i} className="highlight-item" style={{ marginBottom: 16 }}>
-                      <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                        {i + 1}. {item.highlight}
-                        {item.category && (
-                          <span style={{
-                            marginLeft: '8px',
-                            fontSize: '11px',
-                            padding: '2px 8px',
-                            borderRadius: '12px',
-                            background: item.category === 'vote' ? '#fee2e2' : 
-                                       item.category === 'budget' ? '#dcfce7' :
-                                       item.category === 'public_comment' ? '#dbeafe' : '#fef3c7',
-                            color: item.category === 'vote' ? '#991b1b' : 
-                                   item.category === 'budget' ? '#166534' :
-                                   item.category === 'public_comment' ? '#1e40af' : '#92400e'
-                          }}>
-                            {item.category === 'vote' ? '🗳️️ Vote' :
-                             item.category === 'budget' ? '💰 Budget' :
-                             item.category === 'public_comment' ? '💬 Public' :
-                             item.category === 'announcement' ? '📢 Announcement' : ''}
-                          </span>
-                        )}
-                      </div>
-                      {item.quote && (
-                        <div style={{
-                          paddingLeft: 20,
-                          fontSize: 13,
-                          color: "#64748b",
-                          fontStyle: "italic",
-                          borderLeft: "3px solid #97D68D",
-                          marginLeft: 10,
-                          paddingTop: 4,
-                          paddingBottom: 4
-                        }}>
-                          "{item.quote}"
-                          {item.speaker && (
-                            <span style={{ display: 'block', marginTop: '4px', fontStyle: 'normal', color: '#94a3b8', fontSize: '12px' }}>
-                              â€” {item.speaker}
+                {!highlightsCollapsed && (
+                  <div className="highlights-list">
+                    {highlightsWithQuotes.map((item, i) => (
+                      <div key={i} className="highlight-item" style={{ marginBottom: 16 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                          {i + 1}. {item.highlight}
+                          {item.category && (
+                            <span style={{
+                              marginLeft: '8px',
+                              fontSize: '11px',
+                              padding: '2px 8px',
+                              borderRadius: '12px',
+                              background: item.category === 'vote' ? '#fee2e2' :
+                                         item.category === 'budget' ? '#dcfce7' :
+                                         item.category === 'public_comment' ? '#dbeafe' : '#fef3c7',
+                              color: item.category === 'vote' ? '#991b1b' :
+                                     item.category === 'budget' ? '#166534' :
+                                     item.category === 'public_comment' ? '#1e40af' : '#92400e'
+                            }}>
+                              {item.category === 'vote' ? 'Vote' :
+                               item.category === 'budget' ? 'Budget' :
+                               item.category === 'public_comment' ? 'Public' :
+                               item.category === 'announcement' ? 'Announcement' : ''}
                             </span>
                           )}
                         </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                        {item.quote && (
+                          <div style={{
+                            paddingLeft: 20,
+                            fontSize: 13,
+                            color: "#64748b",
+                            fontStyle: "italic",
+                            borderLeft: "3px solid #97D68D",
+                            marginLeft: 10,
+                            paddingTop: 4,
+                            paddingBottom: 4
+                          }}>
+                            "{item.quote}"
+                            {item.speaker && (
+                              <span style={{ display: 'block', marginTop: '4px', fontStyle: 'normal', color: '#94a3b8', fontSize: '12px' }}>
+                                — {item.speaker}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -9007,6 +9612,11 @@ export default function App() {
                     const blob = new Blob([vtt || fullText], { type: vtt ? 'text/vtt' : 'text/plain' });
                     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `transcript-${videoId}.${vtt ? 'vtt' : 'txt'}`; a.click(); URL.revokeObjectURL(url);
                   }}>⬇️ Download</button>
+                  {sents.length > 0 && (
+                    <button className="desktop-search-tool-btn" onClick={() => setShowFullTranscript(prev => !prev)}
+                      style={showFullTranscript ? { background: '#166534', color: '#fff', borderColor: '#166534' } : {}}
+                    >{showFullTranscript ? '🔤 Word Cloud' : '📝 Full Transcript'}</button>
+                  )}
                 </div>
               </div>
 
@@ -9048,10 +9658,12 @@ export default function App() {
                       <div className="desktop-transcript-panel" ref={desktopTranscriptRef} onMouseUp={handleDesktopTranscriptMouseUp} style={{ maxHeight: '400px' }}>
                         {sents.map((s, idx) => {
                           const isFocus = expanded.open && idx === expanded.focusIdx;
+                          const isActive = idx === activeCueIdx;
                           return (
-                            <span key={idx} id={`sent-${idx}`} className={`sent ${isFocus ? 'hit' : ''}`} data-idx={idx} data-start={s.start} data-end={s.end}
-                              style={isFocus ? { background: 'rgba(34,197,94,0.2)', borderRadius: '4px', padding: '2px 4px' } : undefined}
+                            <span key={idx} id={`sent-${idx}`} className={`sent ${isFocus ? 'hit' : ''} ${isActive ? 'active-cue' : ''}`} data-idx={idx} data-start={s.start} data-end={s.end}
+                              style={(isFocus || isActive) ? { background: isActive ? 'rgba(30,127,99,0.25)' : 'rgba(34,197,94,0.2)', borderRadius: '4px', padding: '2px 4px', transition: 'background 0.3s' } : undefined}
                             >
+                              {isActive && <span style={{ fontSize: 10, color: '#1e7f63', fontFamily: 'monospace', marginRight: 3, fontWeight: 700 }}>{formatTime(s.start)}</span>}
                               {s.text}{' '}
                             </span>
                           );
@@ -9109,7 +9721,7 @@ export default function App() {
                             }}>📖 Context</button>
                             <button className="search-result-btn search-result-btn-investigate" onClick={() => {
                               setInvestigateWord({ text: m.text.split(/\s+/).slice(0, 5).join(' ') });
-                            }}>🔬</button>
+                            }}>Investigate</button>
                           </div>
                         </div>
                       ))}
@@ -9225,11 +9837,14 @@ export default function App() {
             </div>
 
             {/* Section 2: Highlight Video Editor */}
-            <div className="section-divider">
+            <div className="section-divider" ref={sectionEditRef}>
               <div className="section-divider-line" />
               <div className="section-divider-title">
                 <span className="section-divider-icon">🎬</span>
                 Highlight Video Editor
+              </div>
+              <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>
+                Drag clips to reorder, trim edges, add effects, and export your highlight reel as a video.
               </div>
             </div>
 
@@ -9328,6 +9943,8 @@ export default function App() {
                         navigator.clipboard.writeText(shareUrl).then(() => addToast('🔗 Reel link copied to clipboard!')).catch(() => {
                           prompt('Copy this reel link:', shareUrl);
                         });
+                        // Precompute summary for viewers
+                        apiSharePrecompute(videoId, fullText);
                       }} title="Copy a shareable link with your clip selections embedded">
                         <span>🔗</span>
                         <span>Share Reel Link</span>
@@ -9369,6 +9986,7 @@ export default function App() {
                         navigator.clipboard.writeText(shareUrl).then(() => addToast('🔗 Reel link copied to clipboard!')).catch(() => {
                           prompt('Copy this reel link:', shareUrl);
                         });
+                        apiSharePrecompute(videoId, fullText);
                       }} title="Copy a shareable link that plays your clips as a reel">
                         <span>🔗</span>
                         <span>Share Reel Link</span>
@@ -9405,6 +10023,33 @@ export default function App() {
                     {!isCloudMode && (
                       <>
                         <div style={{ flex: 1 }} />
+                        <button className="toolbar-action-btn" style={{ fontSize: '11px', color: '#94a3b8' }} disabled={downloadJob?.status === 'running'} onClick={async () => {
+                          if (downloadJob?.status === 'running') return;
+                          setDownloadJob({ status: 'running', percent: 0, message: 'Starting download...' });
+                          try {
+                            const res = await apiDownloadMp4({ videoId, resolution: downloadResolution });
+                            if (res.jobId) {
+                              const poll = setInterval(async () => {
+                                try {
+                                  const status = await apiJobStatus(res.jobId);
+                                  setDownloadJob({ status: status.status, percent: status.percent, message: status.message, file: status.file });
+                                  if (status.status === 'done') { clearInterval(poll); if (status.file) { window.open(status.file, '_blank'); addDownload(`${videoId}.mp4`, status.file, 'full_video'); } }
+                                  else if (status.status === 'error') { clearInterval(poll); addToast('Download failed: ' + (status.message || 'Unknown error')); }
+                                } catch(e) { clearInterval(poll); setDownloadJob(null); }
+                              }, 1500);
+                            } else if (res.file) { window.open(res.file, '_blank'); addDownload(`${videoId}.mp4`, res.file, 'full_video'); setDownloadJob(null); }
+                            else if (res.error) { addToast('Download failed: ' + res.error); setDownloadJob(null); }
+                          } catch(e) { addToast('Download failed: ' + e.message); setDownloadJob(null); }
+                        }} title="Download the full original video as MP4">
+                          {downloadJob?.status === 'running' ? `Downloading ${downloadJob.percent || 0}%` : 'Download Full Video'}
+                        </button>
+                        <select value={downloadResolution} onChange={(e) => setDownloadResolution(e.target.value)} style={{ background: '#1a2332', color: '#94a3b8', border: '1px solid #334155', borderRadius: 4, fontSize: 10, padding: '2px 4px' }} title="Download quality">
+                          {availableFormats.length > 0 ? availableFormats.map(f => (
+                            <option key={f.label} value={f.label}>{f.label === 'best' ? 'Best' : f.label}</option>
+                          )) : (
+                            <><option value="best">Best</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option></>
+                          )}
+                        </select>
                         <button className="toolbar-action-btn" style={{ fontSize: '11px' }} onClick={() => {
                           const input = document.createElement('input');
                           input.type = 'file'; input.accept = '.chreel,.json';
@@ -9420,60 +10065,14 @@ export default function App() {
                             } catch (err) { addToast('Failed: ' + err.message); }
                           };
                           input.click();
-                        }} title="Import .chreel file">📂 Import</button>
+                        }} title="Import .chreel file">Import</button>
                       </>
                     )}
                   </div>
                 )}
               </div>
 
-              {/* Download Full Video toolbar — desktop only, separate row */}
-              {!isCloudMode && (<div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: '#111820', borderRadius: 6, margin: '0 12px' }}>
-                <button className="toolbar-download-btn" style={{ flex: 'none' }} disabled={downloadJob?.status === 'running'} onClick={async () => {
-                  if (downloadJob?.status === 'running') return;
-                  setDownloadJob({ status: 'running', percent: 0, message: 'Starting download...' });
-                  try {
-                    const res = await apiDownloadMp4({ videoId, resolution: downloadResolution });
-                    if (res.jobId) {
-                      // Poll for progress
-                      const poll = setInterval(async () => {
-                        try {
-                          const status = await apiJobStatus(res.jobId);
-                          setDownloadJob({ status: status.status, percent: status.percent, message: status.message, file: status.file });
-                          if (status.status === 'done') {
-                            clearInterval(poll);
-                            if (status.file) {
-                              window.open(status.file, '_blank');
-                              addDownload(`${videoId}.mp4`, status.file, 'full_video');
-                            }
-                          } else if (status.status === 'error') {
-                            clearInterval(poll);
-                            addToast('Download failed: ' + (status.message || 'Unknown error'));
-                          }
-                        } catch(e) { clearInterval(poll); setDownloadJob(null); }
-                      }, 1500);
-                    } else if (res.file) {
-                      // Legacy sync response
-                      window.open(res.file, '_blank');
-                      addDownload(`${videoId}.mp4`, res.file, 'full_video');
-                      setDownloadJob(null);
-                    } else if (res.error) {
-                      addToast('Download failed: ' + res.error);
-                      setDownloadJob(null);
-                    }
-                  } catch(e) { addToast('Download failed: ' + e.message); setDownloadJob(null); }
-                }} title="Download the full original video as MP4">
-                  <span>⬇️</span>
-                  <span>{downloadJob?.status === 'running' ? `Downloading ${downloadJob.percent || 0}%` : 'Download Full Video'}</span>
-                </button>
-                <select value={downloadResolution} onChange={(e) => setDownloadResolution(e.target.value)} className="toolbar-resolution-select" title="Select download quality">
-                  {availableFormats.length > 0 ? availableFormats.map(f => (
-                    <option key={f.label} value={f.label}>{f.label === 'best' ? 'Best' : f.label}</option>
-                  )) : (
-                    <><option value="best">Best</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option></>
-                  )}
-                </select>
-              </div>)}
+              {/* Download Full Video moved into secondary toolbar row above */}
 
               {/* Timeline — directly under toolbar */}
               <div className="timeline-editor-wrapper">
@@ -10805,11 +11404,14 @@ export default function App() {
         {fullText && sents.length > 0 && (
           <>
             {/* Section 3: Video Analyzer */}
-            <div className="section-divider">
+            <div className="section-divider" ref={sectionAnalyzeRef}>
               <div className="section-divider-line" />
               <div className="section-divider-title">
                 <span className="section-divider-icon">📊</span>
                 Meeting Analyzer
+              </div>
+              <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>
+                See who spoke, what topics were covered, entity extraction, and cross-meeting patterns.
               </div>
             </div>
 
@@ -11037,9 +11639,9 @@ export default function App() {
       {loading.reel && <LoadingCard title="Building highlight reel..." message="Creating from AI highlights" />}
       {loading.translate && <LoadingCard title="Translating transcript..." message={`Translating to ${translateLang}`} />}
 
-      {/* Onboarding Wizard */}
-      {showOnboarding && (
-        <OnboardingWizard onClose={() => {
+      {/* Guided Tour — animated tooltip walkthrough */}
+      {showOnboarding && !videoId && (
+        <GuidedTour onClose={() => {
           setShowOnboarding(false);
           localStorage.setItem('ch_onboarding_done', 'true');
         }} />

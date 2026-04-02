@@ -449,6 +449,74 @@ export async function apiLiveChatStats(data) {
 }
 
 // ============================================================================
+// SSE STREAMING SUPPORT
+// ============================================================================
+
+/**
+ * Stream summary/highlights via SSE. Uses fetch + ReadableStream (POST body needed).
+ * @param {Object} data - Request payload (transcript, strategy, model, etc.)
+ * @param {Function} onChunk - Called with each text chunk
+ * @param {Function} onDone - Called when stream completes
+ * @param {Function} onError - Called on error
+ * @returns {AbortController} - Call .abort() to cancel
+ */
+export function streamSummaryAI(data, onChunk, onDone, onError) {
+  const controller = new AbortController();
+  fetch(`${BACKEND_URL}/api/summary_ai/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+    signal: controller.signal,
+  }).then(async (res) => {
+    if (!res.ok) {
+      const err = await res.text();
+      onError && onError(new Error(`Stream error ${res.status}: ${err}`));
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let fullText = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const payload = line.slice(6).trim();
+        if (payload === "[DONE]") {
+          onDone && onDone(fullText);
+          return;
+        }
+        try {
+          const parsed = JSON.parse(payload);
+          if (parsed.cached) {
+            fullText = parsed.text;
+            onDone && onDone(fullText);
+            return;
+          }
+          if (parsed.text) {
+            fullText += parsed.text;
+            onChunk && onChunk(parsed.text, fullText);
+          }
+          if (parsed.error) {
+            onError && onError(new Error(parsed.error));
+            return;
+          }
+        } catch (e) { /* skip malformed */ }
+      }
+    }
+    // Stream ended without [DONE]
+    if (fullText) onDone && onDone(fullText);
+  }).catch((err) => {
+    if (err.name !== "AbortError") onError && onError(err);
+  });
+  return controller;
+}
+
+// ============================================================================
 // WEBSOCKET SUPPORT
 // ============================================================================
 
@@ -460,6 +528,44 @@ export async function apiLiveChatStats(data) {
 export function createLiveWebSocket(meetingId) {
   const ws = new WebSocket(getWebSocketUrl(`/ws/live/${meetingId}`));
   return ws;
+}
+
+/**
+ * Connect WebSocket for real-time job status updates
+ * @param {string} jobId - Job ID to monitor
+ * @param {Function} onUpdate - Called with job status updates
+ * @param {Function} onComplete - Called when job finishes
+ * @param {Function} onError - Called on WS error (triggers fallback to polling)
+ * @returns {WebSocket}
+ */
+export function connectJobWebSocket(jobId, onUpdate, onComplete, onError) {
+  const ws = new WebSocket(getWebSocketUrl(`/ws/job/${jobId}`));
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.status === "done" || data.status === "error") {
+        onComplete && onComplete(data);
+      } else {
+        onUpdate && onUpdate(data);
+      }
+    } catch (e) { /* ignore */ }
+  };
+  ws.onerror = () => onError && onError();
+  ws.onclose = (event) => {
+    if (!event.wasClean) onError && onError();
+  };
+  return ws;
+}
+
+/**
+ * Precompute summaries for a shared video link
+ */
+export function apiSharePrecompute(videoId, transcript) {
+  return fetch(`${BACKEND_URL}/api/share/precompute`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ video_id: videoId, transcript: (transcript || "").slice(0, 100000) }),
+  }).catch(() => {}); // fire-and-forget
 }
 
 // ============================================================================
