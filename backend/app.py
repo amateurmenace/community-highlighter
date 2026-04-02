@@ -3474,7 +3474,57 @@ Respond in this exact JSON format (no markdown):
                 print(f"[Documents] Search error for '{query}': {e}")
                 continue
         
-        # Step 3: Also search YouTube for related video content (presentations, etc.)
+        # Step 3: Search CivicClerk portals for official meeting documents
+        try:
+            org_name = search_data.get("organization", "").lower()
+            # Map known municipalities to their CivicClerk portal URLs
+            civicclerk_portals = {
+                "brookline": "https://brooklinema.portal.civicclerk.com",
+            }
+            # Check if any known portal matches
+            portal_url = None
+            for key, url in civicclerk_portals.items():
+                if key in org_name or key in video_title.lower():
+                    portal_url = url
+                    break
+
+            if portal_url:
+                # Search CivicClerk for agendas and minutes
+                try:
+                    cc_search_url = f"{portal_url}/api/v2/PublicPortal/SearchEvents"
+                    cc_params = {"searchText": video_title[:60], "take": 5}
+                    cc_response = httpx.get(cc_search_url, timeout=10.0, follow_redirects=True)
+                    if cc_response.status_code == 200:
+                        cc_data = cc_response.json()
+                        for item in (cc_data if isinstance(cc_data, list) else cc_data.get("items", cc_data.get("data", [])))[:3]:
+                            title = item.get("title", item.get("name", "CivicClerk Document"))
+                            item_id = item.get("id", item.get("eventId", ""))
+                            doc_url = f"{portal_url}/event/{item_id}" if item_id else portal_url
+                            if not any(d['url'] == doc_url for d in documents):
+                                documents.append({
+                                    "title": str(title)[:100],
+                                    "url": doc_url,
+                                    "type": "minutes",
+                                    "description": "Official meeting record from CivicClerk",
+                                    "source": portal_url.split('/')[2],
+                                })
+                except Exception as e:
+                    print(f"[Documents] CivicClerk API search failed: {e}")
+
+                # Always add the portal as a direct link
+                if not any(portal_url in d.get('url', '') for d in documents):
+                    documents.append({
+                        "title": f"CivicClerk Meeting Portal",
+                        "url": portal_url,
+                        "type": "minutes",
+                        "description": "Official meeting agendas, minutes, and video archives",
+                        "source": portal_url.split('/')[2],
+                    })
+                    print(f"[Documents] Added CivicClerk portal: {portal_url}")
+        except Exception as e:
+            print(f"[Documents] CivicClerk search error: {e}")
+
+        # Step 4: Also search YouTube for related video content (presentations, etc.)
         if YOUTUBE_API_KEY and video_title:
             try:
                 # Extract org name from title for better search

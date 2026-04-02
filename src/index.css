@@ -1030,6 +1030,7 @@ header .right {
   position: relative;
   margin: 24px 0;
   height: 50px;
+  overflow: visible;
 }
 
 .timeline-track {
@@ -1039,6 +1040,7 @@ header .right {
   background: #e2e8f0;
   border-radius: 3px;
   top: 10px;
+  overflow: visible;
 }
 
 .decision-marker {
@@ -1101,17 +1103,19 @@ header .right {
 .disagreement-marker {
   position: absolute;
   cursor: pointer;
-  transform: translateX(-50%) translateY(-50%);
-  top: 13px;
+  transform: translateX(-50%);
+  top: 50%;
+  margin-top: -6px;
   border-radius: 50%;
   background: #ff4444;
   border: 2px solid white;
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
   transition: all 0.2s;
+  z-index: 5;
 }
 
 .disagreement-marker:hover {
-  transform: translateX(-50%) translateY(-50%) scale(1.5);
+  transform: translateX(-50%) scale(1.5);
   z-index: 10;
 }
 
@@ -5335,7 +5339,7 @@ header.scrolled {
 .timeline-track {
   display: flex;
   align-items: stretch;
-  min-height: 200px;
+  min-height: 260px;
   gap: 8px;
   padding: 20px 10px;
   overflow-x: auto;
@@ -8462,6 +8466,170 @@ header.scrolled {
 }
 
 .toolbar-handoff-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* View Reel button */
+.toolbar-view-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(20, 184, 166, 0.25);
+  white-space: nowrap;
+}
+.toolbar-view-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(20, 184, 166, 0.35);
+}
+.toolbar-view-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Download Full Video glow */
+.toolbar-download-glow {
+  color: #4ade80 !important;
+  animation: download-glow-pulse 2.5s ease-in-out infinite;
+  border-radius: 6px;
+  padding: 4px 10px !important;
+}
+@keyframes download-glow-pulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(74, 222, 128, 0.2); }
+  50% { box-shadow: 0 0 12px rgba(74, 222, 128, 0.5), 0 0 4px rgba(74, 222, 128, 0.3); }
+}
+.toolbar-download-glow:hover {
+  box-shadow: 0 0 16px rgba(74, 222, 128, 0.6) !important;
+}
+
+/* Timeline playback bar */
+.timeline-playback-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: #1a2332;
+  border: 1px solid #334155;
+  border-radius: 0 0 10px 10px;
+  margin-top: -2px;
+}
+.timeline-playback-bar button {
+  background: #2a3a4e;
+  color: #e2e8f0;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.timeline-playback-bar button:hover:not(:disabled) {
+  background: #334155;
+  border-color: #64748b;
+}
+.timeline-playback-bar button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.timeline-playback-bar .play-btn {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  color: white;
+  border: none;
+  padding: 6px 20px;
+  font-size: 14px;
+}
+.timeline-playback-bar .play-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
+}
+.timeline-playback-bar .stop-btn {
+  background: #dc2626;
+  color: white;
+  border: none;
+}
+.timeline-playback-bar .clip-counter {
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 8px;
+  min-width: 80px;
+  text-align: center;
+}
+
+/* Keyboard shortcuts overlay */
+.shortcuts-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.2s ease;
+}
+.shortcuts-modal {
+  background: #1e293b;
+  border: 1px solid #475569;
+  border-radius: 16px;
+  padding: 32px;
+  max-width: 520px;
+  width: 90%;
+  color: #e2e8f0;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.shortcuts-modal h2 {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0 0 6px;
+  color: #f1f5f9;
+}
+.shortcuts-modal .shortcuts-subtitle {
+  font-size: 13px;
+  color: #94a3b8;
+  margin-bottom: 20px;
+}
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 24px;
+}
+.shortcut-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+}
+.shortcut-item .shortcut-label {
+  font-size: 13px;
+  color: #cbd5e1;
+}
+.shortcut-item kbd {
+  background: #0f172a;
+  border: 1px solid #475569;
+  border-radius: 5px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: #4ade80;
+  min-width: 28px;
+  text-align: center;
+}
+.shortcuts-close-hint {
+  text-align: center;
+  margin-top: 20px;
+  font-size: 12px;
+  color: #64748b;
+}
 
 /* ============================================================================
    TIMELINE LOADING ANIMATION (when AI is building reel)

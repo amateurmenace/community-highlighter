@@ -4,7 +4,7 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 
 ## Architecture
 
-- **Frontend**: React 19 + Vite + vite-plugin-pwa, built to `dist/`. Monolithic `src/App.jsx` (~11800 lines) with 35+ inline sub-components (includes ReelPlayer, AboutPage, TranscriptUploadPrompt, GuidedTour, SectionPreviews)
+- **Frontend**: React 19 + Vite + vite-plugin-pwa + recharts, built to `dist/`. Monolithic `src/App.jsx` (~12500 lines) with 40+ inline sub-components (includes ReelPlayer, AboutPage, TranscriptUploadPrompt, GuidedTour, SectionPreviews, KnowledgeBasePanel, QuestionFlowDiagram, FramingPluralityMap, DisagreementTopology, IssueLifecycle)
 - **Backend**: FastAPI (`backend/app.py`, ~340KB monolith), served by Uvicorn on port 8000. 85+ API endpoints (includes SSE streaming, WebSocket job status)
 - **Desktop packaging**: PyInstaller bundles into macOS `.app` (signed+notarized) and Windows `.exe`
 - **Cloud deployment**: Render (https://community-highlighter.onrender.com/) — full video editor with Share Reel Link + Desktop Handoff (.chreel); video download/render disabled in cloud mode
@@ -67,16 +67,20 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
    - **Hero AI Reel Button** — full-width green gradient CTA "Make AI Highlight Reel" (loads top 5 of 10 highlights)
    - **Collapsible Reel Styles** — "🎬 Choose Reel Style" toggle reveals 6 cards with descriptions
    - **Compact Toolbar** — two-row layout adapts to environment:
-     - **Row 1 (primary)**: clip count + zoom | Export/Share button | Settings
-     - **Row 2 (secondary, when clips exist)**: Shuffle | Regenerate | Clear | Titles ON/OFF | Download Full Video + resolution picker | Import .chreel (desktop)
-     - **Cloud**: Share Reel Link (blue), Render in Desktop App (green, downloads `.chreel`)
-   - **Timeline Editor** — dark-themed NLE track with drag-to-reorder, trim handles, loading animation, tooltips, per-clip thumbnails (backend 360p segment extraction with YouTube fallback). Track min-height 200px, clip height 150px for comfortable viewing without scroll
+     - **Row 1 (primary)**: clip count + zoom | Export/Share button | View Your Edited Reel (teal, opens new tab) | Settings
+     - **Row 2 (secondary, when clips exist)**: Shuffle | Regenerate | Clear | Titles ON/OFF | Download Full Video (green glow animation) + resolution picker | Import .chreel (desktop)
+     - **Cloud**: Share Reel Link (blue), View Your Edited Reel (teal), Render in Desktop App (green, downloads `.chreel`)
+   - **Timeline Editor** — dark-themed NLE track with drag-to-reorder, trim handles, loading animation, tooltips, per-clip thumbnails (backend 360p segment extraction with YouTube fallback). Track min-height 260px, clip height 150px
+   - **Playback Controls Bar** — below timeline: Prev/Play-Stop/Next clip buttons + clip counter + total duration. Dark themed, green accent play button
+   - **Keyboard Shortcuts Overlay** — press `?` to toggle a cheat sheet showing all 12 NLE shortcuts (Ctrl+Z, S, I/O, J/K/L, Space, Delete, Arrows)
    - **Highlights Panel** — always-visible panel under timeline showing all 10 AI highlights with "✓ In timeline" / "+ Add" status
    - **Clip Inspector** — dark-themed panel when clip selected
    - **Job Status** — progress bar during render
 3. **Bottom Panel** — AI Summary, Key Highlights
-4. **Meeting Analyzer Section** — separated by "📊 Meeting Analyzer" section divider:
-   - ALL data visualizations always visible: Entities, Participation, Topics, Timeline, Disagreements, Dynamics, Cross-References, Subscriptions, Issue Tracker
+4. **Meeting Analyzer Section** — separated by "Meeting Analyzer" section divider:
+   - ALL data visualizations always visible: Entities, Participation, Topics, Timeline, Disagreements, Dynamics, Cross-References, **Question Flow**, **Framing Plurality Map**, **Disagreement Topology**, **Issue Lifecycle**, Knowledge Base, Subscriptions, Issue Tracker
+   - **No emojis** in any viz component headings or labels — replaced with text-only or CSS indicators
+   - New viz uses **recharts** library for bar charts and interactive data display
    - Three named section dividers separate the page: "Meeting Highlighter", "Highlight Video Editor", "Meeting Analyzer" (no emojis)
    - Section titles are large (38px), bold (900 weight), left-aligned with line above
 5. **Settings Drawer** — slides from right edge (400px), triggered by "⚙️ Customize Settings":
@@ -84,7 +88,7 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
    - Effects: Captions, Color Filter, Transitions, Background Music
    - Branding: Intro/Outro Title/Subtitle/CTA, Chapter Titles, Watermark, Speaker Labels
    - Full Video Download with resolution picker (desktop only)
-9. **Meeting Analytics** — pushed below the fold (entities, decisions, topics, participation)
+9. **Meeting Analytics** — pushed below the fold (entities, decisions, topics, participation, question flow, framing plurality, disagreement topology, issue lifecycle, knowledge base)
 10. **Share Reel Link** — available on both desktop and cloud, copies URL with `mode=play` for cinematic Reel Player
 11. **About Page** — full Philosophy + Technology page, accessible via `?page=about` permanent link, About button in header and footer
 
@@ -122,12 +126,14 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
 
 When a shared reel link is opened with `?mode=play`, the app renders a cinematic `ReelPlayer` component instead of the full editor:
 - Sequential clip playback via YouTube iframe src changes with CSS fade transitions (0.5s)
-- Title overlays as CSS-animated lower thirds during each clip
+- Title overlays as CSS-animated lower thirds during each clip (controllable via `&labels=on/off` URL param)
+- `showLabels` prop passed from URL parsing — respects editor's Titles ON/OFF setting
 - Segmented progress bar showing position across all clips (clickable segments)
 - Play/pause, skip forward/back, clip counter ("2 / 5")
 - End card with Replay, Open in Editor, Download Desktop App CTAs
 - "Powered by Community Highlighter" branding
 - Zero server cost — entirely client-side iframe orchestration
+- **"View Your Edited Reel"** button in editor toolbar opens reel in new tab (alongside Share Reel Link)
 
 ## Transcript Upload
 
@@ -240,6 +246,38 @@ When a shared reel link is opened with `?mode=play`, the app renders a cinematic
 - ~~Summary lacks timestamps~~ **FIXED**: Executive brief returns structured `{sentences: [{text, timestamp_seconds}]}`. Clickable green timestamp pills seek YouTube player
 - ~~Gemini JSON truncation~~ **FIXED**: Truncation repair (closes open brackets), regex text extraction fallback, increased max_tokens to 1000
 - ~~openai_client undefined in find_relevant_documents~~ **FIXED**: Replaced with `call_ai_api()` wrapper
+
+## New Data Visualizations (v8.2)
+
+All new viz components work WITHOUT speaker attribution (YouTube transcripts rarely have speaker labels). They analyze text patterns, topic keywords, and structural indicators instead.
+
+- **Question Flow Diagram** (`QuestionFlowDiagram`): Detects questions (sentences with `?`), classifies response quality of what follows (substantive/procedural/deflection/unanswered), classifies question type (budget/timeline/accountability/rationale/information). Recharts stacked bar chart showing question clusters over time + summary metrics.
+- **Framing Plurality Map** (`FramingPluralityMap`): For top topics in the meeting, shows how many times each framing lens was used (financial, safety, community, environmental, legal, equity, infrastructure, process). Radial burst SVG with spoke length proportional to mention count. No speaker detection needed — counts co-occurring framing keywords in topic-mentioning sentences.
+- **Disagreement Topology** (`DisagreementTopology`): Extracts position statements (sentences with opinion verbs: should/must/believe/support/oppose), classifies stance (support vs oppose) based on keyword analysis, groups by topic keyword, draws edges between opposing stances on the same topic. SVG node-link diagram.
+- **Issue Lifecycle** (`IssueLifecycle`): Tracks how topics progress through stages within a meeting (introduced → discussed → tabled → voted). Horizontal swimlane chart. Detects stage transitions via keyword matching on agenda/discussion/tabling/voting language.
+
+### Removed
+- **Topic Distribution** (pie chart) — removed as redundant with Topic Heatmap
+
+## Knowledge Base UI
+
+- **KnowledgeBasePanel** component in Meeting Analyzer section
+- Dark-themed panel (#0f172a background) with:
+  - "Add This Meeting to KB" button → calls `/api/knowledge/add_meeting`
+  - Cross-meeting search input → calls `/api/knowledge/search`
+  - "Find Related Meetings" button → calls `/api/knowledge/find_related`
+  - Stats display (meetings count, document chunks)
+  - Search results with relevance scores, excerpts, and "Open Meeting" links
+  - Related meetings with similarity scores
+- Backend: ChromaDB with `all-MiniLM-L6-v2` embeddings, 500-char semantic chunks
+- All 4 KB API functions already existed in `api.js`; this wires them into the UI
+
+## Relevant Documents — CivicClerk Integration
+
+- `/api/find-relevant-documents` now searches CivicClerk portals in addition to DuckDuckGo + YouTube
+- Portal mapping: municipality name → CivicClerk URL (currently: Brookline → `brooklinema.portal.civicclerk.com`)
+- Tries CivicClerk API search first, then always adds the portal as a direct link
+- Extensible: add more municipalities to `civicclerk_portals` dict in `backend/app.py`
 
 ## Civic Meeting Finder
 
@@ -427,10 +465,10 @@ gh workflow run build-windows.yml -f version=v8.1.0
 - Windows builds use `msvcrt` for instance locking (macOS uses `fcntl`)
 - Optimization stats endpoint polled once on mount (was every 30s — caused noisy terminal logs)
 - `build_mac_app_signed.sh` requires `export PATH="/opt/homebrew/bin:$PATH"` for node/npm — added to script header
-- AI translation truncates long transcripts — frontend now offers Google Translate fallback for transcripts >30K chars
+- AI translation truncates long transcripts — frontend offers Google Translate fallback. For >5K chars, copies full transcript to clipboard and opens Google Translate in new tab (avoids URL length limits). Button labeled "Google Translate (Free, Full Text)"
 
 ## Version
 
-Current: 8.1.0 (default AI: Gemini 2.5 Flash)
+Current: 8.2.0 (default AI: Gemini 2.5 Flash)
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)

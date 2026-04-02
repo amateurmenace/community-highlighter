@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 // v5.6: Desktop App Banner for cloud mode
 import { DesktopAppBanner, useCloudMode } from './DesktopAppBanner';
@@ -293,7 +294,7 @@ function useDebounce(value, delay = 220) {
 }
 
 // Reel Player — cinematic playback mode for shared reel links (?mode=play)
-function ReelPlayer({ videoId, clips, onOpenEditor }) {
+function ReelPlayer({ videoId, clips, showLabels = true, onOpenEditor }) {
   const [currentClip, setCurrentClip] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isFading, setIsFading] = useState(false);
@@ -430,7 +431,7 @@ function ReelPlayer({ videoId, clips, onOpenEditor }) {
           allowFullScreen
         />
         <div className={`reel-player-fade ${isFading ? 'active' : ''}`} />
-        {isPlaying && clips[currentClip]?.label && (
+        {isPlaying && showLabels && clips[currentClip]?.label && (
           <div className="reel-player-lower-third">
             <div className="reel-player-lower-third-inner" key={currentClip}>
               {clips[currentClip].label}
@@ -1220,6 +1221,635 @@ function MeetingStatsCard({ cues, fullText, sents, videoTitle }) {
   );
 }
 
+// ============================================================================
+// NEW DATA VISUALIZATIONS (recharts-based)
+// ============================================================================
+
+const RECHARTS_COLORS = ['#1E7F63', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+
+// Question Flow: Questions asked during the meeting, what followed, and response quality
+function QuestionFlowDiagram({ sents }) {
+  const questionData = useMemo(() => {
+    if (!sents || sents.length < 10) return { questions: [], byQuality: {}, bySegment: [] };
+    const totalDuration = sents[sents.length - 1].end;
+    const questions = [];
+
+    sents.forEach((sent, idx) => {
+      if (!sent.text.includes('?') || sent.text.length < 15) return;
+      // Classify the response that followed
+      let responseQuality = 'unanswered';
+      const responseWindow = sents.slice(idx + 1, Math.min(idx + 6, sents.length));
+      const responseText = responseWindow.map(s => s.text).join(' ').toLowerCase();
+      if (responseWindow.length > 0) {
+        if (/\b(yes|no|will|plan|budget|recommend|specifically|data|number|percent|\d+)\b/.test(responseText)) {
+          responseQuality = 'substantive';
+        } else if (/\b(review|look into|follow up|get back|staff will|we'll consider|under consideration|working on)\b/.test(responseText)) {
+          responseQuality = 'procedural';
+        } else if (responseWindow.length > 0 && responseWindow[0].text.length > 20) {
+          responseQuality = 'substantive';
+        } else {
+          responseQuality = 'deflection';
+        }
+      }
+      // Classify the question type
+      const qLower = sent.text.toLowerCase();
+      let questionType = 'general';
+      if (/\b(how much|cost|budget|fund|dollar|spend|price)\b/.test(qLower)) questionType = 'budget';
+      else if (/\b(when|timeline|deadline|schedule|date)\b/.test(qLower)) questionType = 'timeline';
+      else if (/\b(who|responsible|in charge|accountable)\b/.test(qLower)) questionType = 'accountability';
+      else if (/\b(why|reason|rationale|explain|justif)\b/.test(qLower)) questionType = 'rationale';
+      else if (/\b(what|plan|proposal|option|alternative)\b/.test(qLower)) questionType = 'information';
+
+      questions.push({ text: sent.text.slice(0, 120), time: sent.start, quality: responseQuality, type: questionType, pct: (sent.start / totalDuration) * 100 });
+    });
+
+    const byQuality = { substantive: 0, procedural: 0, deflection: 0, unanswered: 0 };
+    const byType = {};
+    questions.forEach(q => {
+      byQuality[q.quality]++;
+      byType[q.type] = (byType[q.type] || 0) + 1;
+    });
+
+    // Build timeline segments (10 buckets)
+    const bucketSize = totalDuration / 10;
+    const bySegment = Array.from({ length: 10 }, (_, i) => {
+      const start = i * bucketSize;
+      const end = (i + 1) * bucketSize;
+      const segQ = questions.filter(q => q.time >= start && q.time < end);
+      return {
+        label: `${Math.floor(start / 60)}m`,
+        total: segQ.length,
+        substantive: segQ.filter(q => q.quality === 'substantive').length,
+        procedural: segQ.filter(q => q.quality === 'procedural').length,
+        deflection: segQ.filter(q => q.quality === 'deflection').length,
+        unanswered: segQ.filter(q => q.quality === 'unanswered').length,
+      };
+    });
+
+    return { questions, byQuality, byType: Object.entries(byType).sort((a, b) => b[1] - a[1]), bySegment, total: questions.length };
+  }, [sents]);
+
+  if (questionData.total < 3) return null;
+  const qualityColors = { substantive: '#22c55e', procedural: '#f59e0b', deflection: '#ef4444', unanswered: '#94a3b8' };
+
+  return (
+    <div className="viz-card" style={{ gridColumn: '1 / -1' }}>
+      <h3>Question Flow</h3>
+      <p className="viz-desc">{questionData.total} questions detected. Shows when questions clustered, what types were asked, and whether they received substantive answers.</p>
+
+      {/* Summary metrics */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+        {Object.entries(qualityColors).map(([quality, color]) => (
+          <div key={quality} style={{ padding: '8px 14px', background: `${color}15`, borderRadius: 8, borderLeft: `3px solid ${color}` }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color }}>{questionData.byQuality[quality]}</div>
+            <div style={{ fontSize: 11, color: '#64748b' }}>{quality.charAt(0).toUpperCase() + quality.slice(1)}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Stacked bar chart: questions over time by response quality */}
+      <ResponsiveContainer width="100%" height={180}>
+        <BarChart data={questionData.bySegment} margin={{ left: 0, right: 10, top: 5, bottom: 5 }}>
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#64748b' }} />
+          <YAxis tick={{ fontSize: 10, fill: '#64748b' }} allowDecimals={false} />
+          <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #475569', borderRadius: 8, color: '#e2e8f0', fontSize: 12 }} />
+          <Bar dataKey="substantive" stackId="q" fill="#22c55e" name="Substantive" radius={[0, 0, 0, 0]} />
+          <Bar dataKey="procedural" stackId="q" fill="#f59e0b" name="Procedural" />
+          <Bar dataKey="deflection" stackId="q" fill="#ef4444" name="Deflection" />
+          <Bar dataKey="unanswered" stackId="q" fill="#94a3b8" name="Unanswered" radius={[2, 2, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+
+      {/* Question type breakdown */}
+      {questionData.byType.length > 1 && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+          {questionData.byType.map(([type, count], idx) => (
+            <span key={type} style={{ padding: '3px 10px', background: '#f1f5f9', borderRadius: 12, fontSize: 11, color: '#475569', fontWeight: 500 }}>
+              {type}: {count}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Framing Plurality: How the same issue is conceptualized through different lenses
+function FramingPluralityMap({ sents, entities }) {
+  const framingData = useMemo(() => {
+    if (!sents || sents.length < 20) return [];
+    const topicCandidates = {};
+    const issueKeywords = ['housing', 'development', 'budget', 'school', 'parking', 'zoning', 'traffic', 'safety', 'park', 'water', 'sewer', 'tax', 'police', 'fire', 'building', 'project', 'property', 'street'];
+    const framingLenses = {
+      'financial': ['cost', 'budget', 'expense', 'tax', 'revenue', 'funding', 'afford', 'price', 'economic', 'investment', 'dollar', 'spend', 'money', 'fund', 'fee', 'rate'],
+      'safety': ['safe', 'danger', 'risk', 'protect', 'emergency', 'security', 'hazard', 'concern', 'accident', 'health'],
+      'community': ['neighbor', 'resident', 'community', 'family', 'quality of life', 'character', 'livability', 'people', 'children', 'senior'],
+      'environmental': ['environment', 'green', 'sustainability', 'pollution', 'water', 'tree', 'wildlife', 'climate', 'stormwater', 'drainage'],
+      'legal': ['regulation', 'code', 'ordinance', 'bylaw', 'compliance', 'requirement', 'permit', 'zoning', 'law', 'legal', 'violation'],
+      'equity': ['affordable', 'access', 'equity', 'inclusive', 'fair', 'serve', 'low-income', 'underserved', 'diversity', 'equal'],
+      'infrastructure': ['road', 'traffic', 'parking', 'transit', 'construction', 'build', 'repair', 'maintain', 'sewer', 'utility', 'sidewalk'],
+      'process': ['timeline', 'deadline', 'delay', 'urgent', 'long-term', 'future', 'plan', 'schedule', 'phase', 'vote', 'approve', 'review']
+    };
+
+    const textLower = sents.map(s => s.text).join(' ').toLowerCase();
+    issueKeywords.forEach(kw => {
+      const regex = new RegExp(`\\b${kw}\\b`, 'gi');
+      const matches = textLower.match(regex);
+      if (matches && matches.length >= 5) topicCandidates[kw] = matches.length;
+    });
+    if (entities) {
+      entities.slice(0, 8).forEach(e => {
+        if (e.count >= 4 && e.type !== 'PERSON') topicCandidates[e.text.toLowerCase()] = e.count;
+      });
+    }
+
+    const topTopics = Object.entries(topicCandidates).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    if (topTopics.length === 0) return [];
+
+    return topTopics.map(([topic]) => {
+      const framings = {};
+      // Find all sentences mentioning this topic and classify by framing lens
+      sents.forEach(sent => {
+        if (!sent.text.toLowerCase().includes(topic)) return;
+        const sentLower = sent.text.toLowerCase();
+        Object.entries(framingLenses).forEach(([lens, keywords]) => {
+          if (keywords.some(kw => sentLower.includes(kw))) {
+            if (!framings[lens]) framings[lens] = { count: 0, examples: [] };
+            framings[lens].count++;
+            if (framings[lens].examples.length < 2) framings[lens].examples.push(sent.text.slice(0, 80));
+          }
+        });
+      });
+      return {
+        topic: topic.charAt(0).toUpperCase() + topic.slice(1),
+        framings: Object.entries(framings)
+          .map(([lens, data]) => ({ lens, count: data.count, examples: data.examples }))
+          .filter(f => f.count > 0)
+          .sort((a, b) => b.count - a.count)
+      };
+    }).filter(t => t.framings.length >= 2);
+  }, [sents, entities]);
+
+  if (framingData.length === 0) return null;
+
+  return (
+    <div className="viz-card" style={{ gridColumn: '1 / -1' }}>
+      <h3>Framing Plurality Map</h3>
+      <p className="viz-desc">A single issue is simultaneously many things. Each spoke shows a lens through which this topic was discussed. The visual argument: this is the full dimensionality of a problem being made visible.</p>
+      <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', justifyContent: 'center' }}>
+        {framingData.map((topic, tIdx) => {
+          const cx = 160, cy = 150, baseRadius = 50;
+          const maxCount = Math.max(...topic.framings.map(f => f.count), 1);
+          const spokeCount = topic.framings.length;
+          return (
+            <div key={tIdx} style={{ textAlign: 'center' }}>
+              <svg width={320} height={310} viewBox="0 0 320 310">
+                {/* Center topic */}
+                <circle cx={cx} cy={cy} r={30} fill="#1E7F63" opacity={0.9} />
+                <text x={cx} y={cy + 4} textAnchor="middle" fontSize={11} fill="white" fontWeight={700}>
+                  {topic.topic.length > 14 ? topic.topic.slice(0, 14) + '..' : topic.topic}
+                </text>
+                {/* Spokes — length proportional to mention count */}
+                {topic.framings.map((framing, fIdx) => {
+                  const angle = (fIdx / spokeCount) * 2 * Math.PI - Math.PI / 2;
+                  const spokeLen = baseRadius + (framing.count / maxCount) * 70;
+                  const endX = cx + Math.cos(angle) * spokeLen;
+                  const endY = cy + Math.sin(angle) * spokeLen;
+                  const labelX = cx + Math.cos(angle) * (spokeLen + 16);
+                  const labelY = cy + Math.sin(angle) * (spokeLen + 16);
+                  const color = RECHARTS_COLORS[fIdx % RECHARTS_COLORS.length];
+                  const dotSize = 4 + (framing.count / maxCount) * 8;
+                  return (
+                    <g key={fIdx}>
+                      <line x1={cx} y1={cy} x2={endX} y2={endY} stroke={color} strokeWidth={Math.max(1.5, (framing.count / maxCount) * 4)} opacity={0.6} />
+                      <circle cx={endX} cy={endY} r={dotSize} fill={color} opacity={0.85} />
+                      <text x={endX} y={endY + 2} textAnchor="middle" fontSize={8} fill="white" fontWeight={700}>{framing.count}</text>
+                      <text x={labelX} y={labelY} textAnchor="middle" fontSize={10} fill={color} fontWeight={600}>{framing.lens}</text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Disagreement Topology: Map the structure of debate as positions and counter-positions
+function DisagreementTopology({ sents }) {
+  const topology = useMemo(() => {
+    if (!sents || sents.length < 20) return { nodes: [], edges: [] };
+    const supportWords = ['support', 'agree', 'favor', 'approve', 'recommend', 'believe', 'think we should', 'need to', 'important'];
+    const opposeWords = ['oppose', 'disagree', 'against', 'concerned', 'object', 'problem', 'don\'t think', 'don\'t agree', 'not in favor', 'shouldn\'t', 'issue with', 'worried'];
+    const positions = []; // {text, time, stance: 'support'|'oppose'|'neutral', topic}
+
+    // Extract position statements: sentences with opinion indicators
+    sents.forEach(sent => {
+      if (sent.text.length < 30) return;
+      const textLower = sent.text.toLowerCase();
+      const hasOpinion = /\b(should|must|need|think|believe|support|oppose|recommend|propose|want|urge|request|ask)\b/i.test(sent.text);
+      if (!hasOpinion) return;
+
+      let stance = 'neutral';
+      if (opposeWords.some(w => textLower.includes(w))) stance = 'oppose';
+      else if (supportWords.some(w => textLower.includes(w))) stance = 'support';
+      else return; // Skip neutral — not interesting for topology
+
+      // Extract a topic keyword from the sentence
+      const topicWords = textLower.match(/\b(budget|school|housing|development|traffic|parking|zoning|project|building|property|tax|safety|police|water|sewer|park|street|plan|proposal|ordinance|policy|program|grant|fund)\b/);
+      const topic = topicWords ? topicWords[1] : 'general';
+
+      positions.push({ text: sent.text.slice(0, 90), time: sent.start, stance, topic });
+    });
+
+    if (positions.length < 3) return { nodes: [], edges: [] };
+
+    // Find edges: connect opposing stances on the same topic
+    const edges = [];
+    const usedPositions = new Set();
+    for (let i = 0; i < positions.length; i++) {
+      for (let j = i + 1; j < positions.length; j++) {
+        if (positions[i].topic === positions[j].topic && positions[i].stance !== positions[j].stance) {
+          edges.push({ from: i, to: j });
+          usedPositions.add(i);
+          usedPositions.add(j);
+        }
+      }
+    }
+
+    // Only keep positions involved in contestations
+    const nodeIndices = [...usedPositions].slice(0, 14);
+    const nodes = nodeIndices.map(i => ({ ...positions[i], idx: i }));
+    const filteredEdges = edges.filter(e => nodeIndices.includes(e.from) && nodeIndices.includes(e.to)).slice(0, 20);
+
+    return { nodes, edges: filteredEdges };
+  }, [sents]);
+
+  if (topology.nodes.length < 2) return null;
+
+  const width = 700, height = 340;
+  const nodePositions = topology.nodes.map((_, idx) => {
+    const angle = (idx / topology.nodes.length) * 2 * Math.PI - Math.PI / 4;
+    const r = 110 + (idx % 2) * 30;
+    return { x: width / 2 + Math.cos(angle) * r, y: height / 2 + Math.sin(angle) * (r * 0.75) };
+  });
+
+  return (
+    <div className="viz-card" style={{ gridColumn: '1 / -1' }}>
+      <h3>Disagreement Topology</h3>
+      <p className="viz-desc">The shape of the controversy. Each node is a stated position; red lines connect opposing stances on the same topic. Green = support, red = oppose.</p>
+      <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} /> Support</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} /> Oppose</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}><span style={{ width: 10, height: 2, background: '#ef4444', display: 'inline-block', opacity: 0.4 }} /> Contestation</span>
+      </div>
+      <svg width="100%" viewBox={`0 0 ${width} ${height}`} style={{ maxHeight: 360 }}>
+        {/* Edges */}
+        {topology.edges.map((edge, idx) => {
+          const fromIdx = topology.nodes.findIndex(n => n.idx === edge.from);
+          const toIdx = topology.nodes.findIndex(n => n.idx === edge.to);
+          if (fromIdx < 0 || toIdx < 0) return null;
+          return (
+            <line key={idx}
+              x1={nodePositions[fromIdx].x} y1={nodePositions[fromIdx].y}
+              x2={nodePositions[toIdx].x} y2={nodePositions[toIdx].y}
+              stroke="#ef4444" strokeWidth={1.5} opacity={0.25} strokeDasharray="4 2"
+            />
+          );
+        })}
+        {/* Nodes */}
+        {topology.nodes.map((node, idx) => {
+          const pos = nodePositions[idx];
+          const color = node.stance === 'support' ? '#22c55e' : '#ef4444';
+          return (
+            <g key={idx}>
+              <circle cx={pos.x} cy={pos.y} r={18} fill={color} opacity={0.75} />
+              <text x={pos.x} y={pos.y + 3} textAnchor="middle" fontSize={8} fill="white" fontWeight={700}>{node.topic.slice(0, 8)}</text>
+              <text x={pos.x} y={pos.y - 24} textAnchor="middle" fontSize={8} fill="#475569" fontWeight={500}>
+                {node.text.slice(0, 30)}...
+              </text>
+              <title>{node.text}</title>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function IssueLifecycle({ sents }) {
+  const issues = useMemo(() => {
+    if (!sents || sents.length < 10) return [];
+    const totalDuration = sents[sents.length - 1].end;
+    // Detect major topics/issues as they progress through the meeting
+    const stageKeywords = {
+      introduced: ['new business', 'introduce', 'first time', 'bring up', 'raising', 'item number', 'agenda item', 'next item'],
+      discussed: ['discuss', 'debate', 'consider', 'review', 'talk about', 'question about', 'thoughts on', 'comment on'],
+      tabled: ['table', 'defer', 'postpone', 'continue', 'next meeting', 'revisit', 'push back', 'delay'],
+      voted: ['vote', 'motion', 'approve', 'deny', 'all in favor', 'aye', 'nay', 'pass', 'second', 'carried', 'adopted'],
+    };
+    const stageColors = { introduced: '#3b82f6', discussed: '#f59e0b', tabled: '#f97316', voted: '#22c55e' };
+    const stageLabels = { introduced: 'Introduced', discussed: 'Discussed', tabled: 'Tabled', voted: 'Voted' };
+
+    // Find potential issues by looking for "new business" / "agenda item" boundaries
+    const issueSegments = [];
+    let currentIssue = null;
+    sents.forEach((sent, idx) => {
+      const text = sent.text.toLowerCase();
+      // Detect issue boundaries
+      if (stageKeywords.introduced.some(kw => text.includes(kw)) && text.length > 20) {
+        if (currentIssue && currentIssue.stages.length > 0) {
+          issueSegments.push(currentIssue);
+        }
+        currentIssue = {
+          label: sent.text.slice(0, 80),
+          startTime: sent.start,
+          stages: [{ stage: 'introduced', time: sent.start, pct: (sent.start / totalDuration) * 100 }]
+        };
+      }
+      if (currentIssue) {
+        for (const [stage, keywords] of Object.entries(stageKeywords)) {
+          if (stage === 'introduced') continue;
+          if (keywords.some(kw => text.includes(kw))) {
+            const lastStage = currentIssue.stages[currentIssue.stages.length - 1];
+            if (lastStage.stage !== stage && sent.start - lastStage.time > 10) {
+              currentIssue.stages.push({ stage, time: sent.start, pct: (sent.start / totalDuration) * 100 });
+            }
+          }
+        }
+      }
+    });
+    if (currentIssue && currentIssue.stages.length > 0) issueSegments.push(currentIssue);
+
+    // Only show issues with 2+ stages (something actually happened)
+    return issueSegments.filter(i => i.stages.length >= 2).slice(0, 8).map(issue => ({
+      ...issue,
+      stageColors,
+      stageLabels
+    }));
+  }, [sents]);
+
+  if (issues.length === 0) return null;
+
+  return (
+    <div className="viz-card" style={{ gridColumn: '1 / -1' }}>
+      <h3>Issue Lifecycle</h3>
+      <p className="viz-desc">Track how topics progress through stages within this meeting. Each row is an issue; nodes show stages reached.</p>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+        {[['introduced', '#3b82f6'], ['discussed', '#f59e0b'], ['tabled', '#f97316'], ['voted', '#22c55e']].map(([stage, color]) => (
+          <span key={stage} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, display: 'inline-block' }} />
+            {stage.charAt(0).toUpperCase() + stage.slice(1)}
+          </span>
+        ))}
+      </div>
+
+      {/* Swimlane view */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {issues.map((issue, idx) => (
+          <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #e2e8f0' }}>
+            <div style={{ width: 180, fontSize: 11, color: '#334155', fontWeight: 500, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={issue.label}>
+              {issue.label.slice(0, 50)}{issue.label.length > 50 ? '...' : ''}
+            </div>
+            <div style={{ flex: 1, position: 'relative', height: 24 }}>
+              {/* Track line */}
+              <div style={{ position: 'absolute', top: 11, left: 0, right: 0, height: 2, background: '#e2e8f0' }} />
+              {/* Stage nodes */}
+              {issue.stages.map((stage, sIdx) => (
+                <div key={sIdx} style={{
+                  position: 'absolute',
+                  left: `${stage.pct}%`,
+                  top: 3,
+                  width: 18, height: 18,
+                  borderRadius: '50%',
+                  background: issue.stageColors[stage.stage],
+                  border: '2px solid white',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                  transform: 'translateX(-9px)',
+                  cursor: 'default'
+                }} title={`${issue.stageLabels[stage.stage]} at ${Math.floor(stage.time / 60)}:${String(Math.floor(stage.time % 60)).padStart(2, '0')}`} />
+              ))}
+              {/* Connecting line between stages */}
+              {issue.stages.length > 1 && (
+                <div style={{
+                  position: 'absolute',
+                  top: 11,
+                  left: `${issue.stages[0].pct}%`,
+                  width: `${issue.stages[issue.stages.length - 1].pct - issue.stages[0].pct}%`,
+                  height: 3,
+                  background: 'linear-gradient(90deg, #3b82f6, #22c55e)',
+                  borderRadius: 2
+                }} />
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Timeline axis */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingLeft: 188, fontSize: 10, color: '#94a3b8' }}>
+        <span>Start</span>
+        <span>25%</span>
+        <span>50%</span>
+        <span>75%</span>
+        <span>End</span>
+      </div>
+    </div>
+  );
+}
+
+// Knowledge Base: Add meetings, search across them, find connections
+function KnowledgeBasePanel({ videoId, videoTitle, fullText, entities }) {
+  const [kbStats, setKbStats] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [relatedMeetings, setRelatedMeetings] = useState([]);
+  const [isAdding, setIsAdding] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [addedToKb, setAddedToKb] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Load KB stats on mount
+  useEffect(() => {
+    apiKnowledgeBaseStats().then(setKbStats).catch(() => setKbStats(null));
+  }, []);
+
+  // Check if current meeting is already in KB
+  useEffect(() => {
+    if (!videoId) return;
+    apiSearchKnowledgeBase({ query: videoId, limit: 1, filters: { video_id: videoId } })
+      .then(res => { if (res.total_found > 0) setAddedToKb(true); })
+      .catch(() => {});
+  }, [videoId]);
+
+  const handleAddMeeting = async () => {
+    if (!videoId) return;
+    setIsAdding(true);
+    setError(null);
+    try {
+      const res = await apiAddToKnowledgeBase({ videoId, metadata: { title: videoTitle } });
+      setAddedToKb(true);
+      setKbStats(prev => prev ? { ...prev, total_meetings: (prev.total_meetings || 0) + 1, total_documents: (prev.total_documents || 0) + (res.documents_added || 0) } : prev);
+      // Auto-find related meetings
+      const related = await apiFindRelated({ videoId, limit: 5 });
+      if (related.related) setRelatedMeetings(related.related);
+    } catch (err) {
+      setError(err.message || 'Failed to add meeting');
+    }
+    setIsAdding(false);
+  };
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return;
+    setIsSearching(true);
+    setError(null);
+    try {
+      const res = await apiSearchKnowledgeBase({ query: searchQuery, limit: 10 });
+      setSearchResults(res.results || []);
+    } catch (err) {
+      setError(err.message || 'Search failed');
+    }
+    setIsSearching(false);
+  };
+
+  const handleFindRelated = async () => {
+    if (!videoId) return;
+    setIsSearching(true);
+    try {
+      const res = await apiFindRelated({ videoId, limit: 5 });
+      setRelatedMeetings(res.related || []);
+    } catch (err) {
+      setError(err.message || 'Failed to find related meetings');
+    }
+    setIsSearching(false);
+  };
+
+  return (
+    <div className="viz-card" style={{ gridColumn: '1 / -1', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155' }}>
+      <h3 style={{ color: '#f1f5f9' }}>Knowledge Base</h3>
+      <p className="viz-desc" style={{ color: '#94a3b8' }}>
+        Build a searchable knowledge base across multiple meetings. Add this meeting, then search across all stored meetings to find connections and patterns over time.
+      </p>
+
+      {/* Stats bar */}
+      {kbStats && (
+        <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+          <span style={{ padding: '4px 12px', background: '#1e293b', borderRadius: 6, fontSize: 12, color: '#94a3b8' }}>
+            {kbStats.total_meetings || 0} meetings stored
+          </span>
+          <span style={{ padding: '4px 12px', background: '#1e293b', borderRadius: 6, fontSize: 12, color: '#94a3b8' }}>
+            {kbStats.total_documents || 0} document chunks
+          </span>
+        </div>
+      )}
+
+      {/* Add to KB */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
+        <button
+          onClick={handleAddMeeting}
+          disabled={isAdding || addedToKb || !videoId}
+          style={{
+            padding: '8px 16px', fontSize: 13, fontWeight: 600, borderRadius: 8, border: 'none', cursor: addedToKb ? 'default' : 'pointer',
+            background: addedToKb ? '#1e293b' : 'linear-gradient(135deg, #22c55e, #16a34a)', color: addedToKb ? '#4ade80' : 'white',
+            transition: 'all 0.2s'
+          }}
+        >
+          {isAdding ? 'Adding...' : addedToKb ? 'In Knowledge Base' : 'Add This Meeting to KB'}
+        </button>
+        {addedToKb && (
+          <button onClick={handleFindRelated} disabled={isSearching}
+            style={{ padding: '8px 16px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #475569', background: '#1e293b', color: '#e2e8f0', cursor: 'pointer' }}>
+            Find Related Meetings
+          </button>
+        )}
+      </div>
+
+      {/* Cross-meeting search */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSearch()}
+          placeholder="Search across all meetings (e.g., 'DPW yard', 'budget override', 'school committee')..."
+          style={{
+            flex: 1, padding: '10px 14px', fontSize: 13, borderRadius: 8, border: '1px solid #475569',
+            background: '#1e293b', color: '#e2e8f0', outline: 'none'
+          }}
+        />
+        <button onClick={handleSearch} disabled={isSearching || !searchQuery.trim()}
+          style={{ padding: '8px 20px', fontSize: 13, fontWeight: 600, borderRadius: 8, border: 'none', background: '#3b82f6', color: 'white', cursor: 'pointer' }}>
+          {isSearching ? 'Searching...' : 'Search KB'}
+        </button>
+      </div>
+
+      {error && <div style={{ color: '#ef4444', fontSize: 12, marginBottom: 8 }}>{error}</div>}
+
+      {/* Search results */}
+      {searchResults.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', marginBottom: 8 }}>Search Results ({searchResults.length})</div>
+          {searchResults.map((result, idx) => (
+            <div key={idx} style={{ padding: '10px 12px', marginBottom: 6, background: '#1e293b', borderRadius: 8, borderLeft: '3px solid #3b82f6' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#f1f5f9' }}>{result.title || result.video_id}</span>
+                <span style={{ fontSize: 11, color: '#64748b' }}>{result.date}</span>
+              </div>
+              <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5 }}>{result.excerpt}</div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                <span style={{ fontSize: 10, padding: '2px 8px', background: '#0f172a', borderRadius: 4, color: '#4ade80' }}>
+                  {Math.round((result.relevance_score || 0) * 100)}% match
+                </span>
+                <button onClick={() => {
+                  window.open(`${window.location.origin}/?v=${result.video_id}`, '_blank');
+                }} style={{ fontSize: 10, padding: '2px 8px', background: '#334155', border: 'none', borderRadius: 4, color: '#e2e8f0', cursor: 'pointer' }}>
+                  Open Meeting
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Related meetings */}
+      {relatedMeetings.length > 0 && (
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', marginBottom: 8 }}>Related Meetings</div>
+          {relatedMeetings.map((meeting, idx) => (
+            <div key={idx} style={{ padding: '10px 12px', marginBottom: 6, background: '#1e293b', borderRadius: 8, borderLeft: '3px solid #22c55e' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#f1f5f9' }}>{meeting.title || meeting.video_id}</span>
+                <span style={{ fontSize: 11, color: '#64748b' }}>{meeting.date}</span>
+              </div>
+              <div style={{ fontSize: 12, color: '#94a3b8' }}>{meeting.excerpt}</div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                <span style={{ fontSize: 10, padding: '2px 8px', background: '#0f172a', borderRadius: 4, color: '#4ade80' }}>
+                  {Math.round((meeting.similarity_score || 0) * 100)}% similar
+                </span>
+                <button onClick={() => {
+                  window.open(`${window.location.origin}/?v=${meeting.video_id}`, '_blank');
+                }} style={{ fontSize: 10, padding: '2px 8px', background: '#334155', border: 'none', borderRadius: 4, color: '#e2e8f0', cursor: 'pointer' }}>
+                  Open Meeting
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!kbStats && (
+        <div style={{ fontSize: 12, color: '#64748b', padding: '12px', background: '#1e293b', borderRadius: 8 }}>
+          Knowledge Base requires ChromaDB. If not available, the backend will indicate this.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DecisionTimeline({ sents, playerRef, videoId, addToBasket, pad, openExpandedAt }) {
   const [selectedDecision, setSelectedDecision] = useState(null);
 
@@ -1666,7 +2296,7 @@ function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, pl
 
   return (
     <div className="viz-card participation-tracker">
-      <h3>📊 Participation Tracker</h3>
+      <h3>Participation Tracker</h3>
       <p className="viz-desc">Click metrics to see details. Click timeline to jump to video.</p>
 
       {/* Key Metrics - Now Clickable */}
@@ -1692,10 +2322,10 @@ function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, pl
             {engagementData.publicCommentCount}
           </div>
           <div style={{ fontSize: '11px', color: selectedMetric === 'publicComments' ? 'white' : '#64748b' }}>
-            💬 Public Comments
+            Public Comments
           </div>
         </div>
-        <div 
+        <div
           onClick={() => handleMetricClick('questions')}
           style={{ 
             textAlign: 'center', 
@@ -1730,14 +2360,14 @@ function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, pl
             {engagementData.motionCount}
           </div>
           <div style={{ fontSize: '11px', color: selectedMetric === 'motions' ? 'white' : '#64748b' }}>
-            🗳️️ Motions/Votes
+            Motions/Votes
           </div>
         </div>
         <div style={{ textAlign: 'center', padding: '12px', background: '#f5f3ff', borderRadius: '8px' }}>
           <div style={{ fontSize: '24px', fontWeight: 700, color: '#7c3aed' }}>
             {engagementData.meetingLength}m
           </div>
-          <div style={{ fontSize: '11px', color: '#64748b' }}>⏱️ Duration</div>
+          <div style={{ fontSize: '11px', color: '#64748b' }}>Duration</div>
         </div>
       </div>
 
@@ -1753,9 +2383,9 @@ function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, pl
           border: '1px solid #e2e8f0'
         }}>
           <div style={{ fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '8px' }}>
-            {selectedMetric === 'publicComments' && '💬 Public Comments Found'}
+            {selectedMetric === 'publicComments' && 'Public Comments Found'}
             {selectedMetric === 'questions' && 'â“ Questions Asked'}
-            {selectedMetric === 'motions' && '🗳️️ Motions & Votes'}
+            {selectedMetric === 'motions' && 'Motions & Votes'}
           </div>
           {matchingResults.slice(0, 10).map((result, idx) => (
             <div 
@@ -1790,7 +2420,7 @@ function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, pl
                     cursor: 'pointer'
                   }}
                 >
-                  🎬 Video [{formatTime(result.start)}]
+                  Video [{formatTime(result.start)}]
                 </button>
                 <button
                   onClick={() => openExpandedAt && openExpandedAt(result.start)}
@@ -1804,7 +2434,7 @@ function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, pl
                     cursor: 'pointer'
                   }}
                 >
-                  📄 Transcript
+                  Transcript
                 </button>
                 <button
                   onClick={() => addToBasket && addToBasket({
@@ -1822,7 +2452,7 @@ function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, pl
                     cursor: 'pointer'
                   }}
                 >
-                  💾 Save Clip
+                  + Clip
                 </button>
               </div>
             </div>
@@ -1885,40 +2515,40 @@ function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, pl
             borderRadius: '12px', 
             fontSize: '11px' 
           }}>
-            📋 Procedural: {engagementData.discussionTypes.procedural}
+            Procedural: {engagementData.discussionTypes.procedural}
           </span>
-          <span style={{ 
-            padding: '4px 10px', 
-            background: '#f3e8ff', 
-            color: '#6b21a8', 
-            borderRadius: '12px', 
-            fontSize: '11px' 
+          <span style={{
+            padding: '4px 10px',
+            background: '#f3e8ff',
+            color: '#6b21a8',
+            borderRadius: '12px',
+            fontSize: '11px'
           }}>
-            💭 Discussion: {engagementData.discussionTypes.discussion}
+            Discussion: {engagementData.discussionTypes.discussion}
           </span>
-          <span style={{ 
-            padding: '4px 10px', 
-            background: '#fef3c7', 
-            color: '#92400e', 
-            borderRadius: '12px', 
-            fontSize: '11px' 
+          <span style={{
+            padding: '4px 10px',
+            background: '#fef3c7',
+            color: '#92400e',
+            borderRadius: '12px',
+            fontSize: '11px'
           }}>
-            🗳️️ Action Items: {engagementData.discussionTypes.action}
+            Action Items: {engagementData.discussionTypes.action}
           </span>
-          <span style={{ 
-            padding: '4px 10px', 
-            background: '#dcfce7', 
-            color: '#166534', 
-            borderRadius: '12px', 
-            fontSize: '11px' 
+          <span style={{
+            padding: '4px 10px',
+            background: '#dcfce7',
+            color: '#166534',
+            borderRadius: '12px',
+            fontSize: '11px'
           }}>
-            👥 Public Input: {engagementData.discussionTypes.publicInput}
+            Public Input: {engagementData.discussionTypes.publicInput}
           </span>
         </div>
       </div>
 
       <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '12px', textAlign: 'center' }}>
-        💚 Green bars indicate public participation · Click metrics or timeline for details
+        Green bars indicate public participation. Click metrics or timeline for details.
       </div>
     </div>
   );
@@ -5503,7 +6133,8 @@ function LoadingCard({ title, message, percent, bytesLoaded, bytesTotal, startTi
 
 const translations = {
   en: {
-    appSubtitle: "An AI-powered app made by the community, for the community that turns long public meetings into useful moments in minutes.",
+    appSubtitle: "An app made by folks in community media that turns long public meetings into useful moments in minutes.",
+    appDescription: "Tap into one of the largest sources of civic data throughout the US: local government and community meetings. No longer trapped by the inaccessible timeframes of 6 hours on a Tuesday night, or hidden within the unsearchable black box of closed video formats, Community Highlighter is an evolving suite of tools that gives people the power to do things with meetings.",
     siteLanguage: "Site language:",
     step1: "Paste a YouTube link to analyze a meeting.",
     step2: "Search the video for anything! Or click on a word below to see all of its mentions.",
@@ -6116,31 +6747,31 @@ function MeetingScorecard({ transcript, highlights, entities, isLoading }) {
     switch(type) {
       case 'decisions':
         return {
-          title: '🗳️️ Votes & Decisions',
+          title: 'Votes & Decisions',
           description: 'All voting actions and formal decisions made during this meeting.',
           items: highlights?.filter(h => h.category === 'vote' || h.highlight?.toLowerCase()?.includes('vote') || h.highlight?.toLowerCase()?.includes('approv')).map(h => h.highlight || h.text) || []
         };
       case 'comments':
         return {
-          title: '💬 Public Comments',
+          title: 'Public Comments',
           description: 'Moments when residents and community members spoke.',
           items: highlights?.filter(h => h.category === 'public_comment' || h.highlight?.toLowerCase()?.includes('resident')).map(h => h.highlight || h.text) || []
         };
       case 'budget':
         return {
-          title: '💰 Budget Items',
+          title: 'Budget Items',
           description: 'Financial discussions and budget-related decisions.',
           items: highlights?.filter(h => h.category === 'budget' || h.highlight?.toLowerCase()?.includes('budget') || h.highlight?.includes('$')).map(h => h.highlight || h.text) || []
         };
       case 'topics':
         return {
-          title: '📋 Key Topics',
+          title: 'Key Topics',
           description: 'Main subjects discussed during the meeting.',
           items: scorecard?.hot_topics || []
         };
       case 'engagement':
         return {
-          title: '📈 Engagement Score',
+          title: 'Engagement Score',
           description: 'Calculated based on topic variety, public comments, voting activity, and meeting dynamics.',
           items: scorecard?.hot_topics || []
         };
@@ -6164,17 +6795,17 @@ function MeetingScorecard({ transcript, highlights, entities, isLoading }) {
   const topicsCount = scorecard.hot_topics?.length || 0;
 
   const metrics = [
-    { key: 'decisions', value: scorecard.decisions_made, label: 'Votes/Decisions', icon: '🗳️️', color: '#ef4444' },
-    { key: 'comments', value: scorecard.public_comments, label: 'Public Comments', icon: '💬', color: '#2563eb' },
-    { key: 'budget', value: scorecard.budget_items, label: 'Budget Items', icon: '💰', color: '#16a34a' },
-    { key: 'topics', value: topicsCount, label: 'Key Topics', icon: '📋', color: '#9333ea' },
-    { key: 'duration', value: scorecard.duration, label: 'Duration', icon: '⏱️', color: '#64748b', noClick: true },
-    { key: 'engagement', value: `${scorecard.engagement_score}%`, label: 'Engagement', icon: '📈', color: scorecard.engagement_score > 70 ? '#16a34a' : scorecard.engagement_score > 40 ? '#eab308' : '#ef4444' },
+    { key: 'decisions', value: scorecard.decisions_made, label: 'Votes/Decisions', icon: '', color: '#ef4444' },
+    { key: 'comments', value: scorecard.public_comments, label: 'Public Comments', icon: '', color: '#2563eb' },
+    { key: 'budget', value: scorecard.budget_items, label: 'Budget Items', icon: '', color: '#16a34a' },
+    { key: 'topics', value: topicsCount, label: 'Key Topics', icon: '', color: '#9333ea' },
+    { key: 'duration', value: scorecard.duration, label: 'Duration', icon: '', color: '#64748b', noClick: true },
+    { key: 'engagement', value: `${scorecard.engagement_score}%`, label: 'Engagement', icon: '', color: scorecard.engagement_score > 70 ? '#16a34a' : scorecard.engagement_score > 40 ? '#eab308' : '#ef4444' },
   ];
 
   return (
     <div className="viz-card" style={{ gridColumn: '1 / -1' }}>
-      <h3>📊 Meeting Scorecard</h3>
+      <h3>Meeting Scorecard</h3>
       <p className="viz-desc">Key metrics at a glance. Click any metric for details.</p>
       
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px', marginTop: '16px' }}>
@@ -6279,7 +6910,7 @@ function MeetingScorecard({ transcript, highlights, entities, isLoading }) {
 
       {scorecard.hot_topics && scorecard.hot_topics.length > 0 && !expandedMetric && (
         <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: '10px' }}>🔥 Hot Topics</div>
+          <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: '10px' }}>Hot Topics</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
             {scorecard.hot_topics.map((topic, idx) => (
               <span key={idx} style={{
@@ -6397,16 +7028,16 @@ function InteractiveTimeline({ sents, highlights, playerRef, videoId, addToBaske
 
   const getTypeLabel = (type) => {
     switch(type) {
-      case 'vote': case 'decision': return '🗳️️ Vote/Decision';
-      case 'budget': return '💰 Budget Item';
-      case 'public_comment': return '💬 Public Comment';
-      default: return '⭐ Highlight';
+      case 'vote': case 'decision': return 'Vote/Decision';
+      case 'budget': return 'Budget Item';
+      case 'public_comment': return 'Public Comment';
+      default: return 'Highlight';
     }
   };
 
   return (
     <div className="viz-card interactive-timeline" style={{ gridColumn: '1 / -1' }}>
-      <h3>🎯 Interactive Timeline</h3>
+      <h3>Interactive Timeline</h3>
       <p className="viz-desc">Click any marker to expand details and jump to that moment. Lines indicate key moments.</p>
       
       <div style={{ display: 'flex', gap: '16px', marginBottom: '12px', flexWrap: 'wrap' }}>
@@ -6635,11 +7266,11 @@ function InteractiveTimeline({ sents, highlights, playerRef, videoId, addToBaske
                 className="btn btn-accent"
                 style={{ fontSize: '12px', padding: '8px 12px' }}
               >
-                📄 Transcript Context
+                Transcript Context
               </button>
             )}
-            
-            {/* Save to Basket - same as SearchResultCard */}
+
+            {/* Save to Basket */}
             {addToBasket && (
               <button
                 onClick={() => {
@@ -6651,25 +7282,23 @@ function InteractiveTimeline({ sents, highlights, playerRef, videoId, addToBaske
                 className="btn btn-primary"
                 style={{ fontSize: '12px', padding: '8px 12px' }}
               >
-                💾 Save to Basket
+                + Clip
               </button>
             )}
-            
-            {/* Video Context - same as SearchResultCard */}
+
+            {/* Video Context */}
             <button
               onClick={() => {
                 const point = timelinePoints[expandedPoint];
                 const start = Math.max(0, Math.floor(point.time - (pad || 2)));
                 if (!playerRef?.current || !videoId) return;
-                // Set iframe src to start playing at this time
                 playerRef.current.src = `https://www.youtube.com/embed/${videoId}?start=${start}&autoplay=1&mute=0&playsinline=1`;
-                // Scroll video into view
                 playerRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
               }}
               className="btn btn-ghost"
               style={{ fontSize: '12px', padding: '8px 12px' }}
             >
-              🎬 Video Context
+              Video Context
             </button>
           </div>
         </div>
@@ -7156,6 +7785,7 @@ export default function App() {
   const [translateLang, setTranslateLang] = useState("Spanish");
   const [showExportModal, setShowExportModal] = useState(false);
   const [showSettingsDrawer, setShowSettingsDrawer] = useState(false);
+  const [showShortcutOverlay, setShowShortcutOverlay] = useState(false);
   const [showReelStyles, setShowReelStyles] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [downloadJob, setDownloadJob] = useState(null); // { jobId, percent, message, status }
@@ -7384,13 +8014,19 @@ export default function App() {
   // ⌨️ Keyboard shortcuts for video editing
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Escape closes settings drawer
-      if (e.key === 'Escape' && showSettingsDrawer) {
-        setShowSettingsDrawer(false);
-        return;
+      // Escape closes settings drawer or shortcuts overlay
+      if (e.key === 'Escape') {
+        if (showShortcutOverlay) { setShowShortcutOverlay(false); return; }
+        if (showSettingsDrawer) { setShowSettingsDrawer(false); return; }
       }
       // Don't capture when typing in input/textarea
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+      // ? = show keyboard shortcuts overlay
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault();
+        setShowShortcutOverlay(v => !v);
+        return;
+      }
       if (!videoId || clipBasket.length === 0) return;
 
       const isMac = navigator.platform.toUpperCase().includes('MAC');
@@ -7481,7 +8117,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [videoId, clipBasket, selectedClipIndex, showSettingsDrawer]);
+  }, [videoId, clipBasket, selectedClipIndex, showSettingsDrawer, showShortcutOverlay]);
 
   // Drag-and-drop .chreel file import (desktop mode)
   useEffect(() => {
@@ -7557,7 +8193,8 @@ export default function App() {
       if (clips.length > 0) {
         if (mode === 'play') {
           // Reel Player mode — cinematic playback
-          setReelPlayerMode({ videoId: urlVid, clips });
+          const showLabels = params.get('labels') !== 'off';
+          setReelPlayerMode({ videoId: urlVid, clips, showLabels });
           return; // Don't load editor
         }
         setUrl(`https://www.youtube.com/watch?v=${urlVid}`);
@@ -8452,12 +9089,21 @@ export default function App() {
     if (!fullText) { addToast("Load a video first"); return; }
     const langCodes = { Spanish: 'es', French: 'fr', Portuguese: 'pt', Chinese: 'zh-CN', Japanese: 'ja', Korean: 'ko', German: 'de', Arabic: 'ar' };
     const tl = langCodes[translateLang] || 'es';
-    // Google Translate URL supports up to ~5000 chars in URL; for longer, use the form POST approach
-    const text = fullText.slice(0, 5000);
-    window.open(`https://translate.google.com/?sl=en&tl=${tl}&text=${encodeURIComponent(text)}&op=translate`, '_blank');
-    if (fullText.length > 5000) {
-      addToast(`Opened first portion in Google Translate. Full transcript is ${Math.round(fullText.length / 1000)}K chars — use the Download button to get the full text file, then upload to translate.google.com.`);
+    // For short text, use the URL approach
+    if (fullText.length <= 5000) {
+      window.open(`https://translate.google.com/?sl=en&tl=${tl}&text=${encodeURIComponent(fullText)}&op=translate`, '_blank');
+      return;
     }
+    // For longer text: copy to clipboard and open Google Translate with instructions
+    navigator.clipboard.writeText(fullText).then(() => {
+      window.open(`https://translate.google.com/?sl=en&tl=${tl}&op=translate`, '_blank');
+      addToast(`Full transcript (${Math.round(fullText.length / 1000)}K chars) copied to clipboard. Paste it into Google Translate in the new tab.`);
+    }).catch(() => {
+      // Fallback: open with first portion and notify
+      const text = fullText.slice(0, 5000);
+      window.open(`https://translate.google.com/?sl=en&tl=${tl}&text=${encodeURIComponent(text)}&op=translate`, '_blank');
+      addToast(`Could not copy to clipboard. Opened first portion. Download the transcript file and upload to translate.google.com for the full text.`);
+    });
   };
 
   const translateTranscript = async () => {
@@ -8599,6 +9245,7 @@ export default function App() {
       <ReelPlayer
         videoId={reelPlayerMode.videoId}
         clips={reelPlayerMode.clips}
+        showLabels={reelPlayerMode.showLabels !== false}
         onOpenEditor={() => setReelPlayerMode(null)}
       />
     );
@@ -8845,6 +9492,9 @@ export default function App() {
         </div>
       </header>
       <div className="subtitle-mobile">{t.appSubtitle}</div>
+      {!videoId && t.appDescription && (
+        <div style={{ maxWidth: '800px', margin: '0 auto', padding: '12px 24px 0', fontSize: '13.5px', color: '#64748b', lineHeight: 1.7, textAlign: 'center' }}>{t.appDescription}</div>
+      )}
 
       <main className={`container ${videoId ? 'desktop-editor-mode' : ''}`} style={{ paddingTop: 32, paddingBottom: 100 }}>
         {processStatus.active && (
@@ -9873,8 +10523,8 @@ export default function App() {
                           <button className="download-center-btn" onClick={translateTranscript} disabled={loading.translate}>
                             {loading.translate ? 'Translating...' : 'Translate'}
                           </button>
-                          <button className="download-center-btn" style={{ color: '#6366f1' }} onClick={translateFullTranscriptBrowser}>
-                            Google Translate
+                          <button className="download-center-btn" style={{ color: '#6366f1', fontWeight: 700 }} onClick={translateFullTranscriptBrowser} title="Free, handles full transcript length — copies text to clipboard and opens Google Translate">
+                            Google Translate (Free, Full Text)
                           </button>
                         </div>
                       </div>
@@ -10103,7 +10753,7 @@ export default function App() {
                         if (clipBasket.length === 0) return;
                         const clipsParam = clipBasket.map(c => `${Math.round(c.start)}-${Math.round(c.end)}`).join(',');
                         const titlesParam = clipBasket.map(c => (c.label || '').slice(0, 50)).join('|');
-                        const shareUrl = `${window.location.origin}/?v=${videoId}&clips=${clipsParam}&titles=${encodeURIComponent(titlesParam)}&mode=play`;
+                        const shareUrl = `${window.location.origin}/?v=${videoId}&clips=${clipsParam}&titles=${encodeURIComponent(titlesParam)}&mode=play&labels=${videoOptions.showHighlightLabels !== false ? 'on' : 'off'}`;
                         navigator.clipboard.writeText(shareUrl).then(() => addToast('🔗 Reel link copied to clipboard!')).catch(() => {
                           prompt('Copy this reel link:', shareUrl);
                         });
@@ -10112,6 +10762,16 @@ export default function App() {
                       }} title="Copy a shareable link with your clip selections embedded">
                         <span>🔗</span>
                         <span>Share Reel Link</span>
+                      </button>
+                      <button className="toolbar-view-btn" disabled={clipBasket.length === 0} onClick={() => {
+                        if (clipBasket.length === 0) return;
+                        const clipsParam = clipBasket.map(c => `${Math.round(c.start)}-${Math.round(c.end)}`).join(',');
+                        const titlesParam = clipBasket.map(c => (c.label || '').slice(0, 50)).join('|');
+                        const viewUrl = `${window.location.origin}/?v=${videoId}&clips=${clipsParam}&titles=${encodeURIComponent(titlesParam)}&mode=play&labels=${videoOptions.showHighlightLabels !== false ? 'on' : 'off'}`;
+                        window.open(viewUrl, '_blank');
+                      }} title="Preview your edited reel in a new tab">
+                        <span>&#9654;</span>
+                        <span>View Your Edited Reel</span>
                       </button>
                       <button className="toolbar-handoff-btn" disabled={clipBasket.length === 0} onClick={() => {
                         if (clipBasket.length === 0) return;
@@ -10146,7 +10806,7 @@ export default function App() {
                         if (clipBasket.length === 0) return;
                         const clipsParam = clipBasket.map(c => `${Math.round(c.start)}-${Math.round(c.end)}`).join(',');
                         const titlesParam = clipBasket.map(c => (c.label || '').slice(0, 50)).join('|');
-                        const shareUrl = `${window.location.origin}/?v=${videoId}&clips=${clipsParam}&titles=${encodeURIComponent(titlesParam)}&mode=play`;
+                        const shareUrl = `${window.location.origin}/?v=${videoId}&clips=${clipsParam}&titles=${encodeURIComponent(titlesParam)}&mode=play&labels=${videoOptions.showHighlightLabels !== false ? 'on' : 'off'}`;
                         navigator.clipboard.writeText(shareUrl).then(() => addToast('🔗 Reel link copied to clipboard!')).catch(() => {
                           prompt('Copy this reel link:', shareUrl);
                         });
@@ -10154,6 +10814,16 @@ export default function App() {
                       }} title="Copy a shareable link that plays your clips as a reel">
                         <span>🔗</span>
                         <span>Share Reel Link</span>
+                      </button>
+                      <button className="toolbar-view-btn" disabled={clipBasket.length === 0} onClick={() => {
+                        if (clipBasket.length === 0) return;
+                        const clipsParam = clipBasket.map(c => `${Math.round(c.start)}-${Math.round(c.end)}`).join(',');
+                        const titlesParam = clipBasket.map(c => (c.label || '').slice(0, 50)).join('|');
+                        const viewUrl = `${window.location.origin}/?v=${videoId}&clips=${clipsParam}&titles=${encodeURIComponent(titlesParam)}&mode=play&labels=${videoOptions.showHighlightLabels !== false ? 'on' : 'off'}`;
+                        window.open(viewUrl, '_blank');
+                      }} title="Preview your edited reel in a new tab">
+                        <span>&#9654;</span>
+                        <span>View Your Edited Reel</span>
                       </button>
                     </>
                   )}
@@ -10187,7 +10857,7 @@ export default function App() {
                     {!isCloudMode && (
                       <>
                         <div style={{ flex: 1 }} />
-                        <button className="toolbar-action-btn" style={{ fontSize: '11px', color: '#94a3b8' }} disabled={downloadJob?.status === 'running'} onClick={async () => {
+                        <button className={`toolbar-action-btn ${downloadJob?.status !== 'running' ? 'toolbar-download-glow' : ''}`} style={{ fontSize: '11px' }} disabled={downloadJob?.status === 'running'} onClick={async () => {
                           if (downloadJob?.status === 'running') return;
                           setDownloadJob({ status: 'running', percent: 0, message: 'Starting download...' });
                           try {
@@ -10357,6 +11027,50 @@ export default function App() {
                     })
                   )}
                 </div>
+
+                {/* Playback controls bar */}
+                {clipBasket.length > 0 && (
+                  <div className="timeline-playback-bar">
+                    <button disabled={!clipBasket.length || selectedClipIndex === 0 || selectedClipIndex === null}
+                      onClick={() => {
+                        const prevIdx = selectedClipIndex !== null ? Math.max(0, selectedClipIndex - 1) : 0;
+                        const clip = clipBasket[prevIdx];
+                        if (clip) { seekToClip(clip, prevIdx); }
+                      }} title="Previous clip">
+                      &#9664;&#9664; Prev
+                    </button>
+                    <button className={previewingClip ? 'stop-btn' : 'play-btn'}
+                      onClick={() => {
+                        if (previewingClip) {
+                          setPreviewingClip(null);
+                          if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+                          if (playerRef.current) {
+                            playerRef.current.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo' }), '*');
+                          }
+                        } else {
+                          const idx = selectedClipIndex ?? 0;
+                          const clip = clipBasket[idx];
+                          if (clip) previewClip(clip, idx);
+                        }
+                      }} title={previewingClip ? 'Stop playback' : 'Play selected clip'}>
+                      {previewingClip ? 'Stop' : 'Play'}
+                    </button>
+                    <button disabled={!clipBasket.length || selectedClipIndex === null || selectedClipIndex >= clipBasket.length - 1}
+                      onClick={() => {
+                        const nextIdx = selectedClipIndex !== null ? Math.min(clipBasket.length - 1, selectedClipIndex + 1) : 0;
+                        const clip = clipBasket[nextIdx];
+                        if (clip) { seekToClip(clip, nextIdx); }
+                      }} title="Next clip">
+                      Next &#9654;&#9654;
+                    </button>
+                    <span className="clip-counter">
+                      {selectedClipIndex !== null ? `Clip ${selectedClipIndex + 1}` : 'No clip selected'} / {clipBasket.length}
+                    </span>
+                    <span className="clip-counter" style={{ color: '#64748b' }}>
+                      Total: {clipBasket.reduce((sum, c) => sum + (c.end - c.start), 0).toFixed(0)}s
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Clip Inspector — inside workspace, dark themed */}
@@ -10571,6 +11285,31 @@ export default function App() {
                 <div className="bottom-panel-section"><SharePanel videoId={videoId} videoTitle={videoTitle} /></div>
               )}
             </div>
+
+            {/* Keyboard Shortcuts Overlay */}
+            {showShortcutOverlay && (
+              <div className="shortcuts-overlay" onClick={() => setShowShortcutOverlay(false)}>
+                <div className="shortcuts-modal" onClick={(e) => e.stopPropagation()}>
+                  <h2>Keyboard Shortcuts</h2>
+                  <p className="shortcuts-subtitle">Timeline editing shortcuts (press ? to toggle)</p>
+                  <div className="shortcuts-grid">
+                    <div className="shortcut-item"><span className="shortcut-label">Undo</span><kbd>{navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+Z</kbd></div>
+                    <div className="shortcut-item"><span className="shortcut-label">Redo</span><kbd>{navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+⇧+Z</kbd></div>
+                    <div className="shortcut-item"><span className="shortcut-label">Delete clip</span><kbd>Del</kbd></div>
+                    <div className="shortcut-item"><span className="shortcut-label">Split clip</span><kbd>S</kbd></div>
+                    <div className="shortcut-item"><span className="shortcut-label">Nudge left</span><kbd>&#8592;</kbd></div>
+                    <div className="shortcut-item"><span className="shortcut-label">Nudge right</span><kbd>&#8594;</kbd></div>
+                    <div className="shortcut-item"><span className="shortcut-label">Preview clip</span><kbd>Space</kbd></div>
+                    <div className="shortcut-item"><span className="shortcut-label">Set in-point</span><kbd>I</kbd></div>
+                    <div className="shortcut-item"><span className="shortcut-label">Set out-point</span><kbd>O</kbd></div>
+                    <div className="shortcut-item"><span className="shortcut-label">Seek back 5s</span><kbd>J</kbd></div>
+                    <div className="shortcut-item"><span className="shortcut-label">Play/Pause</span><kbd>K</kbd></div>
+                    <div className="shortcut-item"><span className="shortcut-label">Seek fwd 5s</span><kbd>L</kbd></div>
+                  </div>
+                  <p className="shortcuts-close-hint">Press <kbd style={{ background: '#0f172a', border: '1px solid #475569', borderRadius: 4, padding: '1px 6px', fontSize: 11, color: '#4ade80' }}>Esc</kbd> or <kbd style={{ background: '#0f172a', border: '1px solid #475569', borderRadius: 4, padding: '1px 6px', fontSize: 11, color: '#4ade80' }}>?</kbd> to close</p>
+                </div>
+              </div>
+            )}
 
             {/* ================================================================
                SETTINGS DRAWER — slides from right
@@ -11648,7 +12387,19 @@ export default function App() {
                 entities={entities}
               />
 
-              {/* 8. Topic Subscriptions + Relevant Documents - SIDE BY SIDE */}
+              {/* 8. NEW: Question Flow Diagram */}
+              <QuestionFlowDiagram sents={sents} />
+
+              {/* 9. NEW: Framing Plurality Map */}
+              <FramingPluralityMap sents={sents} entities={entities} />
+
+              {/* 10. NEW: Disagreement Topology */}
+              <DisagreementTopology sents={sents} />
+
+              {/* 11. NEW: Issue Lifecycle */}
+              <IssueLifecycle sents={sents} />
+
+              {/* 12. Topic Subscriptions + Relevant Documents - SIDE BY SIDE */}
               <div style={{ 
                 display: 'grid', 
                 gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', 
@@ -11667,7 +12418,15 @@ export default function App() {
                 />
               </div>
 
-              {/* 9. Issue Tracker & Meeting Comparison - FULL WIDTH with Meeting Finder integrated */}
+              {/* Knowledge Base — cross-meeting search */}
+              <KnowledgeBasePanel
+                videoId={videoId}
+                videoTitle={videoTitle}
+                fullText={fullText}
+                entities={entities}
+              />
+
+              {/* Issue Tracker & Meeting Comparison */}
               <CrossMeetingAnalysisPanel
                 currentVideoId={videoId}
                 currentTitle={videoTitle}
