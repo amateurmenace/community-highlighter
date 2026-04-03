@@ -187,8 +187,8 @@ app = BUNDLE(
     info_plist={
         'CFBundleName': 'Community Highlighter',
         'CFBundleDisplayName': 'Community Highlighter',
-        'CFBundleShortVersionString': '7.0.0',
-        'CFBundleVersion': '7.0.0',
+        'CFBundleShortVersionString': '9.1.0',
+        'CFBundleVersion': '9.1.0',
         'CFBundleIdentifier': 'com.communityhighlighter.app',
         'NSHighResolutionCapable': True,
         'LSMinimumSystemVersion': '10.15',
