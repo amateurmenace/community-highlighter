@@ -76,6 +76,7 @@ set_key_if_missing() {
 set_key_if_missing "OPENAI_API_KEY" "OPENAI_API_KEY"
 set_key_if_missing "GOOGLE_API_KEY" "GOOGLE_API_KEY"
 set_key_if_missing "YOUTUBE_API_KEY" "YOUTUBE_API_KEY"
+set_key_if_missing "YOUTUBE_API_KEY_SECONDARY" "YOUTUBE_API_KEY_SECONDARY"
 
 # Get the service URL
 echo ""

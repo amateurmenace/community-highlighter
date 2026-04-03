@@ -617,7 +617,12 @@ function KnowledgeBasePanel({ videoId, videoTitle, fullText, entities }) {
       const related = await apiFindRelated({ videoId, limit: 5 });
       if (related.related) setRelatedMeetings(related.related);
     } catch (err) {
-      setError(err.message || 'Failed to add meeting');
+      const msg = err.message || 'Failed to add meeting';
+      if (msg.includes('503') || msg.includes('ChromaDB') || msg.includes('not available')) {
+        setError('Knowledge Base requires the desktop app. Cloud mode does not support cross-meeting search.');
+      } else {
+        setError(msg);
+      }
     }
     setIsAdding(false);
   };
@@ -1821,23 +1826,36 @@ function DisagreementTimeline({ sents, playerRef, videoId, openExpandedAt, addTo
   useEffect(() => {
     if (!sents) return;
 
-    const disagreementKeywords = [
-      'disagree', 'opposed', 'against', 'object', 'concern', 'worried',
-      'problem', 'issue', 'challenge', 'difficulty', 'reject', 'deny', 'refuse',
-      'violation', 'unacceptable', 'unfortunately', 'strongly oppose', 'cannot support'
+    // Strong disagreement signals
+    const strongKeywords = [
+      'disagree', 'opposed', 'against', 'object', 'strongly oppose', 'cannot support',
+      'reject', 'deny', 'refuse', 'violation', 'unacceptable', 'outrageous',
+      'no way', 'absolutely not', 'wrong', 'mistake', 'inappropriate', 'unfair',
+      'frustrated', 'angry', 'disappointed', 'ridiculous', 'appalled',
+      'vote no', 'voted no', 'nay', 'dissent', 'veto', 'override'
     ];
-
-    const modifierKeywords = ['but', 'however', 'although', 'not'];
+    // Moderate tension signals
+    const moderateKeywords = [
+      'concern', 'worried', 'problem', 'issue', 'challenge', 'difficulty',
+      'unfortunately', 'controversial', 'contentious', 'debate', 'dispute',
+      'complaint', 'criticism', 'tension', 'conflict', 'pushback',
+      'split', 'divided', 'skeptical', 'question whether', 'not convinced',
+      'reconsider', 'rethink', 'troubling', 'alarming', 'troublesome'
+    ];
+    // Context modifiers that suggest disagreement
+    const modifierKeywords = ['but', 'however', 'although', 'not', 'despite', 'regardless', 'nevertheless', 'on the other hand'];
 
     const moments = [];
     sents.forEach((sent, idx) => {
       const lowerText = sent.text.toLowerCase();
       let score = 0;
 
-      disagreementKeywords.forEach(keyword => {
+      strongKeywords.forEach(keyword => {
+        if (lowerText.includes(keyword)) score += 3;
+      });
+      moderateKeywords.forEach(keyword => {
         if (lowerText.includes(keyword)) score += 2;
       });
-
       modifierKeywords.forEach(keyword => {
         if (lowerText.includes(keyword)) score += 1;
       });
@@ -2022,7 +2040,7 @@ function CrossReferenceNetwork({ fullText, entities }) {
         name: e.text,
         type: e.type || 'ENTITY',
         count: e.count,
-        radius: 10 + (e.count / maxCount) * 20,
+        radius: 14 + (e.count / maxCount) * 24,
         color: typeColors[e.type] || '#94a3b8',
       };
     });
@@ -2077,7 +2095,7 @@ function CrossReferenceNetwork({ fullText, entities }) {
         <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#f59e0b', display: 'inline-block' }} /> Organization</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#8b5cf6', display: 'inline-block' }} /> Keyword</span>
       </div>
-      <svg ref={svgRef} width="100%" viewBox="0 0 600 560" style={{ maxHeight: 540, cursor: draggingNode !== null ? 'grabbing' : 'default' }}
+      <svg ref={svgRef} width="100%" viewBox="0 0 700 620" style={{ maxHeight: 600, cursor: draggingNode !== null ? 'grabbing' : 'default' }}
         onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
       >
         {/* Edges */}
@@ -2117,10 +2135,14 @@ function CrossReferenceNetwork({ fullText, entities }) {
                 fill={node.color} opacity={isHovered ? 0.95 : 0.8}
                 stroke={isDragging ? '#fff' : isHovered ? '#fff' : 'none'} strokeWidth={isDragging ? 3 : 2}
               />
-              <text x={pos.x} y={pos.y + 3} textAnchor="middle" fontSize={Math.min(11, node.radius * 0.7)} fill="white" fontWeight={700}>
-                {node.name.length > 12 ? node.name.slice(0, 11) + '..' : node.name}
+              <text x={pos.x} y={pos.y + 4} textAnchor="middle" fontSize={Math.max(10, Math.min(14, node.radius * 0.9))} fill="white" fontWeight={700}>
+                {node.name.length > 15 ? node.name.slice(0, 14) + '..' : node.name}
               </text>
-              <text x={pos.x} y={pos.y - node.radius - 5} textAnchor="middle" fontSize={9} fill="#94a3b8" fontWeight={500}>
+              {/* Label below node for readability */}
+              <text x={pos.x} y={pos.y + node.radius + 14} textAnchor="middle" fontSize={11} fill={isHovered ? '#e2e8f0' : '#94a3b8'} fontWeight={500}>
+                {node.name.length > 20 ? node.name.slice(0, 19) + '..' : node.name}
+              </text>
+              <text x={pos.x} y={pos.y - node.radius - 6} textAnchor="middle" fontSize={11} fill="#cbd5e1" fontWeight={600}>
                 {node.count}x
               </text>
             </g>
@@ -2927,7 +2949,7 @@ function CivicMeetingFinder({ onSelectVideo }) {
       }
 
       // Score and sort results to prioritize civic/government content
-      const civicKeywords = ['council', 'board', 'committee', 'selectboard', 'select board', 'town', 'city', 'municipal', 'government', 'public', 'hearing', 'session', 'meeting', 'planning', 'zoning', 'school committee', 'finance', 'budget', 'warrant'];
+      const civicKeywords = ['council', 'board', 'committee', 'selectboard', 'select board', 'town', 'city', 'municipal', 'government', 'public', 'hearing', 'session', 'meeting', 'planning', 'zoning', 'school committee', 'finance', 'budget', 'warrant', 'ordinance', 'resolution', 'commissioner', 'supervisor', 'alderman', 'mayor', 'clerk', 'minutes', 'agenda', 'motion', 'vote', 'quorum', 'appropriation', 'legislative', 'charter', 'variance', 'permit', 'citizen', 'resident', 'taxpayer', 'township', 'borough', 'village', 'county', 'district'];
       let items = data.items || [];
 
       // Score each result: civic relevance + recency
@@ -3190,6 +3212,22 @@ function CivicMeetingFinder({ onSelectVideo }) {
           border: `1px solid ${error.includes('quota') || error.includes('fallback') || error.includes('direct YouTube') ? '#fde68a' : '#fecaca'}`,
         }}>
           {error}
+        </div>
+      )}
+
+      {/* Loading skeletons */}
+      {loading && results.length === 0 && !error && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '12px' }}>
+          {[1, 2, 3].map(i => (
+            <div key={i} style={{ padding: '14px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', gap: '12px' }}>
+              <div style={{ width: '120px', height: '68px', background: 'linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s infinite', borderRadius: '6px', flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ height: '14px', width: '80%', background: 'linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s infinite', borderRadius: '4px', marginBottom: '8px' }} />
+                <div style={{ height: '10px', width: '60%', background: 'linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s infinite', borderRadius: '4px' }} />
+              </div>
+            </div>
+          ))}
+          <style>{`@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
         </div>
       )}
 
@@ -5004,7 +5042,7 @@ function ProgressIndicator({ status, percent, message, estimatedTime, isVideoDow
   }, []);
   
   return (
-    <div className="progress-indicator animate-slideIn" style={{
+    <div className="progress-indicator animate-slideIn" role="status" aria-live="polite" style={{
       background: 'linear-gradient(135deg, #1E7F63 0%, #166b52 100%)',
       color: 'white',
       padding: '20px',
@@ -5585,8 +5623,8 @@ function MeetingAssistant({ videoId, transcript, forceOpen = 0, aiModel = "gpt-4
           }}>
             <div>
               <h3 style={{ margin: 0, color: '#f1f5f9', fontSize: '16px' }}>Meeting Chat</h3>
-              <p style={{ margin: '2px 0 0', color: '#64748b', fontSize: '12px' }}>
-                {messages.length > 0 ? `${messages.filter(m => m.type === 'user').length} questions asked` : 'Ask anything about this meeting'}
+              <p style={{ margin: '2px 0 0', color: '#94a3b8', fontSize: '12px' }}>
+                {messages.length > 0 ? `${messages.filter(m => m.type === 'user').length} ${messages.filter(m => m.type === 'user').length === 1 ? 'question' : 'questions'} asked` : 'Ask anything about this meeting'}
               </p>
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -5606,7 +5644,7 @@ function MeetingAssistant({ videoId, transcript, forceOpen = 0, aiModel = "gpt-4
                 title="Close"
                 aria-label="Close chat"
               >
-                \u2715
+                {'\u2715'}
               </button>
             </div>
           </div>
@@ -6753,7 +6791,7 @@ function AccessibilityPanel({ summary, onSimplified, onTranslated }) {
     }
   };
 
-  const languages = ['Spanish', 'Chinese', 'Vietnamese', 'Portuguese', 'French', 'Korean', 'Arabic', 'Russian', 'Japanese', 'Hindi'];
+  const languages = ['Spanish', 'Chinese', 'Vietnamese', 'Portuguese', 'French', 'Korean', 'Arabic', 'Russian', 'Japanese', 'Hindi', 'German', 'Italian', 'Thai', 'Polish'];
 
   if (!summary) return null;
 
@@ -7060,12 +7098,16 @@ export default function App() {
       }
 
       // 5. Start auto-tracking: update highlighted cue as video plays
+      //    Uses wall-clock elapsed time to stay in sync (no iframe time API available)
       if (activeCueTimerRef.current) clearInterval(activeCueTimerRef.current);
-      let currentTime = seconds;
+      const startWallTime = Date.now();
+      const startVideoTime = seconds;
+      let lastScrollTime = Date.now();
       activeCueTimerRef.current = setInterval(() => {
-        currentTime += 1;
+        const elapsed = (Date.now() - startWallTime) / 1000;
+        const currentTime = startVideoTime + elapsed;
         let newIdx = bestIdx;
-        for (let i = bestIdx; i < sents.length; i++) {
+        for (let i = 0; i < sents.length; i++) {
           if (sents[i].start <= currentTime && (i === sents.length - 1 || sents[i + 1].start > currentTime)) {
             newIdx = i;
             break;
@@ -7073,14 +7115,33 @@ export default function App() {
         }
         if (newIdx !== bestIdx) {
           setActiveCueIdx(newIdx);
-          const cueEl = document.getElementById(`sent-${newIdx}`);
-          if (cueEl) cueEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Only auto-scroll if user hasn't manually scrolled away recently
+          const now = Date.now();
+          if (now - lastScrollTime > 200) {
+            const cueEl = document.getElementById(`sent-${newIdx}`);
+            if (cueEl) {
+              cueEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              lastScrollTime = now;
+            }
+          }
         }
         bestIdx = newIdx;
-      }, 1000);
+      }, 500);
 
-      // Stop after 2 minutes
-      setTimeout(() => { if (activeCueTimerRef.current) clearInterval(activeCueTimerRef.current); }, 120000);
+      // Stop after 5 minutes
+      setTimeout(() => { if (activeCueTimerRef.current) clearInterval(activeCueTimerRef.current); }, 300000);
+
+      // Stop tracking when user scrolls manually (prevents being stuck in scroll loop)
+      const handleUserScroll = () => {
+        if (activeCueTimerRef.current) {
+          clearInterval(activeCueTimerRef.current);
+          activeCueTimerRef.current = null;
+        }
+        window.removeEventListener('wheel', handleUserScroll);
+        window.removeEventListener('touchmove', handleUserScroll);
+      };
+      window.addEventListener('wheel', handleUserScroll, { once: true });
+      window.addEventListener('touchmove', handleUserScroll, { once: true });
     }, 600);
   }, [videoId, sents]);
 
@@ -8300,7 +8361,7 @@ export default function App() {
   // Open full transcript in Google Translate (free, no token cost, full text)
   const translateFullTranscriptBrowser = () => {
     if (!fullText) { addToast("Load a video first"); return; }
-    const langCodes = { Spanish: 'es', French: 'fr', Portuguese: 'pt', Chinese: 'zh-CN', Japanese: 'ja', Korean: 'ko', German: 'de', Arabic: 'ar' };
+    const langCodes = { Spanish: 'es', French: 'fr', Portuguese: 'pt', Chinese: 'zh-CN', Japanese: 'ja', Korean: 'ko', German: 'de', Arabic: 'ar', Vietnamese: 'vi', Hindi: 'hi', Italian: 'it', Thai: 'th', Polish: 'pl', Russian: 'ru' };
     const tl = langCodes[translateLang] || 'es';
     // For short text, use the URL approach
     if (fullText.length <= 5000) {
@@ -8702,7 +8763,7 @@ export default function App() {
       {videoId && <div className="subtitle-mobile">{t.appSubtitle}</div>}
 
       <main id="main-content" className={`container ${videoId ? 'desktop-editor-mode' : ''}`} style={{ paddingTop: 32, paddingBottom: 100 }}>
-        {processStatus.active && (
+        {processStatus.active && !videoId && (
           <ProgressIndicator
             status="active"
             percent={processStatus.percent}
@@ -9479,6 +9540,8 @@ export default function App() {
                     <option value="Spanish">Spanish</option><option value="French">French</option><option value="Portuguese">Portuguese</option>
                     <option value="Chinese">Chinese</option><option value="Arabic">Arabic</option><option value="Russian">Russian</option>
                     <option value="Japanese">Japanese</option><option value="German">German</option>
+                    <option value="Vietnamese">Vietnamese</option><option value="Hindi">Hindi</option><option value="Korean">Korean</option>
+                    <option value="Italian">Italian</option><option value="Thai">Thai</option><option value="Polish">Polish</option>
                   </select>
                   <button className="desktop-search-tool-btn" onClick={translateTranscript} disabled={loading.translate}>🌐 Translate</button>
                   <button className="desktop-search-tool-btn" onClick={() => {
@@ -9730,6 +9793,8 @@ export default function App() {
                             <option value="Spanish">Spanish</option><option value="French">French</option><option value="Portuguese">Portuguese</option>
                             <option value="Chinese">Chinese</option><option value="Arabic">Arabic</option><option value="Russian">Russian</option>
                             <option value="Japanese">Japanese</option><option value="German">German</option>
+                            <option value="Vietnamese">Vietnamese</option><option value="Hindi">Hindi</option><option value="Korean">Korean</option>
+                            <option value="Italian">Italian</option><option value="Thai">Thai</option><option value="Polish">Polish</option>
                           </select>
                           <button className="download-center-btn" onClick={translateTranscript} disabled={loading.translate}>
                             {loading.translate ? 'Translating...' : 'Translate'}
@@ -10053,10 +10118,9 @@ export default function App() {
                     </>
                   ) : (
                     <>
-                      <button className="toolbar-export-btn" onClick={() => setShowExportModal(true)} disabled={clipBasket.length === 0}
-                        title={clipBasket.length === 0 ? 'Add clips to the timeline first, then export as video' : `Export ${clipBasket.length} clips as MP4 video`}>
-                        <span className="toolbar-export-icon">📦</span>
-                        <span className="toolbar-export-label">{clipBasket.length > 0 ? `Export ${clipBasket.length} Clip${clipBasket.length !== 1 ? 's' : ''} as Video` : 'Export as Video'}</span>
+                      <button className={`toolbar-export-btn${!isCloudMode && clipBasket.length > 0 ? ' toolbar-export-glow' : ''}`} onClick={() => setShowExportModal(true)} disabled={clipBasket.length === 0}
+                        title={clipBasket.length === 0 ? 'Add clips to the timeline first, then export as video' : `Export ${clipBasket.length} clips as highlight reel`}>
+                        <span className="toolbar-export-label">Export Highlight Reel</span>
                       </button>
                       <button className="toolbar-share-btn" disabled={clipBasket.length === 0} onClick={() => {
                         if (clipBasket.length === 0) return;
@@ -11563,6 +11627,19 @@ export default function App() {
         </div>
         )}
 
+        {/* Progress/terminal output — positioned under video editor when editing */}
+        {processStatus.active && videoId && (
+          <ProgressIndicator
+            status="active"
+            percent={processStatus.percent}
+            message={processStatus.message}
+            estimatedTime={processStatus.estimatedTime}
+            isVideoDownload={processStatus.isVideoDownload}
+            logs={jobLogs}
+            estimatedSeconds={jobEstimate}
+          />
+        )}
+
         {fullText && sents.length > 0 && (
           <>
             {/* Section 3: Video Analyzer */}
@@ -11834,7 +11911,7 @@ export default function App() {
       )}
 
       {/* Toast notifications */}
-      <div className="toast-container">
+      <div className="toast-container" role="status" aria-live="polite">
         {toasts.map(t => (
           <div key={t.id} className="toast">{t.message}</div>
         ))}

@@ -148,14 +148,21 @@ for _i in range(3, 11):
     if _extra:
         _youtube_key_pool.append(_extra)
 _youtube_key_idx = 0  # Index into the pool
-_youtube_exhausted_keys = set()  # Keys that hit quota
+_youtube_exhausted_keys = {}  # key -> timestamp when exhausted (auto-expire after 1 hour)
+_YOUTUBE_KEY_EXHAUST_TTL = 3600  # Re-try exhausted keys after 1 hour
 print(f"[YouTube] {len(_youtube_key_pool)} API key(s) in rotation pool")
 
 def _get_youtube_key():
-    """Get the current active YouTube API key, skipping exhausted ones."""
+    """Get the current active YouTube API key, skipping recently exhausted ones."""
     global _youtube_key_idx
     if not _youtube_key_pool:
         return None
+    now = time.time()
+    # Clear expired exhaustion entries
+    expired = [k for k, t in _youtube_exhausted_keys.items() if now - t > _YOUTUBE_KEY_EXHAUST_TTL]
+    for k in expired:
+        del _youtube_exhausted_keys[k]
+        print(f"[YouTube] Key un-exhausted after TTL (may have quota again)")
     # Try each key starting from current index
     for _ in range(len(_youtube_key_pool)):
         key = _youtube_key_pool[_youtube_key_idx % len(_youtube_key_pool)]
@@ -168,10 +175,10 @@ def _get_youtube_key():
 def _rotate_youtube_key(exhausted_key):
     """Mark a key as exhausted and rotate to the next one."""
     global _youtube_key_idx
-    _youtube_exhausted_keys.add(exhausted_key)
+    _youtube_exhausted_keys[exhausted_key] = time.time()
     _youtube_key_idx = (_youtube_key_idx + 1) % len(_youtube_key_pool)
     remaining = len(_youtube_key_pool) - len(_youtube_exhausted_keys)
-    print(f"[YouTube] Key exhausted, rotated. {remaining} key(s) remaining")
+    print(f"[YouTube] Key exhausted, rotated. {remaining} key(s) remaining in pool")
     return _get_youtube_key()
 
 # Legacy compat
@@ -2170,7 +2177,9 @@ async def _summary_ai_impl(req: Request):
         raise HTTPException(400, "No transcript provided")
 
     video_id = data.get("video_id", "")
-    print(f"[summary_ai] Processing transcript: {len(transcript):,} characters, strategy={strategy}, model={model}, force_refresh={force_refresh}")
+    # Cache key includes reel_style so different styles get separate caches
+    cache_strategy_key = f"summary_{strategy}_{reel_style}" if reel_style else f"summary_{strategy}"
+    print(f"[summary_ai] Processing transcript: {len(transcript):,} characters, strategy={strategy}, model={model}, reel_style={reel_style}, force_refresh={force_refresh}")
 
     # Check cache first (if video_id provided)
     if video_id and not force_refresh:
@@ -2181,9 +2190,9 @@ async def _summary_ai_impl(req: Request):
                 if cached_ts is not None:
                     print(f"[summary_ai] Cache hit for {strategy}_ts (video: {video_id[:8]}...)")
                     return cached_ts
-            cached = get_cached_result(video_id, f"summary_{strategy}", {"model": model})
+            cached = get_cached_result(video_id, cache_strategy_key, {"model": model})
             if cached is not None:
-                print(f"[summary_ai] Cache hit for {strategy} (video: {video_id[:8]}...)")
+                print(f"[summary_ai] Cache hit for {cache_strategy_key} (video: {video_id[:8]}...)")
                 return cached
         except Exception as e:
             print(f"[summary_ai] Cache read error: {e}")
@@ -2345,7 +2354,7 @@ TRANSCRIPT:
                         }
                         if video_id:
                             try:
-                                save_to_cache(video_id, f"summary_{strategy}", resp, {"model": model})
+                                save_to_cache(video_id, cache_strategy_key, resp, {"model": model})
                             except Exception:
                                 pass
                         return resp
@@ -2361,7 +2370,7 @@ TRANSCRIPT:
                 resp = {"summarySentences": body, "strategy": strategy, "headline": headline}
                 if video_id:
                     try:
-                        save_to_cache(video_id, f"summary_{strategy}", resp, {"model": model})
+                        save_to_cache(video_id, cache_strategy_key, resp, {"model": model})
                     except Exception:
                         pass
                 return resp
@@ -2370,7 +2379,7 @@ TRANSCRIPT:
                 resp = {"summarySentences": ai_result, "strategy": strategy}
                 if video_id:
                     try:
-                        save_to_cache(video_id, f"summary_{strategy}", resp, {"model": model})
+                        save_to_cache(video_id, cache_strategy_key, resp, {"model": model})
                     except Exception:
                         pass
                 return resp
@@ -2438,7 +2447,7 @@ Respond in this EXACT JSON format with EXACTLY 10 items:
                         }
                         if video_id:
                             try:
-                                save_to_cache(video_id, f"summary_{strategy}", resp, {"model": model})
+                                save_to_cache(video_id, cache_strategy_key, resp, {"model": model})
                             except Exception:
                                 pass
                         return resp
@@ -2482,7 +2491,7 @@ Write the article with:
                 resp = {"summarySentences": body, "strategy": strategy, "headline": headline}
                 if video_id:
                     try:
-                        save_to_cache(video_id, f"summary_{strategy}", resp, {"model": model})
+                        save_to_cache(video_id, cache_strategy_key, resp, {"model": model})
                     except Exception:
                         pass
                 return resp
@@ -2535,7 +2544,7 @@ Write a comprehensive 2-3 paragraph summary."""
                 resp = {"summarySentences": ai_result, "strategy": strategy}
                 if video_id:
                     try:
-                        save_to_cache(video_id, f"summary_{strategy}", resp, {"model": model})
+                        save_to_cache(video_id, cache_strategy_key, resp, {"model": model})
                     except Exception:
                         pass
                 return resp
@@ -2559,6 +2568,8 @@ async def summary_ai_stream(req: Request):
     strategy = data.get("strategy", "report")
     video_id = data.get("video_id", "")
     force_refresh = data.get("forceRefresh", False)
+    reel_style = data.get("reelStyle", None)
+    cache_strategy_key = f"summary_{strategy}_{reel_style}" if reel_style else f"summary_{strategy}"
 
     if strategy not in ("report", "highlights_with_quotes", "executive"):
         raise HTTPException(400, "Streaming only supports 'report', 'highlights_with_quotes', and 'executive' strategies")
@@ -2584,7 +2595,7 @@ async def summary_ai_stream(req: Request):
                         yield f"data: {json.dumps({'text': cached_data, 'cached': True})}\n\n"
                         yield "data: [DONE]\n\n"
                     return StreamingResponse(cached_ts_stream(), media_type="text/event-stream")
-            cached = get_cached_result(video_id, f"summary_{strategy}", {"model": model})
+            cached = get_cached_result(video_id, cache_strategy_key, {"model": model})
             if cached is not None:
                 cached_text = cached.get("summarySentences", "")
                 if isinstance(cached_text, list):
@@ -2686,18 +2697,26 @@ Respond in this EXACT JSON format with EXACTLY 10 items:
                         parts = complete.split("\n", 1)
                         headline = parts[0].replace("HEADLINE:", "").strip()
                         body = parts[1].strip() if len(parts) > 1 else complete
-                    save_to_cache(video_id, f"summary_{strategy}", {"summarySentences": body, "strategy": strategy, "headline": headline}, {"model": model})
+                    save_to_cache(video_id, cache_strategy_key, {"summarySentences": body, "strategy": strategy, "headline": headline}, {"model": model})
                 else:
                     parsed = json.loads(complete)
                     highlights = parsed.get("highlights", [])
                     if isinstance(highlights, list) and len(highlights) > 0:
-                        save_to_cache(video_id, f"summary_{strategy}", {"summarySentences": json.dumps(highlights), "strategy": strategy}, {"model": model})
+                        save_to_cache(video_id, cache_strategy_key, {"summarySentences": json.dumps(highlights), "strategy": strategy}, {"model": model})
             except Exception as e:
                 print(f"[stream] Cache save error: {e}")
 
         yield "data: [DONE]\n\n"
 
-    return StreamingResponse(generate_sse(), media_type="text/event-stream")
+    return StreamingResponse(
+        generate_sse(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        }
+    )
 
 
 @app.post("/api/summary_full")
@@ -3036,9 +3055,10 @@ async def youtube_status():
 
 
 async def _ytdlp_search(q: str, maxResults: int = 20):
-    """Fallback search using yt-dlp when no YouTube API key is available."""
+    """Fallback search using yt-dlp when no YouTube API key is available.
+    Runs all search queries in parallel for faster results."""
     import asyncio
-    from datetime import datetime
+    from concurrent.futures import ThreadPoolExecutor
 
     search_queries = [
         f'{q} city council meeting',
@@ -3051,9 +3071,8 @@ async def _ytdlp_search(q: str, maxResults: int = 20):
 
     def _run_single_search(query, limit):
         try:
-            # Use discovered path, fallback to sys.executable -m yt_dlp
             cmd = [YT_DLP_PATH, f'ytsearch{limit}:{query}', '--dump-json', '--flat-playlist', '--no-warnings', '--quiet'] if YT_DLP_PATH else [sys.executable, '-m', 'yt_dlp', f'ytsearch{limit}:{query}', '--dump-json', '--flat-playlist', '--no-warnings', '--quiet']
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
             items = []
             for line in result.stdout.strip().split('\n'):
                 if not line:
@@ -3075,14 +3094,23 @@ async def _ytdlp_search(q: str, maxResults: int = 20):
                 except json.JSONDecodeError:
                     continue
             return items
+        except subprocess.TimeoutExpired:
+            print(f"[yt-dlp search] Timeout for: {query[:60]}")
+            return []
         except Exception as e:
             print(f"[yt-dlp search] Error: {e}")
             return []
 
+    # Run all yt-dlp searches in parallel
     loop = asyncio.get_event_loop()
-    for query in search_queries:
-        items = await loop.run_in_executor(None, _run_single_search, query, 8)
-        for item in items:
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [loop.run_in_executor(executor, _run_single_search, query, 8) for query in search_queries]
+        results = await asyncio.gather(*futures, return_exceptions=True)
+
+    for result in results:
+        if isinstance(result, Exception):
+            continue
+        for item in result:
             vid = item["id"]["videoId"]
             if vid and vid not in seen_ids:
                 seen_ids.add(vid)
@@ -5551,7 +5579,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                         result[ci] = (path, max(0, clip_padding))
                 return result
 
-            with ThreadPoolExecutor(max_workers=min(3, len(merged_groups))) as dl_pool:
+            with ThreadPoolExecutor(max_workers=min(5, len(merged_groups))) as dl_pool:
                 futures = [dl_pool.submit(_download_group, g) for g in merged_groups]
                 done_count = 0
                 for fut in as_completed(futures):
@@ -5936,7 +5964,7 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                     encode_tasks.append((i, cmd, clip_file, duration))
 
                 # Phase 2: Execute ffmpeg encodes in parallel (2-3 workers)
-                encode_workers = min(3, max(1, (os.cpu_count() or 4) // 2))
+                encode_workers = min(4, max(2, (os.cpu_count() or 4) // 2))
                 encode_results = {}  # i -> clip_file
                 encode_errors = []
 
@@ -6016,12 +6044,13 @@ def simple_job(job_id, vid, clips, format_type="combined", captions_enabled=True
                 # with matching settings (no intro/outro slides that may differ)
                 has_slides = bool(intro_title or outro_title)
                 if has_slides or len(clip_files_for_concat) <= 1:
-                    # Re-encode when mixing slides with video or single clip
+                    # Re-encode when mixing slides with video or single clip — use HW encoder if available
                     cmd = [
                         "ffmpeg", "-f", "concat", "-safe", "0",
                         "-i", concat_file,
-                        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                        "-c:v", HW_ENCODER, *HW_ENCODER_ARGS,
                         "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
+                        "-movflags", "+faststart",
                         output, "-y"
                     ]
                 else:
@@ -8087,8 +8116,20 @@ async def chat_with_meeting_stream(req: Request):
         full_text = ""
         try:
             for chunk in call_ai_api_stream(ctx["user_prompt"], max_tokens=500, model=model, temperature=0.7, system_prompt=ctx["system_prompt"]):
+                chunk = fix_brooklyn(chunk)
                 full_text += chunk
                 yield f"data: {json.dumps({'text': chunk})}\n\n"
+
+            # If no text was generated, fall back to non-streaming call
+            if not full_text.strip():
+                print(f"[Chat stream] No streaming output — trying non-streaming fallback")
+                answer = call_ai_api(ctx["user_prompt"], max_tokens=500, model=model, temperature=0.7, system_prompt=ctx["system_prompt"])
+                if answer:
+                    full_text = answer
+                    yield f"data: {json.dumps({'text': answer})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'error': 'No AI API key configured. Please set OPENAI_API_KEY or GOOGLE_API_KEY in your environment.'})}\n\n"
+                    return
 
             # Parse suggestions from the complete response
             clean_answer, suggestions = _parse_chat_suggestions(full_text)
@@ -8105,9 +8146,19 @@ async def chat_with_meeting_stream(req: Request):
             yield "data: [DONE]\n\n"
         except Exception as e:
             print(f"Chat stream error: {e}")
+            import traceback
+            traceback.print_exc()
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        }
+    )
 
 @app.post("/api/assistant/suggestions")
 async def get_chat_suggestions(req: Request):

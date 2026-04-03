@@ -1,8 +1,8 @@
 // ============================================================================
 // api.js - Community Highlighter API Client v4.0
 // ============================================================================
-// ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ All existing functions preserved
-// ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ New functions for enhanced features added
+// All existing functions preserved
+// New functions for enhanced features added
 // ============================================================================
 
 const BACKEND_URL = ""; // v5.0: Use relative URLs for deployment
@@ -203,7 +203,7 @@ export async function apiClearCache(videoId = null) {
 }
 
 // ============================================================================
-// ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â´ NEW: LIVE MEETING MODE APIs
+// NEW: LIVE MEETING MODE APIs
 // ============================================================================
 
 /**
@@ -225,7 +225,7 @@ export async function apiStartLiveMonitoring(data) {
 }
 
 // ============================================================================
-// ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â¬ NEW: AI MEETING ASSISTANT APIs
+// NEW: AI MEETING ASSISTANT APIs
 // ============================================================================
 
 /**
@@ -302,7 +302,31 @@ export function streamChatWithMeeting(data, onChunk, onDone, onError) {
       }
     }
     // Stream ended without done signal
-    if (fullText) onDone && onDone({ fullText, suggestions: [], stats: {} });
+    if (fullText) {
+      onDone && onDone({ fullText, suggestions: [], stats: {} });
+    } else {
+      // Stream completed but no text received — try non-streaming fallback
+      console.warn("[Chat] SSE stream returned no text, trying non-streaming fallback");
+      try {
+        const fallbackRes = await fetch(`${BACKEND_URL}/api/assistant/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+          signal: controller.signal,
+        });
+        if (fallbackRes.ok) {
+          const fallbackData = await fallbackRes.json();
+          if (fallbackData.answer) {
+            onChunk && onChunk(fallbackData.answer, fallbackData.answer);
+            onDone && onDone({ fullText: fallbackData.answer, suggestions: fallbackData.suggestions || [], stats: fallbackData.stats || {} });
+            return;
+          }
+        }
+      } catch (fbErr) {
+        console.warn("[Chat] Non-streaming fallback also failed:", fbErr);
+      }
+      onError && onError(new Error("No response received from AI. Please check your API keys are configured."));
+    }
   }).catch((err) => {
     if (err.name !== "AbortError") onError && onError(err);
   });
@@ -328,7 +352,7 @@ export async function apiChatSuggestions(data) {
 }
 
 // ============================================================================
-// ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂºÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â NEW: KNOWLEDGE BASE APIs
+// NEW: KNOWLEDGE BASE APIs
 // ============================================================================
 
 /**
@@ -399,7 +423,7 @@ export async function apiKnowledgeBaseStats() {
 }
 
 // ============================================================================
-// ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒâ€¦Ã‚Â½ NEW: CLIP PREVIEW API
+// NEW: CLIP PREVIEW API
 // ============================================================================
 
 /**
@@ -443,7 +467,7 @@ export async function apiClipThumbnails(data) {
 }
 
 // ============================================================================
-// ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â¬ LIVE CHAT APIs (PRESERVED)
+// LIVE CHAT APIs (PRESERVED)
 // ============================================================================
 
 export async function apiLiveChatMessages(data) {

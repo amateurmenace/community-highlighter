@@ -7,7 +7,7 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 - **Frontend**: React 19 + Vite + vite-plugin-pwa + recharts, built to `dist/`. Code-split into 4 chunks: ReelPlayer (6.7KB), App editor (343KB), recharts (384KB), React runtime (185KB). `src/App.jsx` (~11,500 lines) with inline sub-components. Extracted components in `src/components/`: AnimatedTagline, AboutPage, SummaryLoadingTerminal, SectionPreviews, GuidedTour, MeetingViz (QuestionFlowDiagram, FramingPluralityMap, DisagreementTopology, IssueLifecycle). ReelPlayer extracted to `src/ReelPlayer.jsx` for code-splitting.
 - **Backend**: FastAPI (`backend/app.py`, ~340KB monolith), served by Uvicorn on port 8000. 85+ API endpoints (includes SSE streaming, WebSocket job status)
 - **Desktop packaging**: PyInstaller bundles into macOS `.app` (signed+notarized) and Windows `.exe`
-- **Cloud deployment**: Render (https://community-highlighter.onrender.com/) — full video editor with Share Reel Link + Desktop Handoff (.chreel); cloud rendering enabled for short reels (max 5 clips / 2 min); full video download requires desktop app
+- **Cloud deployment**: Render (https://community-highlighter.onrender.com/) + Google Cloud Run — full video editor with Share Reel Link + Desktop Handoff (.chreel); cloud rendering enabled for short reels (max 5 clips / 2 min); full video download requires desktop app
 - **GitHub**: https://github.com/amateurmenace/community-highlighter
 - **Latest release**: https://github.com/amateurmenace/community-highlighter/releases/latest
 
@@ -35,7 +35,7 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 5. User selects reel style from collapsible "Choose Reel Style" panel: Decisions, Comments, Controversial, Budget, Actions, Social (with descriptions)
 6. **Top 5 of 10 AI highlights auto-load into dark timeline editor** — user can add remaining 5 from the Highlights panel (shows "✓ In timeline" / "+ Add" per highlight)
 7. User can also: search transcript (rich result cards with Watch/+Timeline/Context/Investigate), view analytics, build clips manually
-8. Export via labeled "Export N Clips as Video" button + "Download Full Video" button (muted, inline in secondary toolbar row next to Import) → backend renders via ffmpeg → MP4/ZIP download
+8. Export via "Export Highlight Reel" button (glows green on desktop when clips exist) + "Download Full Video" button (muted, inline in secondary toolbar row next to Import) → backend renders via ffmpeg → MP4/ZIP download
 9. **Celebration modal** with confetti animation on render completion, download history tracking
 10. **Share Reel Link** triggers background summary precomputation (`/api/share/precompute`) so viewers get instant cached results
 
@@ -69,7 +69,7 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
    - **Hero AI Reel Button** — full-width green gradient CTA "Make AI Highlight Reel" (loads top 5 of 10 highlights)
    - **Collapsible Reel Styles** — "🎬 Choose Reel Style" toggle reveals 6 cards with descriptions
    - **Compact Toolbar** — two-row layout adapts to environment:
-     - **Row 1 (primary)**: clip count + zoom | Export/Share button | View Your Edited Reel (teal, opens new tab) | Settings
+     - **Row 1 (primary)**: clip count + zoom | Export Highlight Reel button (green glow on desktop) | View Your Edited Reel (teal, opens new tab) | Settings
      - **Row 2 (secondary, when clips exist)**: Shuffle | Regenerate | Clear | Titles ON/OFF | Download Full Video (green glow animation) + resolution picker | Import .chreel (desktop)
      - **Cloud**: Share Reel Link (blue), View Your Edited Reel (teal), Render in Desktop App (green, downloads `.chreel`)
    - **Timeline Editor** — dark-themed NLE track with drag-to-reorder, trim handles, loading animation, tooltips, per-clip thumbnails (backend 360p segment extraction with YouTube fallback). Track min-height 260px, clip height 150px
@@ -260,8 +260,16 @@ When a shared reel link is opened with `?mode=play`, `main.jsx` detects this and
 - ~~No PDF summary export~~ **FIXED** (v8.3): `POST /api/export/pdf` generates branded one-page PDF with fpdf2
 - ~~No cross-meeting visualizations~~ **FIXED** (v8.3): TopicTrendsChart (recharts LineChart) + EntityNetworkGraph (SVG radial layout)
 - ~~Mobile layout issues~~ **FIXED** (v8.3): Comprehensive responsive pass — word cloud, timeline, settings drawer, nav pills, toolbar, viz cards
+- ~~Reel style cache collision~~ **FIXED** (v9.1): Cache key now includes `reelStyle` — different styles get separate caches
+- ~~SSE buffering on Render~~ **FIXED** (v9.1): Added `X-Accel-Buffering: no` + `Cache-Control: no-cache` headers, non-streaming fallback
+- ~~Chat streaming fails silently~~ **FIXED** (v9.1): Backend falls back to non-streaming `call_ai_api()` when stream yields nothing, frontend falls back to `/api/assistant/chat`
+- ~~YouTube API keys never recover~~ **FIXED** (v9.1): Exhausted keys auto-recover after 1-hour TTL (was permanent until restart)
+- ~~yt-dlp search sequential~~ **FIXED** (v9.1): All 3 search queries run in parallel via ThreadPoolExecutor(3)
+- ~~View in Transcript drift~~ **FIXED** (v9.1): Wall-clock elapsed time replaces naive `currentTime += 1`. Stops on user scroll. Extended to 5 min
+- ~~Concat uses slow preset~~ **FIXED** (v9.1): Concat-with-slides now uses HW encoder + faststart movflag
+- ~~Low parallelism~~ **FIXED** (v9.1): Download workers 3→5, encoding workers 3→4
 
-## Data Visualizations (v8.2, upgraded v9.0)
+## Data Visualizations (v8.2, upgraded v9.0, enhanced v9.1)
 
 All viz components work WITHOUT speaker attribution. They analyze text patterns, topic keywords, and structural indicators. Extracted to `src/components/MeetingViz.jsx`. All viz components link back to the video via clickable timestamps and "+ Clip" buttons.
 
@@ -270,8 +278,8 @@ All viz components work WITHOUT speaker attribution. They analyze text patterns,
 - **Disagreement Topology** (`DisagreementTopology`): Interactive SVG node-link diagram (750x420). Nodes show support (green) vs oppose (red) positions. **Hover** highlights connected edges, dims unrelated nodes, shows full text in floating tooltip with **Jump** and **+ Clip** buttons. Includes "How to Read" primer. Nodes 24px radius with 50-char text preview.
 - **Issue Lifecycle** (`IssueLifecycle`): Swimlane chart tracking topic progression (introduced → discussed → tabled → voted).
 - **Participation Tracker**: Dark-themed card with 4 metric boxes (public comments, questions, motions, duration), recharts BarChart activity timeline (click to jump), proportional stacked bar for discussion breakdown.
-- **Cross-Reference Network**: Client-side co-occurrence graph (entities + top keywords). Up to 25 draggable nodes, 40 edges. Color by type (person/place/org/keyword). Hover highlights connections. Drag nodes to rearrange.
-- **Moments of Disagreement** (`DisagreementTimeline`): Keyword scoring with 30s clustering, capped at 50 markers. Markers positioned on gradient track (16px height). Click marker for context + video jump + clip actions.
+- **Cross-Reference Network**: Client-side co-occurrence graph (entities + top keywords). Up to 25 draggable nodes, 40 edges. Color by type (person/place/org/keyword). Hover highlights connections. Drag nodes to rearrange. **v9.1**: Larger nodes (14-38px radius), readable labels below nodes (11px), bigger SVG canvas (700x620)
+- **Moments of Disagreement** (`DisagreementTimeline`): Three-tier keyword scoring (strong +3, moderate +2, modifier +1) with 30s clustering, capped at 50 markers. **v9.1**: Expanded from 18 to 50+ keywords — now catches "frustrated", "divided", "split vote", "pushback", "skeptical", "alarming", "vote no", "dissent", etc.
 - **Entities** (`MentionedEntitiesCard`): 16px entity names with type badge (PER/PLA/ORG colored indicators), 14px count badges.
 
 ### Removed (v9.0)
@@ -308,18 +316,25 @@ All viz components work WITHOUT speaker attribution. They analyze text patterns,
 - **YouTube Search**: Multi-query strategy searches 5 civic-focused queries in parallel via YouTube Data API
 - **yt-dlp Fallback**: Automatic fallback when no YouTube API key is configured OR when quota is exceeded (403 `quotaExceeded`). Backend detects `"QUOTA_EXCEEDED"` sentinel from failed queries and switches to `_ytdlp_search()` transparently
 - **Fallback user notice**: Yellow warning banner shown in results area: "Using direct YouTube search (API quota exceeded). Results may be less comprehensive." Response includes `fallback: true` and `fallback_reason` fields
-- **Civic Scoring**: Results scored by civic keyword density + channel/title matching for the queried municipality
+- **Civic Scoring** (v9.1): Results scored by 45+ civic keyword density (was 19) + channel/title matching for the queried municipality. Expanded keywords include ordinance, resolution, commissioner, supervisor, mayor, clerk, agenda, quorum, charter, variance, township, borough, county, district
 - **Tiered Sorting**: High civic relevance (3+ keywords) → medium (1-2) → low (0), then by date within tiers
+- **Loading skeleton** (v9.1): 3 shimmer placeholder cards shown during search
+- **YouTube API Key Rotation** (v9.1): Exhausted keys auto-recover after 1-hour TTL (was permanent until restart). `YOUTUBE_API_KEY_SECONDARY` now in render.yaml and Cloud Run deploy script
+- **yt-dlp Fallback** (v9.1): All 3 search queries run in parallel via ThreadPoolExecutor(3) (was sequential), timeout reduced 30s→20s
 - **Quota management**: YouTube Data API v3 daily quota is 10,000 units. Each civic search costs ~500 units (5 queries x 100 units). ~20 searches/day exhausts quota. Resets at midnight Pacific
 
-## AI Chat Streaming (v9.0)
+## AI Chat Streaming (v9.0, fixed v9.1)
 
 - **Backend**: `POST /api/assistant/chat/stream` — SSE streaming endpoint. Streams AI response token by token.
 - **Backend**: `_build_chat_context()` helper shared by streaming and non-streaming chat endpoints. Builds transcript context, stats, system/user prompts.
 - **Backend**: AI generates inline `SUGGESTIONS:` follow-ups parsed by `_parse_chat_suggestions()`
 - **Backend**: Uses `call_ai_api_stream()` — works with both OpenAI and Gemini models. Gemini gets 200K char context (vs 30K for OpenAI)
-- **Frontend**: `streamChatWithMeeting()` in `api.js` for SSE chat streaming
+- **Backend**: SSE responses include `X-Accel-Buffering: no` + `Cache-Control: no-cache` headers to prevent reverse proxy buffering (Render/Cloud Run)
+- **Backend**: If streaming yields no output, falls back to non-streaming `call_ai_api()` with clear error message when no API key configured
+- **Backend**: `fix_brooklyn()` applied to streaming chunks (fixes mojibake em-dashes in real-time)
+- **Frontend**: `streamChatWithMeeting()` in `api.js` for SSE chat streaming, with non-streaming fallback to `/api/assistant/chat` when SSE returns empty
 - **Frontend**: Rewritten `MeetingAssistant` component with streaming text display, conversation memory (passes full history), clickable `[MM:SS]` timestamp pills, auto-scroll, follow-up suggestion chips, clear chat, dark theme
+- **Frontend**: Close button renders proper `✕` character (was showing literal `\u2715`), subtitle text contrast improved (`#94a3b8`), singular/plural "question(s) asked"
 
 ## YouTube Search Cache (v9.0)
 
@@ -339,11 +354,14 @@ All viz components work WITHOUT speaker attribution. They analyze text patterns,
 - Enhanced match checking: returns mention count, multiple contexts (up to 3), tracks last_match_video/title
 - Browser Notification API integration — sends desktop notifications when topics found
 
-## Multi-language Translation (v9.0)
+## Multi-language Translation (v9.0, expanded v9.1)
 
+- **14 transcript languages** (v9.1): Spanish, French, Portuguese, Chinese, Arabic, Russian, Japanese, German, Vietnamese, Hindi, Korean, Italian, Thai, Polish
+- **14 summary languages** (v9.1): Same set plus German added to summary panel
 - Gemini translates up to 400K chars without truncation
 - OpenAI uses chunked parallel translation via ThreadPoolExecutor(3) for long transcripts
 - Returns `truncated` and `chunks` fields
+- Google Translate fallback for transcripts >30K chars (copies to clipboard + opens translate.google.com)
 
 ## Component Extraction (v9.0)
 
@@ -355,13 +373,15 @@ Extracted from `src/App.jsx` into `src/components/`:
 - `GuidedTour.jsx` — onboarding spotlight walkthrough
 - `MeetingViz.jsx` — QuestionFlowDiagram, FramingPluralityMap, DisagreementTopology, IssueLifecycle
 
-## Accessibility (v9.0)
+## Accessibility (v9.0, enhanced v9.1)
 
 - Skip-to-content link (visible on focus)
 - `role="dialog" aria-modal="true"` on all modals (CelebrationModal, shortcuts, export, entity popup, topic popup)
 - `role="region" aria-label` on settings drawer
 - `aria-label` on URL input, search input, clear button, language selector, subscription form inputs
 - Deprecated `onKeyPress` replaced with `onKeyDown`
+- `aria-live="polite" role="status"` on ProgressIndicator and toast container (v9.1) — screen readers announce progress and notifications
+- `prefers-reduced-motion` disables all animations including export glow (already in CSS)
 
 ## API Endpoints (78 total, Key Categories)
 
@@ -511,8 +531,9 @@ gh workflow run build-windows.yml -f version=v8.1.0
 | `OPENAI_API_KEY` | Yes | OpenAI API key for analysis |
 | `GOOGLE_API_KEY` | No | Google Gemini API key — enables Gemini 2.5 Flash model option (1M context, no chunking) |
 | `YOUTUBE_API_KEY` | No | Improves transcript fetching and civic meeting search (optional — falls back to yt-dlp without it) |
-| `YOUTUBE_API_KEY_SECONDARY` | No | Backup YouTube API key — auto-failover when primary quota is exceeded |
-| `CLOUD_MODE` | Auto | `true` on Render, `false` for desktop |
+| `YOUTUBE_API_KEY_SECONDARY` | No | Backup YouTube API key — auto-failover when primary quota is exceeded (1-hour TTL recovery) |
+| `YOUTUBE_API_KEY_3` .. `_10` | No | Additional YouTube API keys for larger rotation pools |
+| `CLOUD_MODE` | Auto | `true` on Render/Cloud Run, `false` for desktop |
 | `DESKTOP_MODE` | Auto | Set by app_launcher.py |
 | `FFMPEG_PATH` | Auto | Auto-detected from Homebrew (macOS) or PATH (Windows) |
 | `CACHE_MAX_AGE_HOURS` | No | Cache cleanup threshold in hours (default: 24) |
@@ -552,6 +573,6 @@ gh workflow run build-windows.yml -f version=v8.1.0
 
 ## Version
 
-Current: 9.0.0 (default AI: Gemini 2.5 Flash)
+Current: 9.1.0 (default AI: Gemini 2.5 Flash)
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)

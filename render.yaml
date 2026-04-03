@@ -17,8 +17,12 @@ services:
         value: "true"
       - key: OPENAI_API_KEY
         sync: false  # Set this in Render dashboard
+      - key: GOOGLE_API_KEY
+        sync: false  # Enables Gemini models (recommended)
       - key: YOUTUBE_API_KEY
-        sync: false  # Optional
+        sync: false  # Optional — improves transcript fetching & meeting search
+      - key: YOUTUBE_API_KEY_SECONDARY
+        sync: false  # Optional — auto-failover when primary quota exceeded
       - key: PYTHON_VERSION
         value: "3.11"
     healthCheckPath: /api/health

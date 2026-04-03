@@ -18,7 +18,7 @@ echo "=============================================="
 DEVELOPER_ID="Developer ID Application: Stephen Walter (6M536MV7GT)"  # UPDATE THIS
 NOTARIZE_PROFILE="community-highlighter-notarize"
 APP_NAME="Community Highlighter"
-VERSION="7.4.1"
+VERSION="8.1.0"
 DMG_NAME="CommunityHighlighter-${VERSION}-macOS"
 BUNDLE_ID="com.communityhighlighter.app"
 
