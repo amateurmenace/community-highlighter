@@ -41,8 +41,8 @@ COPY --from=frontend-build /app/dist/ dist/
 
 # Note: public/ assets are copied to dist/ by Vite during build
 
-# Create cache directories
-RUN mkdir -p backend/cache backend/ai_cache
+# Create cache and data directories
+RUN mkdir -p backend/cache backend/ai_cache /data/knowledge_base
 
 # Copy fonts for video text overlays
 COPY backend/fonts/ backend/fonts/
@@ -51,6 +51,7 @@ COPY backend/fonts/ backend/fonts/
 ENV CLOUD_MODE=true
 ENV PYTHONUNBUFFERED=1
 ENV NLTK_DATA=/usr/local/nltk_data
+ENV KB_PERSIST_DIR=/data/knowledge_base/chroma_db
 
 # Cloud Run sets PORT automatically (default 8080)
 ENV PORT=8080

@@ -5,7 +5,11 @@ services:
   - type: web
     name: community-highlighter
     runtime: python
-    plan: free
+    plan: starter
+    disk:
+      name: kb-data
+      mountPath: /data/knowledge_base
+      sizeGB: 1
     buildCommand: |
       pip install -r requirements.txt
       python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords'); nltk.download('punkt_tab')"
@@ -23,6 +27,8 @@ services:
         sync: false  # Optional — improves transcript fetching & meeting search
       - key: YOUTUBE_API_KEY_SECONDARY
         sync: false  # Optional — auto-failover when primary quota exceeded
+      - key: KB_PERSIST_DIR
+        value: "/data/knowledge_base/chroma_db"
       - key: PYTHON_VERSION
         value: "3.11"
     healthCheckPath: /api/health

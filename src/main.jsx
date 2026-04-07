@@ -2,9 +2,10 @@ import { StrictMode, lazy, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 
-// Code-split: ReelPlayer loads separately from the main editor bundle
+// Code-split: each route loads its own chunk
 const ReelPlayer = lazy(() => import('./ReelPlayer.jsx'))
 const App = lazy(() => import('./App.jsx'))
+const KBDashboard = lazy(() => import('./components/KBDashboard.jsx'))
 
 // Parse URL params once to determine which chunk to load
 function parseReelParams() {
@@ -24,7 +25,13 @@ function parseReelParams() {
   return { videoId, clips, showLabels };
 }
 
+function parseKBParams() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('page') === 'kb';
+}
+
 const reelParams = parseReelParams();
+const kbMode = parseKBParams();
 
 function Root() {
   if (reelParams) {
@@ -45,6 +52,21 @@ function Root() {
             window.location.search = '';
           }}
         />
+      </Suspense>
+    );
+  }
+
+  if (kbMode) {
+    return (
+      <Suspense fallback={
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0a0f1a', color: '#fff', fontFamily: 'system-ui' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 8, color: '#f1f5f9' }}>Knowledge Base</div>
+            <div style={{ fontSize: 13, color: '#64748b' }}>Loading analytics...</div>
+          </div>
+        </div>
+      }>
+        <KBDashboard onNavigateHome={() => { window.location.href = '/'; }} />
       </Suspense>
     );
   }

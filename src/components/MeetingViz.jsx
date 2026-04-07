@@ -1,16 +1,19 @@
-import { useState, useMemo } from "react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { useState, useMemo, useRef } from "react";
+import VizExportButton from './VizExportButton';
 
 const RECHARTS_COLORS = ['#1E7F63', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
 // ============================================================================
-// Question Flow Diagram — shows when questions clustered and actual question text
+// Question Flow — shows actual questions with patterns and similarity grouping
 // ============================================================================
 
 export function QuestionFlowDiagram({ sents, onTimestampClick, addToBasket, pad = 3 }) {
-  const [showQuestions, setShowQuestions] = useState(false);
+  const cardRef = useRef(null);
+  const [expandedType, setExpandedType] = useState(null);
+  const [showAll, setShowAll] = useState(false);
+
   const questionData = useMemo(() => {
-    if (!sents || sents.length < 10) return { questions: [], byQuality: {}, bySegment: [] };
+    if (!sents || sents.length < 10) return { questions: [], byQuality: {}, patterns: [], byType: {} };
     const totalDuration = sents[sents.length - 1].end;
     const questions = [];
 
@@ -24,7 +27,7 @@ export function QuestionFlowDiagram({ sents, onTimestampClick, addToBasket, pad 
           responseQuality = 'substantive';
         } else if (/\b(review|look into|follow up|get back|staff will|we'll consider|under consideration|working on)\b/.test(responseText)) {
           responseQuality = 'procedural';
-        } else if (responseWindow.length > 0 && responseWindow[0].text.length > 20) {
+        } else if (responseWindow[0].text.length > 20) {
           responseQuality = 'substantive';
         } else {
           responseQuality = 'deflection';
@@ -38,131 +41,300 @@ export function QuestionFlowDiagram({ sents, onTimestampClick, addToBasket, pad 
       else if (/\b(why|reason|rationale|explain|justif)\b/.test(qLower)) questionType = 'rationale';
       else if (/\b(what|plan|proposal|option|alternative)\b/.test(qLower)) questionType = 'information';
 
-      questions.push({ text: sent.text.slice(0, 150), time: sent.start, quality: responseQuality, type: questionType, pct: (sent.start / totalDuration) * 100 });
+      questions.push({ text: sent.text.slice(0, 200), time: sent.start, quality: responseQuality, type: questionType, pct: (sent.start / totalDuration) * 100 });
     });
 
     const byQuality = { substantive: 0, procedural: 0, deflection: 0, unanswered: 0 };
     const byType = {};
     questions.forEach(q => {
       byQuality[q.quality]++;
-      byType[q.type] = (byType[q.type] || 0) + 1;
+      if (!byType[q.type]) byType[q.type] = [];
+      byType[q.type].push(q);
     });
 
-    const bucketSize = totalDuration / 10;
-    const bySegment = Array.from({ length: 10 }, (_, i) => {
-      const start = i * bucketSize;
-      const end = (i + 1) * bucketSize;
-      const segQ = questions.filter(q => q.time >= start && q.time < end);
-      return {
-        label: `${Math.floor(start / 60)}m`,
-        total: segQ.length,
-        substantive: segQ.filter(q => q.quality === 'substantive').length,
-        procedural: segQ.filter(q => q.quality === 'procedural').length,
-        deflection: segQ.filter(q => q.quality === 'deflection').length,
-        unanswered: segQ.filter(q => q.quality === 'unanswered').length,
-      };
-    });
+    // Similarity grouping: find questions with >35% shared significant words
+    const getWords = (text) => {
+      const stop = new Set(['what','when','where','which','that','this','they','them','their','there','have','been','were','does','with','from','will','about','would','could','should','your','just','than','then','also','very','some','more']);
+      return new Set((text.toLowerCase().match(/\b[a-z]{3,}\b/g) || []).filter(w => !stop.has(w)));
+    };
+    const patterns = [];
+    const used = new Set();
+    for (let i = 0; i < questions.length; i++) {
+      if (used.has(i)) continue;
+      const wordsA = getWords(questions[i].text);
+      if (wordsA.size < 2) continue;
+      const group = [i];
+      for (let j = i + 1; j < questions.length; j++) {
+        if (used.has(j)) continue;
+        const wordsB = getWords(questions[j].text);
+        if (wordsB.size < 2) continue;
+        const intersection = new Set([...wordsA].filter(w => wordsB.has(w)));
+        const union = new Set([...wordsA, ...wordsB]);
+        if (union.size > 0 && intersection.size / union.size > 0.35) {
+          group.push(j);
+          used.add(j);
+        }
+      }
+      if (group.length >= 2) {
+        used.add(i);
+        patterns.push({ questions: group.map(idx => questions[idx]), sharedWords: [...wordsA].slice(0, 5) });
+      }
+    }
+    patterns.sort((a, b) => b.questions.length - a.questions.length);
 
-    return { questions, byQuality, byType: Object.entries(byType).sort((a, b) => b[1] - a[1]), bySegment, total: questions.length };
+    return { questions, byQuality, byType, patterns, total: questions.length };
   }, [sents]);
 
   if (questionData.total < 3) return null;
-  const qualityColors = { substantive: '#22c55e', procedural: '#f59e0b', deflection: '#ef4444', unanswered: '#94a3b8' };
 
+  const qualityColors = { substantive: '#22c55e', procedural: '#f59e0b', deflection: '#ef4444', unanswered: '#94a3b8' };
+  const typeIcons = { budget: '$', timeline: 'T', accountability: 'A', rationale: '?', information: 'i', general: 'Q' };
+  const typeColors = { budget: '#22c55e', timeline: '#3b82f6', accountability: '#8b5cf6', rationale: '#f59e0b', information: '#14b8a6', general: '#64748b' };
   const formatTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  const typeEntries = Object.entries(questionData.byType).sort((a, b) => b[1].length - a[1].length);
+  const visibleLimit = showAll ? 999 : 30;
+
+  // SVG donut chart data for question types
+  const donutData = useMemo(() => {
+    const entries = typeEntries.filter(([, qs]) => qs.length > 0);
+    const total = entries.reduce((sum, [, qs]) => sum + qs.length, 0);
+    let cumAngle = 0;
+    return entries.map(([type, qs]) => {
+      const frac = qs.length / total;
+      const startAngle = cumAngle;
+      cumAngle += frac * 360;
+      return { type, count: qs.length, frac, startAngle, endAngle: cumAngle, color: typeColors[type] };
+    });
+  }, [typeEntries]);
+
+  // Helper: SVG arc path for donut segment
+  const arcPath = (cx, cy, r, inner, startDeg, endDeg) => {
+    const toRad = d => (d - 90) * Math.PI / 180;
+    const clampedEnd = endDeg - startDeg >= 360 ? startDeg + 359.99 : endDeg;
+    const x1 = cx + r * Math.cos(toRad(startDeg)), y1 = cy + r * Math.sin(toRad(startDeg));
+    const x2 = cx + r * Math.cos(toRad(clampedEnd)), y2 = cy + r * Math.sin(toRad(clampedEnd));
+    const ix1 = cx + inner * Math.cos(toRad(clampedEnd)), iy1 = cy + inner * Math.sin(toRad(clampedEnd));
+    const ix2 = cx + inner * Math.cos(toRad(startDeg)), iy2 = cy + inner * Math.sin(toRad(startDeg));
+    const large = clampedEnd - startDeg > 180 ? 1 : 0;
+    return `M${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} L${ix1},${iy1} A${inner},${inner} 0 ${large} 0 ${ix2},${iy2} Z`;
+  };
+
+  // Selected type for filtering the question list below
+  const [selectedType, setSelectedType] = useState(null);
+  const [hoveredType, setHoveredType] = useState(null);
+  const [showQuestions, setShowQuestions] = useState(false);
+  const activeType = hoveredType || selectedType;
+
+  // Filtered questions based on selected type
+  const displayQuestions = useMemo(() => {
+    if (!selectedType) return questionData.questions;
+    return questionData.byType[selectedType] || [];
+  }, [selectedType, questionData]);
 
   return (
-    <div className="viz-card" style={{ gridColumn: '1 / -1' }}>
+    <div ref={cardRef} className="viz-card" style={{ gridColumn: '1 / -1', position: 'relative' }}>
+      <VizExportButton targetRef={cardRef} filename="question-flow" />
       <h3>Question Flow</h3>
-      <p className="viz-desc">{questionData.total} questions detected. Shows when questions clustered, what types were asked, and whether they received substantive answers.</p>
+      <p className="viz-desc">{questionData.total} questions detected. Click a question type to filter. Click any timestamp to jump to that moment.</p>
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        {Object.entries(qualityColors).map(([quality, color]) => (
-          <div key={quality} style={{ padding: '8px 14px', background: `${color}15`, borderRadius: 8, borderLeft: `3px solid ${color}` }}>
-            <div style={{ fontSize: 20, fontWeight: 700, color }}>{questionData.byQuality[quality]}</div>
-            <div style={{ fontSize: 11, color: '#64748b' }}>{quality.charAt(0).toUpperCase() + quality.slice(1)}</div>
-          </div>
-        ))}
+      {/* ===== QUESTION TYPE VISUALIZATION — top hero section ===== */}
+      <div style={{ display: 'flex', gap: 24, marginBottom: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+
+        {/* Donut chart */}
+        <div style={{ position: 'relative', width: 180, height: 180, flexShrink: 0 }}>
+          <svg viewBox="0 0 180 180" style={{ width: 180, height: 180 }}>
+            {donutData.map((seg) => (
+              <path key={seg.type} d={arcPath(90, 90, 80, 50, seg.startAngle, seg.endAngle)}
+                fill={seg.color}
+                opacity={activeType && activeType !== seg.type ? 0.25 : 0.85}
+                stroke="#fff" strokeWidth="1.5"
+                style={{ cursor: 'pointer', transition: 'opacity 0.2s' }}
+                onMouseEnter={() => setHoveredType(seg.type)}
+                onMouseLeave={() => setHoveredType(null)}
+                onClick={() => setSelectedType(selectedType === seg.type ? null : seg.type)}
+              >
+                <title>{`${seg.type}: ${seg.count} questions (${Math.round(seg.frac * 100)}%)`}</title>
+              </path>
+            ))}
+            {/* Center label */}
+            <text x="90" y="84" textAnchor="middle" fill="#1e293b" fontSize="22" fontWeight="800">{questionData.total}</text>
+            <text x="90" y="102" textAnchor="middle" fill="#94a3b8" fontSize="10">questions</text>
+          </svg>
+        </div>
+
+        {/* Type cards — interactive legend */}
+        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 8, minWidth: 0 }}>
+          {donutData.map((seg) => {
+            const isActive = selectedType === seg.type;
+            const qs = questionData.byType[seg.type] || [];
+            const substCount = qs.filter(q => q.quality === 'substantive').length;
+            const deflectCount = qs.filter(q => q.quality === 'deflection' || q.quality === 'unanswered').length;
+            return (
+              <div key={seg.type}
+                onClick={() => setSelectedType(isActive ? null : seg.type)}
+                onMouseEnter={() => setHoveredType(seg.type)}
+                onMouseLeave={() => setHoveredType(null)}
+                style={{
+                  padding: '10px 12px', borderRadius: 10, cursor: 'pointer', transition: 'all 0.2s',
+                  background: isActive ? `${seg.color}15` : '#f8fafc',
+                  border: `2px solid ${isActive ? seg.color : activeType === seg.type ? `${seg.color}60` : '#e2e8f0'}`,
+                  transform: isActive ? 'scale(1.03)' : 'scale(1)',
+                }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                  <span style={{
+                    display: 'inline-flex', width: 26, height: 26, alignItems: 'center', justifyContent: 'center',
+                    borderRadius: '50%', fontSize: 13, fontWeight: 800, background: `${seg.color}25`, color: seg.color,
+                  }}>{typeIcons[seg.type]}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', textTransform: 'capitalize' }}>{seg.type}</span>
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: seg.color, lineHeight: 1 }}>{seg.count}</div>
+                {/* Quality breakdown mini-bar */}
+                <div style={{ display: 'flex', gap: 1, height: 4, borderRadius: 2, overflow: 'hidden', marginTop: 6, background: '#e2e8f0' }}>
+                  {substCount > 0 && <div style={{ width: `${(substCount / seg.count) * 100}%`, background: '#22c55e' }} />}
+                  {qs.filter(q => q.quality === 'procedural').length > 0 && <div style={{ width: `${(qs.filter(q => q.quality === 'procedural').length / seg.count) * 100}%`, background: '#f59e0b' }} />}
+                  {deflectCount > 0 && <div style={{ width: `${(deflectCount / seg.count) * 100}%`, background: '#ef4444' }} />}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 10, color: '#94a3b8' }}>
+                  <span>{substCount} answered</span>
+                  <span>{deflectCount} unanswered</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      <ResponsiveContainer width="100%" height={180}>
-        <BarChart data={questionData.bySegment} margin={{ left: 0, right: 10, top: 5, bottom: 5 }}>
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#64748b' }} />
-          <YAxis tick={{ fontSize: 10, fill: '#64748b' }} allowDecimals={false} />
-          <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #475569', borderRadius: 8, color: '#e2e8f0', fontSize: 12 }} />
-          <Bar dataKey="substantive" stackId="q" fill="#22c55e" name="Substantive" radius={[0, 0, 0, 0]} />
-          <Bar dataKey="procedural" stackId="q" fill="#f59e0b" name="Procedural" />
-          <Bar dataKey="deflection" stackId="q" fill="#ef4444" name="Deflection" />
-          <Bar dataKey="unanswered" stackId="q" fill="#94a3b8" name="Unanswered" radius={[2, 2, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
-
-      {questionData.byType.length > 1 && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-          {questionData.byType.map(([type, count]) => (
-            <span key={type} style={{ padding: '3px 10px', background: '#f1f5f9', borderRadius: 12, fontSize: 11, color: '#475569', fontWeight: 500 }}>
-              {type}: {count}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Actual questions list */}
-      <div style={{ marginTop: 16 }}>
-        <button onClick={() => setShowQuestions(!showQuestions)} style={{
-          background: 'none', border: '1px solid #e2e8f0', borderRadius: 6, padding: '6px 14px',
-          fontSize: 12, color: '#475569', cursor: 'pointer', fontWeight: 600,
-        }}>
-          {showQuestions ? 'Hide' : 'Show'} Questions ({questionData.total})
-        </button>
-        {showQuestions && (
-          <div style={{ marginTop: 10 }}>
-            {/* Visual timeline strip showing question positions */}
-            <div style={{ position: 'relative', height: 20, background: '#f1f5f9', borderRadius: 10, marginBottom: 10, overflow: 'hidden' }}>
-              {questionData.questions.map((q, i) => (
-                <div key={i}
-                  onClick={() => onTimestampClick && onTimestampClick(q.time)}
-                  style={{
-                    position: 'absolute', left: `${q.pct}%`, top: 2, width: 8, height: 16,
-                    borderRadius: 4, background: qualityColors[q.quality], opacity: 0.7, cursor: 'pointer',
-                    transform: 'translateX(-4px)', transition: 'opacity 0.15s',
-                  }}
-                  title={`${formatTime(q.time)}: ${q.text.slice(0, 60)}`}
-                  onMouseOver={e => e.target.style.opacity = '1'}
-                  onMouseOut={e => e.target.style.opacity = '0.7'}
-                />
-              ))}
-            </div>
-          </div>
+      {/* Quality legend */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap', fontSize: 11 }}>
+        {Object.entries(qualityColors).map(([k, c]) => (
+          <span key={k} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: c, display: 'inline-block' }} />
+            <span style={{ color: '#64748b', textTransform: 'capitalize' }}>{k}</span>
+          </span>
+        ))}
+        {selectedType && (
+          <button onClick={() => setSelectedType(null)} style={{ marginLeft: 'auto', fontSize: 11, color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+            Clear filter
+          </button>
         )}
-        {showQuestions && (
-          <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {questionData.questions.slice(0, 20).map((q, i) => (
+      </div>
+
+      {/* Timeline strip — colored by quality, filterable */}
+      <div style={{ position: 'relative', height: 28, background: '#f1f5f9', borderRadius: 14, marginBottom: 20, overflow: 'hidden' }}>
+        {questionData.questions.map((q, i) => {
+          const dimmed = selectedType && q.type !== selectedType;
+          return (
+            <div key={i}
+              onClick={() => onTimestampClick && onTimestampClick(q.time)}
+              style={{
+                position: 'absolute', left: `${q.pct}%`, top: 3, width: 10, height: 22,
+                borderRadius: 5, background: dimmed ? '#cbd5e1' : qualityColors[q.quality],
+                opacity: dimmed ? 0.2 : 0.75, cursor: 'pointer',
+                transform: 'translateX(-5px)', transition: 'opacity 0.2s, background 0.2s',
+                border: activeType === q.type ? `2px solid ${typeColors[q.type]}` : 'none',
+              }}
+              title={`[${q.type}] ${formatTime(q.time)}: ${q.text.slice(0, 60)}`}
+              onMouseOver={e => { if (!dimmed) e.currentTarget.style.opacity = '1'; }}
+              onMouseOut={e => { if (!dimmed) e.currentTarget.style.opacity = '0.75'; }}
+            />
+          );
+        })}
+      </div>
+
+      {/* Expand/collapse toggle for full question list */}
+      <button onClick={() => { setShowQuestions(!showQuestions); if (!showQuestions) setShowAll(false); }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '10px 14px',
+          background: showQuestions ? '#f0fdf4' : '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10,
+          cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#1e293b', transition: 'all 0.15s', marginBottom: showQuestions ? 12 : 0,
+        }}>
+        <span style={{ color: '#94a3b8', fontSize: 12 }}>{showQuestions ? '▼' : '▶'}</span>
+        {showQuestions ? 'Hide' : 'Show'} All Questions
+        {selectedType && <span style={{ fontSize: 11, color: typeColors[selectedType], fontWeight: 500 }}> — filtered to {selectedType}</span>}
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>{displayQuestions.length} question{displayQuestions.length !== 1 ? 's' : ''}</span>
+        {questionData.patterns.length > 0 && !selectedType && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 8, background: '#8b5cf615', color: '#8b5cf6', fontWeight: 600 }}>{questionData.patterns.length} patterns</span>}
+      </button>
+
+      {showQuestions && (
+        <div>
+          {/* Repeated Patterns section */}
+          {questionData.patterns.length > 0 && !selectedType && (
+            <div style={{ marginBottom: 16 }}>
+              <h4 style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+                Repeated Patterns
+                <span style={{ fontSize: 11, fontWeight: 500, color: '#8b5cf6', background: '#8b5cf610', padding: '2px 8px', borderRadius: 8 }}>
+                  Similar questions asked multiple times
+                </span>
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {questionData.patterns.slice(0, 5).map((pattern, pi) => (
+                  <div key={pi} style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 10, padding: '12px 16px' }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#7c3aed', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ background: '#8b5cf6', color: '#fff', borderRadius: 10, padding: '1px 8px', fontSize: 10, fontWeight: 700 }}>
+                        Asked {pattern.questions.length}x
+                      </span>
+                      <span style={{ color: '#a78bfa', fontWeight: 500 }}>about: {pattern.sharedWords.join(', ')}</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {pattern.questions.map((q, qi) => (
+                        <div key={qi} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12 }}>
+                          <button onClick={() => onTimestampClick && onTimestampClick(q.time)} style={{
+                            fontFamily: 'monospace', fontSize: 10, color: '#4ade80', background: '#166534',
+                            border: 'none', borderRadius: 4, padding: '2px 6px', cursor: 'pointer', whiteSpace: 'nowrap',
+                          }}>{formatTime(q.time)}</button>
+                          <span style={{ flex: 1, color: '#334155', lineHeight: 1.4 }}>{q.text}</span>
+                          <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 6, background: `${qualityColors[q.quality]}20`, color: qualityColors[q.quality], fontWeight: 600, whiteSpace: 'nowrap' }}>
+                            {q.quality}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Questions list — filtered by selected type */}
+          <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+            {selectedType && (
+              <div style={{ fontSize: 13, fontWeight: 700, color: typeColors[selectedType], marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, textTransform: 'capitalize' }}>
+                <span style={{ display: 'inline-flex', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: '50%', fontSize: 11, fontWeight: 800, background: `${typeColors[selectedType]}20`, color: typeColors[selectedType] }}>
+                  {typeIcons[selectedType]}
+                </span>
+                {selectedType} Questions ({displayQuestions.length})
+              </div>
+            )}
+            {displayQuestions.slice(0, visibleLimit).map((q, i) => (
               <div key={i} style={{
-                display: 'flex', gap: 10, padding: '8px 12px', background: '#f8fafc', borderRadius: 8,
+                display: 'flex', gap: 8, padding: '7px 10px', marginBottom: 4, background: '#f8fafc', borderRadius: 8,
                 borderLeft: `3px solid ${qualityColors[q.quality]}`, alignItems: 'flex-start', fontSize: 13,
               }}>
                 <button onClick={() => onTimestampClick && onTimestampClick(q.time)} style={{
                   fontFamily: 'monospace', fontSize: 11, color: '#4ade80', background: '#166534',
                   border: 'none', borderRadius: 4, padding: '2px 6px', cursor: 'pointer', whiteSpace: 'nowrap', marginTop: 1,
-                }} title="Jump to this moment in the video">
-                  {formatTime(q.time)}
-                </button>
-                <span style={{ flex: 1, color: '#1e293b', lineHeight: 1.4 }} title={q.text}>
-                  {q.text}
-                </span>
+                }}>{formatTime(q.time)}</button>
+                <span style={{
+                  display: 'inline-flex', width: 20, height: 20, alignItems: 'center', justifyContent: 'center',
+                  borderRadius: '50%', fontSize: 10, fontWeight: 700, background: `${typeColors[q.type]}20`, color: typeColors[q.type], flexShrink: 0, marginTop: 1,
+                }}>{typeIcons[q.type]}</span>
+                <span style={{ flex: 1, color: '#1e293b', lineHeight: 1.4 }}>{q.text}</span>
                 <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 8, background: `${qualityColors[q.quality]}20`, color: qualityColors[q.quality], fontWeight: 600, whiteSpace: 'nowrap' }}>
                   {q.quality}
                 </span>
                 <button onClick={() => addToBasket && addToBasket({ start: Math.max(0, q.time - pad), end: q.time + 15, label: q.text.slice(0, 50) })}
                   style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: '#f59e0b', color: '#fff', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: 600 }}
-                  title="Add this question to the clip timeline"
                 >+ Clip</button>
               </div>
             ))}
+            {displayQuestions.length > visibleLimit && !showAll && (
+              <button onClick={() => setShowAll(true)} style={{ background: 'none', border: 'none', fontSize: 12, color: '#3b82f6', cursor: 'pointer', padding: '8px 10px', fontWeight: 600 }}>
+                Show all {displayQuestions.length} questions...
+              </button>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -172,6 +344,7 @@ export function QuestionFlowDiagram({ sents, onTimestampClick, addToBasket, pad 
 // ============================================================================
 
 export function FramingPluralityMap({ sents, entities, onTimestampClick }) {
+  const cardRef = useRef(null);
   const [expandedTopic, setExpandedTopic] = useState(null);
   const framingData = useMemo(() => {
     if (!sents || sents.length < 20) return [];
@@ -229,7 +402,8 @@ export function FramingPluralityMap({ sents, entities, onTimestampClick }) {
   if (framingData.length === 0) return null;
 
   return (
-    <div className="viz-card" style={{ gridColumn: '1 / -1' }}>
+    <div ref={cardRef} className="viz-card" style={{ gridColumn: '1 / -1', position: 'relative' }}>
+      <VizExportButton targetRef={cardRef} filename="framing-plurality-map" />
       <h3>Framing Plurality Map</h3>
       <p className="viz-desc">A single issue is simultaneously many things. Each spoke shows a lens through which this topic was discussed.</p>
       <div style={{ background: '#f0fdf4', borderRadius: 8, padding: '12px 16px', marginBottom: 16, borderLeft: '3px solid #1E7F63' }}>
@@ -311,6 +485,7 @@ export function FramingPluralityMap({ sents, entities, onTimestampClick }) {
 // ============================================================================
 
 export function DisagreementTopology({ sents, onTimestampClick, addToBasket, pad = 3 }) {
+  const cardRef = useRef(null);
   const [hoveredNode, setHoveredNode] = useState(null);
   const topology = useMemo(() => {
     if (!sents || sents.length < 20) return { nodes: [], edges: [] };
@@ -329,8 +504,22 @@ export function DisagreementTopology({ sents, onTimestampClick, addToBasket, pad
       else if (supportWords.some(w => textLower.includes(w))) stance = 'support';
       else return;
 
-      const topicWords = textLower.match(/\b(budget|school|housing|development|traffic|parking|zoning|project|building|property|tax|safety|police|water|sewer|park|street|plan|proposal|ordinance|policy|program|grant|fund)\b/);
-      const topic = topicWords ? topicWords[1] : 'general';
+      // Tier 1: Expanded civic topic keywords (~100+)
+      const topicWords = textLower.match(/\b(budget|school|housing|development|traffic|parking|zoning|project|building|property|tax|safety|police|water|sewer|park|street|plan|proposal|ordinance|policy|program|grant|fund|road|bridge|sidewalk|library|hospital|transit|bus|train|construction|permit|variance|density|commercial|residential|affordable|rent|homeless|shelter|environment|pollution|stormwater|flood|waste|recycling|energy|solar|playground|recreation|senior|youth|education|curriculum|election|ballot|resolution|revenue|debt|bond|levy|contract|bid|audit|transparency|ethics|annexation|equity|diversity|accessibility|disability|emergency|disaster|climate|pedestrian|bicycle|historic|landmark|noise|code|compliance|infrastructure|maintenance|renovation|demolition|crosswalk|intersection|speed|commuter|enrollment|staffing|overtime|pension|insurance|healthcare|childcare|broadband|internet|stormwater|drainage|wetland|conservation|composting|solar|wind|electric|vehicle|charging|rideshare)\b/);
+      // Tier 2: Extract object of opinion verb
+      let topic = topicWords ? topicWords[1] : null;
+      if (!topic) {
+        const objectMatch = textLower.match(/(?:support|oppose|against|about|regarding|on the|with the|for the|issue with)\s+(?:the\s+)?(\w{4,}(?:\s+\w{4,})?)/);
+        if (objectMatch) topic = objectMatch[1];
+      }
+      // Tier 3: Longest meaningful word as topic
+      if (!topic) {
+        const stopwords = new Set(['this','that','they','them','their','there','these','those','have','been','were','what','when','where','which','while','would','could','should','about','after','before','because','between','through','during','under','above','with','from','into','than','then','some','such','very','also','just','more','most','only','other','each','every','both','many','much','here','will','your','does','done','like','make','made','want','need','know','going','come','take','give','keep','think','said','says','really','actually','certainly','believe','people','someone','something','anything','everyone','anybody','nothing','everything']);
+        const words = textLower.match(/\b[a-z]{4,}\b/g) || [];
+        const meaningful = words.filter(w => !stopwords.has(w));
+        if (meaningful.length > 0) topic = meaningful.reduce((a, b) => a.length >= b.length ? a : b);
+      }
+      if (!topic) topic = 'general';
 
       positions.push({ text: sent.text.slice(0, 120), time: sent.start, stance, topic });
     });
@@ -375,7 +564,8 @@ export function DisagreementTopology({ sents, onTimestampClick, addToBasket, pad
   ) : new Set();
 
   return (
-    <div className="viz-card" style={{ gridColumn: '1 / -1', position: 'relative' }}>
+    <div ref={cardRef} className="viz-card" style={{ gridColumn: '1 / -1', position: 'relative' }}>
+      <VizExportButton targetRef={cardRef} filename="disagreement-topology" />
       <h3>Disagreement Topology</h3>
       <p className="viz-desc">The shape of the controversy. Each node is a stated position; red lines connect opposing stances on the same topic.</p>
       <div style={{ background: '#fef2f2', borderRadius: 8, padding: '12px 16px', marginBottom: 16, borderLeft: '3px solid #ef4444' }}>
@@ -428,7 +618,7 @@ export function DisagreementTopology({ sents, onTimestampClick, addToBasket, pad
                 stroke={isHovered ? '#1e293b' : 'none'} strokeWidth={2}
                 style={{ transition: 'r 0.2s, opacity 0.2s' }}
               />
-              <text x={pos.x} y={pos.y + 4} textAnchor="middle" fontSize={11} fill="white" fontWeight={700}>{node.topic.slice(0, 10)}</text>
+              <text x={pos.x} y={pos.y + 4} textAnchor="middle" fontSize={10} fill="white" fontWeight={700}>{(node.topic.charAt(0).toUpperCase() + node.topic.slice(1)).slice(0, 12)}</text>
               {/* Text preview above node */}
               <text x={pos.x} y={pos.y - 32} textAnchor="middle" fontSize={10} fill="#475569" fontWeight={500}>
                 {node.text.slice(0, 50)}{node.text.length > 50 ? '...' : ''}
@@ -469,101 +659,4 @@ export function DisagreementTopology({ sents, onTimestampClick, addToBasket, pad
   );
 }
 
-// ============================================================================
-// Issue Lifecycle — track how topics progress through stages within a meeting
-// ============================================================================
-
-export function IssueLifecycle({ sents }) {
-  const issues = useMemo(() => {
-    if (!sents || sents.length < 10) return [];
-    const totalDuration = sents[sents.length - 1].end;
-    const stageKeywords = {
-      introduced: ['new business', 'introduce', 'first time', 'bring up', 'raising', 'item number', 'agenda item', 'next item'],
-      discussed: ['discuss', 'debate', 'consider', 'review', 'talk about', 'question about', 'thoughts on', 'comment on'],
-      tabled: ['table', 'defer', 'postpone', 'continue', 'next meeting', 'revisit', 'push back', 'delay'],
-      voted: ['vote', 'motion', 'approve', 'deny', 'all in favor', 'aye', 'nay', 'pass', 'second', 'carried', 'adopted'],
-    };
-    const stageColors = { introduced: '#3b82f6', discussed: '#f59e0b', tabled: '#f97316', voted: '#22c55e' };
-    const stageLabels = { introduced: 'Introduced', discussed: 'Discussed', tabled: 'Tabled', voted: 'Voted' };
-
-    const issueSegments = [];
-    let currentIssue = null;
-    sents.forEach((sent) => {
-      const text = sent.text.toLowerCase();
-      if (stageKeywords.introduced.some(kw => text.includes(kw)) && text.length > 20) {
-        if (currentIssue && currentIssue.stages.length > 0) {
-          issueSegments.push(currentIssue);
-        }
-        currentIssue = {
-          label: sent.text.slice(0, 80),
-          startTime: sent.start,
-          stages: [{ stage: 'introduced', time: sent.start, pct: (sent.start / totalDuration) * 100 }]
-        };
-      }
-      if (currentIssue) {
-        for (const [stage, keywords] of Object.entries(stageKeywords)) {
-          if (stage === 'introduced') continue;
-          if (keywords.some(kw => text.includes(kw))) {
-            const lastStage = currentIssue.stages[currentIssue.stages.length - 1];
-            if (lastStage.stage !== stage && sent.start - lastStage.time > 10) {
-              currentIssue.stages.push({ stage, time: sent.start, pct: (sent.start / totalDuration) * 100 });
-            }
-          }
-        }
-      }
-    });
-    if (currentIssue && currentIssue.stages.length > 0) issueSegments.push(currentIssue);
-
-    return issueSegments.filter(i => i.stages.length >= 2).slice(0, 8).map(issue => ({
-      ...issue, stageColors, stageLabels
-    }));
-  }, [sents]);
-
-  if (issues.length === 0) return null;
-
-  return (
-    <div className="viz-card" style={{ gridColumn: '1 / -1' }}>
-      <h3>Issue Lifecycle</h3>
-      <p className="viz-desc">Track how topics progress through stages within this meeting. Each row is an issue; nodes show stages reached.</p>
-      <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
-        {[['introduced', '#3b82f6'], ['discussed', '#f59e0b'], ['tabled', '#f97316'], ['voted', '#22c55e']].map(([stage, color]) => (
-          <span key={stage} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
-            <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, display: 'inline-block' }} />
-            {stage.charAt(0).toUpperCase() + stage.slice(1)}
-          </span>
-        ))}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {issues.map((issue, idx) => (
-          <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #e2e8f0' }}>
-            <div style={{ width: 180, fontSize: 11, color: '#334155', fontWeight: 500, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={issue.label}>
-              {issue.label.slice(0, 50)}{issue.label.length > 50 ? '...' : ''}
-            </div>
-            <div style={{ flex: 1, position: 'relative', height: 24 }}>
-              <div style={{ position: 'absolute', top: 11, left: 0, right: 0, height: 2, background: '#e2e8f0' }} />
-              {issue.stages.map((stage, sIdx) => (
-                <div key={sIdx} style={{
-                  position: 'absolute', left: `${stage.pct}%`, top: 3,
-                  width: 18, height: 18, borderRadius: '50%',
-                  background: issue.stageColors[stage.stage],
-                  border: '2px solid white', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                  transform: 'translateX(-9px)', cursor: 'default'
-                }} title={`${issue.stageLabels[stage.stage]} at ${Math.floor(stage.time / 60)}:${String(Math.floor(stage.time % 60)).padStart(2, '0')}`} />
-              ))}
-              {issue.stages.length > 1 && (
-                <div style={{
-                  position: 'absolute', top: 11, left: `${issue.stages[0].pct}%`,
-                  width: `${issue.stages[issue.stages.length - 1].pct - issue.stages[0].pct}%`,
-                  height: 3, background: 'linear-gradient(90deg, #3b82f6, #22c55e)', borderRadius: 2
-                }} />
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingLeft: 188, fontSize: 10, color: '#94a3b8' }}>
-        <span>Start</span><span>25%</span><span>50%</span><span>75%</span><span>End</span>
-      </div>
-    </div>
-  );
-}
+// IssueLifecycle removed in v9.2
