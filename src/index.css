@@ -1095,13 +1095,28 @@ header .right {
   overflow: visible;
 }
 
+.disagreement-timeline .timeline-container {
+  position: relative;
+  height: 60px;
+  overflow: visible;
+}
+
 .disagreement-timeline .timeline-track {
   position: absolute !important;
-  height: 16px;
+  display: block !important;
+  width: 100% !important;
+  height: 16px !important;
+  min-height: 16px !important;
   background: linear-gradient(90deg, #fef2f2 0%, #fee2e2 50%, #fef2f2 100%) !important;
   border-radius: 8px;
   top: 12px;
   overflow: visible !important;
+  padding: 0 !important;
+  gap: 0 !important;
+}
+
+.disagreement-timeline .timeline-track::before {
+  display: none !important;
 }
 
 .timeline-track {
@@ -1171,8 +1186,8 @@ header .right {
 }
 
 /* Disagreement Timeline */
-.disagreement-marker {
-  position: absolute;
+.disagreement-timeline .disagreement-marker {
+  position: absolute !important;
   cursor: pointer;
   transform: translateX(-50%);
   top: 50%;
@@ -1190,14 +1205,19 @@ header .right {
   z-index: 10;
 }
 
-.marker-pulse {
+.disagreement-timeline .marker-pulse {
   position: absolute;
   width: 100%;
   height: 100%;
   border-radius: 50%;
   background: #ff4444;
-  animation: pulse 2s infinite;
+  animation: disagreementPulse 2s infinite;
   opacity: 0.5;
+}
+
+@keyframes disagreementPulse {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 0.2; transform: scale(1.4); }
 }
 
 /* Decision Popup */
@@ -2979,51 +2999,52 @@ header .right {
   box-shadow: 4px 4px 0px rgba(0, 0, 0, 1);
 }
 
-.kb-header {
+/* Legacy KB panel styles (scoped to inline KnowledgeBasePanel in App.jsx) */
+.legacy-kb-panel .kb-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
 }
 
-.kb-header h2 {
+.legacy-kb-panel .kb-header h2 {
   margin: 0;
   color: #7c3aed;
   font-size: 24px;
 }
 
-.kb-stats {
+.legacy-kb-panel .kb-stats {
   display: flex;
   gap: 20px;
   font-size: 14px;
   color: #6b7280;
 }
 
-.kb-stats span {
+.legacy-kb-panel .kb-stats span {
   padding: 5px 10px;
   background: #f3f4f6;
   border: 1px solid #000;
 }
 
-.kb-search {
+.legacy-kb-panel .kb-search {
   display: flex;
   gap: 10px;
   margin-bottom: 25px;
 }
 
-.kb-search input {
+.legacy-kb-panel .kb-search input {
   flex: 1;
   padding: 12px;
   border: 2px solid #000;
   font-size: 16px;
 }
 
-.kb-search input:focus {
+.legacy-kb-panel .kb-search input:focus {
   outline: none;
   border-color: #7c3aed;
 }
 
-.kb-search button {
+.legacy-kb-panel .kb-search button {
   padding: 12px 30px;
   background: #7c3aed;
   color: white;
@@ -3034,21 +3055,21 @@ header .right {
   box-shadow: 4px 4px 0px rgba(0, 0, 0, 1);
 }
 
-.kb-search button:hover:not(:disabled) {
+.legacy-kb-panel .kb-search button:hover:not(:disabled) {
   transform: translate(-2px, -2px);
   box-shadow: 4px 4px 0px rgba(0, 0, 0, 1);
 }
 
-.search-results {
+.legacy-kb-panel .search-results {
   margin: 25px 0;
 }
 
-.search-results h3 {
+.legacy-kb-panel .search-results h3 {
   margin: 0 0 15px 0;
   color: #7c3aed;
 }
 
-.search-result {
+.legacy-kb-panel .search-result {
   padding: 15px;
   margin-bottom: 15px;
   border: 2px solid #000;
@@ -3057,19 +3078,19 @@ header .right {
   transition: all 0.3s ease;
 }
 
-.search-result:hover {
+.legacy-kb-panel .search-result:hover {
   background: #f3e8ff;
   transform: translateX(5px);
   box-shadow: 3px 3px 0px rgba(0, 0, 0, 0.3);
 }
 
-.result-title {
+.legacy-kb-panel .result-title {
   font-size: 16px;
   font-weight: bold;
   margin-bottom: 5px;
 }
 
-.result-meta {
+.legacy-kb-panel .result-meta {
   display: flex;
   gap: 15px;
   margin-bottom: 10px;
@@ -3077,23 +3098,23 @@ header .right {
   color: #6b7280;
 }
 
-.relevance {
+.legacy-kb-panel .relevance {
   color: #7c3aed;
   font-weight: 600;
 }
 
-.result-excerpt {
+.legacy-kb-panel .result-excerpt {
   font-size: 14px;
   line-height: 1.5;
   color: #4b5563;
   margin-bottom: 10px;
 }
 
-.current-meeting-kb {
+.legacy-kb-panel .current-meeting-kb {
   margin: 20px 0;
 }
 
-.add-to-kb-button {
+.legacy-kb-panel .add-to-kb-button {
   width: 100%;
   padding: 15px;
   background: #7c3aed;
@@ -3107,21 +3128,21 @@ header .right {
   margin-bottom: 20px;
 }
 
-.add-to-kb-button:hover:not(:disabled) {
+.legacy-kb-panel .add-to-kb-button:hover:not(:disabled) {
   transform: translate(-2px, -2px);
   box-shadow: 6px 6px 0px rgba(0, 0, 0, 1);
 }
 
-.related-meetings {
+.legacy-kb-panel .related-meetings {
   margin-top: 20px;
 }
 
-.related-meetings h3 {
+.legacy-kb-panel .related-meetings h3 {
   margin: 0 0 15px 0;
   color: #7c3aed;
 }
 
-.related-meeting {
+.legacy-kb-panel .related-meeting {
   padding: 12px;
   margin-bottom: 10px;
   border: 2px solid #000;
@@ -3130,24 +3151,24 @@ header .right {
   transition: all 0.3s ease;
 }
 
-.related-meeting:hover {
+.legacy-kb-panel .related-meeting:hover {
   transform: translateX(5px);
   box-shadow: 3px 3px 0px rgba(0, 0, 0, 0.3);
 }
 
-.meeting-title {
+.legacy-kb-panel .meeting-title {
   font-weight: bold;
   margin-bottom: 5px;
 }
 
-.meeting-meta {
+.legacy-kb-panel .meeting-meta {
   display: flex;
   gap: 15px;
   font-size: 13px;
   color: #6b7280;
 }
 
-.similarity {
+.legacy-kb-panel .similarity {
   color: #7c3aed;
   font-weight: 600;
 }

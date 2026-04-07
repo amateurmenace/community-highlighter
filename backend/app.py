@@ -502,7 +502,9 @@ def check_rate_limit(request, limiter=None):
 # ============================================================================
 
 # Initialize ChromaDB only if available
-chroma_db_path = os.path.join(KB_DIR, "chroma_db")
+# KB_PERSIST_DIR allows persistent volume mount in cloud deployments
+chroma_db_path = os.environ.get("KB_PERSIST_DIR", os.path.join(KB_DIR, "chroma_db"))
+os.makedirs(chroma_db_path, exist_ok=True)
 chroma_client = None
 meetings_collection = None
 embedding_model = None
@@ -1499,6 +1501,7 @@ async def health_check():
             "word_frequency": True,
             "sentiment_analysis": True,
             "knowledge_base": CHROMADB_AVAILABLE,
+            "kb_meetings_count": meetings_collection.count() if CHROMADB_AVAILABLE and meetings_collection else 0,
             "video_clips": True,  # Cloud supports up to 5 clips / 2 min
             "video_download": not CLOUD_MODE,
             "live_mode": False
@@ -2862,7 +2865,7 @@ async def get_metadata(req: Request):
 
             return {
                 "title": info.get("title", ""),
-                "description": info.get("description", "")[:500],
+                "description": info.get("description", "")[:2000],
                 "duration": info.get("duration", 0),
                 "uploader": info.get("uploader", ""),
                 "upload_date": info.get("upload_date", ""),
@@ -3496,7 +3499,8 @@ async def find_relevant_documents(req: Request):
     video_title = data.get("video_title", "")
     transcript = data.get("transcript", "")
     entities = data.get("entities", [])
-    
+    description = data.get("description", "")
+
     if not video_title and not transcript:
         return {"documents": [], "error": "No meeting information provided"}
     
@@ -3584,6 +3588,29 @@ Respond in this exact JSON format (no markdown):
                 ]
             }
         
+        # Extract URLs from video description (often contains agenda links)
+        import re as _re
+        desc_urls = _re.findall(r'https?://[^\s<>"\']+', description)
+        description_docs = []
+        for durl in desc_urls:
+            durl = durl.rstrip('.,;:)')
+            # Determine document type from URL
+            doc_type = 'other'
+            if 'civicclerk' in durl.lower() or 'agenda' in durl.lower():
+                doc_type = 'agenda'
+            elif 'minutes' in durl.lower():
+                doc_type = 'minutes'
+            elif '.gov' in durl.lower() or '.org' in durl.lower():
+                doc_type = 'report'
+            source = _re.sub(r'https?://(www\.)?', '', durl).split('/')[0]
+            description_docs.append({
+                "title": f"{'Meeting Agenda' if doc_type == 'agenda' else 'Linked Document'} — {source}",
+                "url": durl,
+                "type": doc_type,
+                "description": "Found in video description",
+                "source": source
+            })
+
         # Step 2: Perform web searches for each query
         documents = []
         search_queries = search_data.get("searches", [])[:6]  # Limit to 6 searches
@@ -3761,8 +3788,12 @@ Respond in this exact JSON format (no markdown):
         
         print(f"[Documents] Found {len(unique_docs)} relevant documents")
         
+        # Prepend description docs, deduplicating against search results
+        desc_url_set = {u.get('url') for u in description_docs}
+        combined_docs = description_docs + [d for d in unique_docs if d.get('url') not in desc_url_set]
+
         return {
-            "documents": unique_docs[:12],  # Limit to 12 results
+            "documents": combined_docs[:15],  # Limit to 15 results
             "organization": search_data.get("organization", ""),
             "meeting_date": search_data.get("meeting_date"),
             "searches_performed": len(search_queries)
@@ -3773,6 +3804,89 @@ Respond in this exact JSON format (no markdown):
         import traceback
         traceback.print_exc()
         return {"documents": [], "error": str(e)}
+
+
+@app.post("/api/find-relevant-documents/deep")
+async def find_relevant_documents_deep(req: Request):
+    """Deep AI-powered search for meeting-related documents."""
+    data = await req.json()
+    video_title = data.get("video_title", "")
+    transcript = data.get("transcript", "")
+    entities = data.get("entities", [])
+    description = data.get("description", "")
+
+    if not video_title:
+        return {"documents": []}
+
+    try:
+        entity_names = [e.get("text", "") for e in entities[:20] if e.get("text")]
+        transcript_sample = transcript[:4000] if transcript else ""
+
+        prompt = f"""Analyze this civic meeting and generate 8 specific search queries to find related PUBLIC documents.
+Focus on finding: official agendas, meeting minutes, staff reports, proposed ordinances, budget documents, development proposals, planning documents.
+Include the municipality/organization name in queries.
+
+Meeting: {video_title}
+Entities: {', '.join(entity_names[:10])}
+Transcript: {transcript_sample[:2000]}
+
+Return a JSON array of 8 search query strings. Example: ["Brookline Select Board agenda March 2024", "Brookline zoning bylaw amendment"]"""
+
+        queries = []
+        result = call_ai_api(prompt, max_tokens=400, model="gemini-2.5-flash" if GOOGLE_API_KEY else "gpt-4o-mini", temperature=0.2, response_format="json_object")
+        if result:
+            try:
+                parsed = json.loads(result) if isinstance(result, str) else result
+                if isinstance(parsed, list):
+                    queries = parsed[:8]
+                elif isinstance(parsed, dict):
+                    queries = list(parsed.values())[0][:8] if parsed else []
+            except Exception:
+                pass
+
+        if not queries:
+            queries = [f"{video_title} agenda", f"{video_title} minutes", f"{video_title} staff report"]
+
+        all_docs = []
+        seen_urls = set()
+
+        # Extract URLs from description first
+        import re as _re
+        for durl in _re.findall(r'https?://[^\s<>"\']+', description):
+            durl = durl.rstrip('.,;:)')
+            if durl not in seen_urls:
+                seen_urls.add(durl)
+                doc_type = 'agenda' if ('civicclerk' in durl.lower() or 'agenda' in durl.lower()) else 'other'
+                source = _re.sub(r'https?://(www\.)?', '', durl).split('/')[0]
+                all_docs.append({"title": f"{'Meeting Agenda' if doc_type == 'agenda' else 'Document'} — {source}", "url": durl, "type": doc_type, "description": "From video description", "source": source})
+
+        # Run DuckDuckGo searches
+        import urllib.parse
+        for query in queries:
+            try:
+                search_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query + ' filetype:pdf OR site:.gov OR site:.org')}"
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                resp = requests.get(search_url, headers=headers, timeout=8)
+                if resp.status_code == 200:
+                    links = _re.findall(r'uddg=([^&"]+)', resp.text)
+                    for link in links[:3]:
+                        clean_url = urllib.parse.unquote(link)
+                        if clean_url in seen_urls or 'duckduckgo.com' in clean_url:
+                            continue
+                        seen_urls.add(clean_url)
+                        title_match = _re.search(r'<a[^>]*class="result__a"[^>]*>(.*?)</a>', resp.text)
+                        title = title_match.group(1) if title_match else clean_url.split('/')[-1][:80]
+                        title = _re.sub(r'<[^>]+>', '', title)
+                        source = _re.sub(r'https?://(www\.)?', '', clean_url).split('/')[0]
+                        doc_type = 'agenda' if 'agenda' in clean_url.lower() else 'minutes' if 'minutes' in clean_url.lower() else 'report' if '.gov' in clean_url else 'other'
+                        all_docs.append({"title": title[:100], "url": clean_url, "type": doc_type, "description": f"Found via: {query[:50]}", "source": source})
+            except Exception:
+                continue
+
+        return {"documents": all_docs[:15]}
+    except Exception as e:
+        print(f"[Deep Search] Error: {e}")
+        return {"documents": []}
 
 
 @app.post("/api/analytics/extended")
@@ -8417,6 +8531,52 @@ Rules:
 # ============================================================================
 
 
+def extract_date_from_title(title):
+    """Parse meeting date from video title. Returns YYYYMMDD string or None."""
+    import re as _re
+    from datetime import datetime as _dt
+
+    if not title:
+        return None
+
+    # Pattern 1: "Month Day, Year" or "Month Day Year" (January 15, 2025 / Jan 15 2025)
+    m = _re.search(
+        r'(January|February|March|April|May|June|July|August|September|October|November|December|'
+        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})',
+        title, _re.IGNORECASE
+    )
+    if m:
+        month_str = m.group(1)
+        day_str = m.group(2)
+        year_str = m.group(3)
+        for fmt in ("%B %d %Y", "%b %d %Y"):
+            try:
+                dt = _dt.strptime(f"{month_str} {day_str} {year_str}", fmt)
+                return dt.strftime("%Y%m%d")
+            except ValueError:
+                continue
+
+    # Pattern 2: "MM/DD/YYYY" or "MM-DD-YYYY"
+    m = _re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})', title)
+    if m:
+        try:
+            dt = _dt(int(m.group(3)), int(m.group(1)), int(m.group(2)))
+            return dt.strftime("%Y%m%d")
+        except (ValueError, OverflowError):
+            pass
+
+    # Pattern 3: "YYYY-MM-DD"
+    m = _re.search(r'(\d{4})-(\d{2})-(\d{2})', title)
+    if m:
+        try:
+            _dt(int(m.group(1)), int(m.group(2)), int(m.group(3)))  # validate
+            return f"{m.group(1)}{m.group(2)}{m.group(3)}"
+        except (ValueError, OverflowError):
+            pass
+
+    return None
+
+
 @app.post("/api/knowledge/add_meeting")
 async def add_meeting_to_knowledge_base(req: Request):
     """Add a meeting to the searchable knowledge base"""
@@ -8471,41 +8631,31 @@ async def add_meeting_to_knowledge_base(req: Request):
             print(f"Metadata error: {e}")
             meta = {"title": "Unknown", "upload_date": ""}
 
+        # Try to extract date from title first (more accurate for civic meetings)
+        title_date = extract_date_from_title(meta.get("title", ""))
+        if title_date:
+            meta["upload_date"] = title_date
+
         # Prepare documents for vector database
         documents = []
         doc_metadata = []
         doc_ids = []
 
-        # Split transcript into semantic chunks
+        # Split transcript into word-based chunks (consistent with streaming endpoint)
         chunks = []
-        lines = transcript_text.split("\n")
-        current_chunk = []
-        chunk_size = 500  # characters per chunk
-
-        for line in lines:
-            if line.strip() and not line.strip().isdigit() and "-->" not in line:
-                current_chunk.append(clean_text(line))
-                if len(" ".join(current_chunk)) > chunk_size:
-                    chunk_text = " ".join(current_chunk)
-                    chunks.append(chunk_text)
-                    current_chunk = []
-
-        # Add remaining chunk
-        if current_chunk:
-            chunks.append(" ".join(current_chunk))
+        words = transcript_text.split()
+        chunk_size = 100  # words per chunk
+        for i in range(0, len(words), chunk_size):
+            chunk = " ".join(words[i:i + chunk_size])
+            if chunk.strip():
+                chunks.append(chunk)
 
         # Add chunks to documents
         for i, chunk in enumerate(chunks):
             doc_id = f"{video_id}_chunk_{i}"
 
-            # Enrich chunk with context
-            enriched_text = f"""
-            Meeting: {meta.get('title', 'Unknown')}
-            Date: {meta.get('upload_date', 'Unknown')}
-            
-            Content: {chunk}
-            """
-
+            # Enrich chunk with context (format matches streaming endpoint)
+            enriched_text = f"Meeting: {meta.get('title', 'Unknown')}\nDate: {meta.get('upload_date', 'Unknown')}\n\nContent: {chunk}"
             documents.append(enriched_text)
             doc_ids.append(doc_id)
             doc_metadata.append(
@@ -8551,6 +8701,7 @@ async def search_knowledge_base(req: Request):
     query = data.get("query", "")
     limit = data.get("limit", 5)
     filters = data.get("filters", {})
+    deduplicate = data.get("deduplicate", False)  # Set true for old behavior (1 per meeting)
 
     if not query:
         raise HTTPException(400, "No search query provided")
@@ -8563,40 +8714,70 @@ async def search_knowledge_base(req: Request):
 
         # Search in vector database
         if not CHROMADB_AVAILABLE:
-
             raise HTTPException(503, "Knowledge Base not available - ChromaDB not installed")
 
+        # Get more results from ChromaDB to allow keyword filtering
+        n_fetch = max(limit * 3, 60)
         results = meetings_collection.query(
             query_texts=[query],
-            n_results=limit,
+            n_results=n_fetch,
             where=where_clause if where_clause else None,
         )
 
         if not results or not results["documents"][0]:
             return {"results": [], "query": query}
 
-        # Format results
-        formatted_results = []
-        seen_videos = set()
+        # Also do keyword matching: find chunks that literally contain the query
+        query_lower = query.lower().strip()
+        query_words = query_lower.split()
 
+        # Score results: combine semantic score with keyword bonus
+        scored = []
         for i, doc in enumerate(results["documents"][0]):
             metadata = results["metadatas"][0][i]
-            video_id = metadata.get("video_id", "")
+            if metadata.get("type", "transcript_chunk") != "transcript_chunk":
+                continue
+            # Strip chunk prefix for display
+            text = doc
+            if "\n\nContent: " in text:
+                text = text.split("\n\nContent: ", 1)[1]
 
-            # Group by video to avoid duplicates
-            if video_id not in seen_videos:
-                formatted_results.append(
-                    {
-                        "video_id": video_id,
-                        "title": metadata.get("title", "Unknown"),
-                        "date": metadata.get("date", ""),
-                        "relevance_score": 1
-                        - (results["distances"][0][i] if results["distances"] else 0),
-                        "excerpt": doc[:200] + "...",
-                        "type": metadata.get("type", "transcript"),
-                    }
-                )
-                seen_videos.add(video_id)
+            # Semantic score (ChromaDB L2 distance → similarity)
+            distance = results["distances"][0][i] if results["distances"] else 0
+            semantic_score = max(0, 1 - distance / 2)
+
+            # Keyword score: count how many query words appear in the chunk
+            text_lower = text.lower()
+            keyword_hits = sum(1 for w in query_words if w in text_lower)
+            keyword_count = sum(text_lower.count(w) for w in query_words)
+            keyword_bonus = (keyword_hits / max(len(query_words), 1)) * 0.5 + min(keyword_count / 10, 0.3)
+
+            combined_score = semantic_score + keyword_bonus
+
+            scored.append({
+                "video_id": metadata.get("video_id", ""),
+                "title": metadata.get("title", "Unknown"),
+                "date": metadata.get("date", ""),
+                "text": text[:400],
+                "document": doc[:400],
+                "score": round(combined_score, 4),
+                "type": metadata.get("type", "transcript_chunk"),
+            })
+
+        # Sort by combined score
+        scored.sort(key=lambda x: -x["score"])
+
+        # Optionally deduplicate to 1 per meeting
+        if deduplicate:
+            seen = set()
+            deduped = []
+            for r in scored:
+                if r["video_id"] not in seen:
+                    deduped.append(r)
+                    seen.add(r["video_id"])
+            scored = deduped
+
+        formatted_results = scored[:limit]
 
         return {
             "results": formatted_results,
@@ -8715,8 +8896,258 @@ async def get_knowledge_base_stats():
         return {"error": str(e), "total_meetings": 0, "total_documents": 0}
 
 
+# v9.2: Streaming add meeting with progress events
+@app.post("/api/knowledge/add_meeting_stream")
+async def add_meeting_to_knowledge_base_stream(req: Request):
+    """Add a meeting with SSE progress events"""
+    data = await req.json()
+    video_id = data.get("videoId")
+    if not video_id:
+        raise HTTPException(400, "No video ID provided")
+    if not CHROMADB_AVAILABLE:
+        raise HTTPException(503, "Knowledge Base not available - ChromaDB not installed")
+
+    async def generate():
+        import json as _json
+        def send(pct, stage):
+            return f"data: {_json.dumps({'progress': pct, 'stage': stage})}\n\n"
+        try:
+            yield send(5, "Fetching transcript...")
+            transcript_text = ""
+            try:
+                transcript = ytt_api.fetch(video_id).to_raw_data()
+                vtt_lines = []
+                for entry in transcript:
+                    text = clean_text(entry["text"])
+                    if text:
+                        vtt_lines.append(text)
+                transcript_text = " ".join(vtt_lines)
+            except Exception as e:
+                yield send(-1, f"Error fetching transcript: {str(e)}")
+                return
+
+            yield send(25, "Getting video metadata...")
+            meta = {}
+            try:
+                ydl_opts = {"quiet": True, "no_warnings": True}
+                if WEBSHARE_PROXY_URL:
+                    ydl_opts["proxy"] = WEBSHARE_PROXY_URL
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(f"https://youtube.com/watch?v={video_id}", download=False)
+                    meta = {
+                        "title": info.get("title", "Unknown"),
+                        "channel": info.get("uploader", "Unknown"),
+                        "upload_date": info.get("upload_date", ""),
+                        "duration": info.get("duration", 0),
+                    }
+            except Exception:
+                meta = {"title": "Unknown", "upload_date": ""}
+
+            # Try to extract date from title first (more accurate for civic meetings)
+            title_date = extract_date_from_title(meta.get("title", ""))
+            if title_date:
+                meta["upload_date"] = title_date
+
+            yield send(45, "Splitting into chunks...")
+            chunks = []
+            words = transcript_text.split()
+            chunk_size = 100  # words per chunk
+            for i in range(0, len(words), chunk_size):
+                chunk = " ".join(words[i:i + chunk_size])
+                if chunk.strip():
+                    chunks.append(chunk)
+
+            yield send(55, f"Indexing {len(chunks)} chunks...")
+            documents = []
+            doc_metadata = []
+            doc_ids = []
+            for i, chunk in enumerate(chunks):
+                enriched = f"Meeting: {meta.get('title', 'Unknown')}\nDate: {meta.get('upload_date', 'Unknown')}\n\nContent: {chunk}"
+                documents.append(enriched)
+                doc_ids.append(f"{video_id}_chunk_{i}")
+                doc_metadata.append({
+                    "video_id": video_id,
+                    "title": meta.get("title", "Unknown"),
+                    "date": meta.get("upload_date", ""),
+                    "chunk_index": i,
+                    "type": "transcript_chunk",
+                })
+                if i % 20 == 0 and i > 0:
+                    pct = 55 + int((i / len(chunks)) * 35)
+                    yield send(pct, f"Indexing chunk {i}/{len(chunks)}...")
+
+            if documents:
+                meetings_collection.add(documents=documents, metadatas=doc_metadata, ids=doc_ids)
+
+            # --- AI Enrichment Stages ---
+            enrichment_added = 0
+            # Use much more transcript for Gemini (1M context) vs OpenAI (limited)
+            _ingest_model = "gemini-2.5-flash" if GOOGLE_API_KEY else "gpt-4o"
+            _max_transcript = 50000 if GOOGLE_API_KEY else 8000
+            transcript_preview = transcript_text[:_max_transcript]
+
+            # Entity extraction
+            yield send(65, "Extracting entities with AI...")
+            try:
+                entity_prompt = f"""Analyze this civic meeting transcript and extract entities as JSON.
+Return ONLY valid JSON with this structure:
+{{"persons": ["Name1", "Name2"], "organizations": ["Org1"], "places": ["Place1"], "topics": ["Topic1", "Topic2"], "money_amounts": ["$100K"]}}
+
+Transcript:
+{transcript_preview}"""
+                entity_result = call_ai_api(entity_prompt, max_tokens=800, model=_ingest_model, temperature=0.1, response_format="json_object")
+                if entity_result:
+                    if isinstance(entity_result, dict):
+                        entity_json = entity_result
+                        entity_text = json.dumps(entity_result)
+                    else:
+                        entity_text = str(entity_result)
+                        try:
+                            entity_json = json.loads(entity_text)
+                        except Exception:
+                            entity_json = {"persons": [], "organizations": [], "places": [], "topics": []}
+                    meetings_collection.upsert(
+                        documents=[f"Entities for {meta.get('title', 'Unknown')}: {entity_text}"],
+                        metadatas=[{"video_id": video_id, "title": meta.get("title", "Unknown"), "date": meta.get("upload_date", ""), "type": "entities_rollup", "entities_json": json.dumps(entity_json)}],
+                        ids=[f"{video_id}_entities"]
+                    )
+                    enrichment_added += 1
+            except Exception as e:
+                print(f"[KB Enrich] Entity extraction failed: {e}")
+
+            # Decision extraction
+            yield send(75, "Extracting decisions...")
+            try:
+                decision_prompt = f"""Analyze this civic meeting transcript thoroughly and extract ALL decisions, motions, votes, approvals, and key action items.
+
+Look for: motions made/seconded, votes taken, items approved/denied/tabled, budget allocations, policy changes, appointments, and any items that were formally discussed and resolved.
+
+Even if there are no formal votes, extract significant discussion outcomes, consensus items, and items deferred to future meetings.
+
+Return ONLY valid JSON with this structure:
+{{"decisions": [{{"text": "Description of decision or action", "type": "approved|denied|tabled|discussed", "context": "Brief context about why or what led to this"}}]}}
+
+If you find no formal decisions, still extract key discussion topics as type "discussed".
+
+Transcript:
+{transcript_preview}"""
+                decision_result = call_ai_api(decision_prompt, max_tokens=2000, model=_ingest_model, temperature=0.1, response_format="json_object")
+                if decision_result:
+                    if isinstance(decision_result, dict):
+                        decision_json = decision_result
+                        decision_text = json.dumps(decision_result)
+                    else:
+                        decision_text = str(decision_result)
+                        try:
+                            decision_json = json.loads(decision_text)
+                        except Exception:
+                            decision_json = {"decisions": []}
+                    meetings_collection.upsert(
+                        documents=[f"Decisions for {meta.get('title', 'Unknown')}: {decision_text}"],
+                        metadatas=[{"video_id": video_id, "title": meta.get("title", "Unknown"), "date": meta.get("upload_date", ""), "type": "decisions", "decisions_json": json.dumps(decision_json)}],
+                        ids=[f"{video_id}_decisions"]
+                    )
+                    enrichment_added += 1
+            except Exception as e:
+                print(f"[KB Enrich] Decision extraction failed: {e}")
+
+            # Meeting summary
+            yield send(82, "Generating meeting summary...")
+            try:
+                summary_prompt = f"""Summarize this civic meeting transcript in 3-4 sentences. Focus on key topics discussed, decisions made, and notable moments.
+
+Transcript:
+{transcript_preview}"""
+                summary_result = call_ai_api(summary_prompt, max_tokens=300, model=_ingest_model, temperature=0.3)
+                if summary_result:
+                    summary_text = summary_result if isinstance(summary_result, str) else str(summary_result)
+                    meetings_collection.upsert(
+                        documents=[f"Summary of {meta.get('title', 'Unknown')}: {summary_text}"],
+                        metadatas=[{"video_id": video_id, "title": meta.get("title", "Unknown"), "date": meta.get("upload_date", ""), "type": "meeting_summary", "summary_text": summary_text[:500]}],
+                        ids=[f"{video_id}_summary"]
+                    )
+                    enrichment_added += 1
+            except Exception as e:
+                print(f"[KB Enrich] Summary generation failed: {e}")
+
+            # Sentiment analysis (no AI call needed — use simple word-based scoring)
+            yield send(90, "Analyzing sentiment...")
+            try:
+                positive_words = {"approve", "approved", "support", "agree", "agreed", "thank", "thanks", "excellent", "good", "great", "progress", "success", "improve", "benefit", "positive", "pleased", "congratulations", "wonderful", "commend"}
+                negative_words = {"oppose", "opposed", "concern", "concerned", "disagree", "problem", "issue", "deny", "denied", "reject", "rejected", "complaint", "frustrated", "disappointed", "worried", "unfortunately", "difficult", "fail", "failed"}
+                words_lower = transcript_text.lower().split()
+                total_w = max(len(words_lower), 1)
+                pos_count = sum(1 for w in words_lower if w in positive_words)
+                neg_count = sum(1 for w in words_lower if w in negative_words)
+                sentiment_total = max(pos_count + neg_count, 1)
+                polarity = round((pos_count - neg_count) / sentiment_total * 100, 3)
+                subjectivity = round(sentiment_total / total_w * 100, 3)
+                meetings_collection.upsert(
+                    documents=[f"Sentiment for {meta.get('title', 'Unknown')}: polarity={polarity}, subjectivity={subjectivity}"],
+                    metadatas=[{"video_id": video_id, "title": meta.get("title", "Unknown"), "date": meta.get("upload_date", ""), "type": "sentiment", "polarity": polarity, "subjectivity": subjectivity}],
+                    ids=[f"{video_id}_sentiment"]
+                )
+                enrichment_added += 1
+            except Exception as e:
+                print(f"[KB Enrich] Sentiment analysis failed: {e}")
+
+            _invalidate_all_kb_caches()
+
+            yield send(100, "Done")
+            yield f"data: {_json.dumps({'done': True, 'documents_added': len(documents), 'enrichment_added': enrichment_added, 'title': meta.get('title', 'Unknown')})}\n\n"
+
+        except Exception as e:
+            yield send(-1, f"Error: {str(e)}")
+
+    return StreamingResponse(generate(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# v9.2: List all meetings in knowledge base
+@app.get("/api/knowledge/meetings")
+async def list_knowledge_base_meetings():
+    """List all meetings stored in the knowledge base"""
+    if not CHROMADB_AVAILABLE:
+        raise HTTPException(503, "Knowledge Base not available")
+    try:
+        collection_data = meetings_collection.get()
+        if not collection_data or not collection_data["metadatas"]:
+            return {"meetings": []}
+        meeting_map = {}
+        for meta in collection_data["metadatas"]:
+            vid = meta.get("video_id", "")
+            if vid and vid not in meeting_map:
+                meeting_map[vid] = {
+                    "video_id": vid,
+                    "title": meta.get("title", "Unknown"),
+                    "date": meta.get("date", ""),
+                    "chunk_count": 0,
+                }
+            if vid:
+                meeting_map[vid]["chunk_count"] += 1
+        meetings = sorted(meeting_map.values(), key=lambda m: m.get("date", ""), reverse=True)
+        return {"meetings": meetings}
+    except Exception as e:
+        return {"meetings": [], "error": str(e)}
+
+
 # v8.3: Topic trends across meetings in knowledge base
 _topic_trends_cache = {"data": None, "timestamp": 0}
+_kb_dashboard_cache = {"data": None, "timestamp": 0}
+_kb_entity_cache = {"data": None, "timestamp": 0}
+_kb_sentiment_cache = {"data": None, "timestamp": 0}
+_kb_decisions_cache = {"data": None, "timestamp": 0}
+_kb_participation_cache = {"data": None, "timestamp": 0}
+_kb_docs_cache = {"data": None, "timestamp": 0}
+
+def _invalidate_all_kb_caches():
+    """Invalidate all KB analytics caches after data mutations."""
+    for cache in [_topic_trends_cache, _kb_dashboard_cache, _kb_entity_cache,
+                  _kb_sentiment_cache, _kb_decisions_cache, _kb_participation_cache, _kb_docs_cache,
+                  _kb_framing_cache, _kb_wordcloud_cache]:
+        cache["data"] = None
+        cache["timestamp"] = 0
+        cache["ts"] = 0
 
 @app.post("/api/knowledge/topic_trends")
 async def knowledge_topic_trends(req: Request):
@@ -8809,6 +9240,988 @@ async def knowledge_topic_trends(req: Request):
 
 
 # ============================================================================
+# KNOWLEDGE BASE ANALYTICS DASHBOARD ENDPOINTS (v9.3)
+# ============================================================================
+
+def _get_all_kb_docs():
+    """Helper: get all KB documents grouped by video_id with type-specific data. Cached for 5 min."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        return {}
+    import time as _t
+    if _kb_docs_cache["data"] is not None and (_t.time() - _kb_docs_cache["timestamp"]) < 300:
+        return _kb_docs_cache["data"]
+    collection_data = meetings_collection.get()
+    if not collection_data or not collection_data["metadatas"]:
+        return {}
+    meetings = {}
+    for doc, meta in zip(collection_data["documents"], collection_data["metadatas"]):
+        vid = meta.get("video_id", "")
+        if vid not in meetings:
+            meetings[vid] = {"title": meta.get("title", "Unknown"), "date": meta.get("date", ""), "chunks": [], "entities_rollup": None, "decisions": None, "summary": None, "sentiment": None}
+        doc_type = meta.get("type", "transcript_chunk")
+        if doc_type == "transcript_chunk":
+            meetings[vid]["chunks"].append(doc)
+        elif doc_type == "entities_rollup":
+            try:
+                meetings[vid]["entities_rollup"] = json.loads(meta.get("entities_json", "{}"))
+            except Exception:
+                meetings[vid]["entities_rollup"] = {}
+        elif doc_type == "decisions":
+            try:
+                meetings[vid]["decisions"] = json.loads(meta.get("decisions_json", "{}"))
+            except Exception:
+                meetings[vid]["decisions"] = {}
+        elif doc_type == "meeting_summary":
+            meetings[vid]["summary"] = meta.get("summary_text", doc[:500])
+        elif doc_type == "sentiment":
+            meetings[vid]["sentiment"] = {"polarity": meta.get("polarity", 0), "subjectivity": meta.get("subjectivity", 0)}
+    _kb_docs_cache["data"] = meetings
+    _kb_docs_cache["timestamp"] = __import__("time").time()
+    return meetings
+
+
+@app.get("/api/knowledge/dashboard_stats")
+async def kb_dashboard_stats():
+    """Aggregated stats for the KB analytics dashboard."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+    import time as _time
+    if _kb_dashboard_cache["data"] and (_time.time() - _kb_dashboard_cache["timestamp"]) < 300:
+        return _kb_dashboard_cache["data"]
+    try:
+        meetings = _get_all_kb_docs()
+        if not meetings:
+            return {"total_meetings": 0, "total_chunks": 0, "date_range": None, "top_entities": [], "avg_sentiment": 0, "total_decisions": 0, "enriched_count": 0}
+
+        total_chunks = sum(len(m["chunks"]) for m in meetings.values())
+        dates = sorted([m["date"] for m in meetings.values() if m["date"]])
+        date_range = {"earliest": dates[0] if dates else None, "latest": dates[-1] if dates else None}
+
+        # Top entities across all meetings
+        from collections import Counter
+        entity_counts = Counter()
+        enriched = 0
+        for m in meetings.values():
+            if m["entities_rollup"]:
+                enriched += 1
+                for etype in ["persons", "organizations", "places", "topics"]:
+                    for e in m["entities_rollup"].get(etype, []):
+                        entity_counts[e] += 1
+        top_entities = [{"name": e, "count": c} for e, c in entity_counts.most_common(10)]
+
+        # Avg sentiment
+        sentiments = [m["sentiment"]["polarity"] for m in meetings.values() if m["sentiment"]]
+        avg_sentiment = round(sum(sentiments) / len(sentiments), 3) if sentiments else 0
+
+        # Total decisions
+        total_decisions = 0
+        for m in meetings.values():
+            if m["decisions"] and "decisions" in m["decisions"]:
+                total_decisions += len(m["decisions"]["decisions"])
+
+        result = {
+            "total_meetings": len(meetings),
+            "total_chunks": total_chunks,
+            "date_range": date_range,
+            "top_entities": top_entities,
+            "avg_sentiment": avg_sentiment,
+            "total_decisions": total_decisions,
+            "enriched_count": enriched,
+            "active_issues": len(ISSUE_TIMELINES)
+        }
+        _kb_dashboard_cache["data"] = result
+        _kb_dashboard_cache["timestamp"] = _time.time()
+        return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/knowledge/entity_tracking")
+async def kb_entity_tracking(req: Request):
+    """Per-meeting entity frequencies sorted by date."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+    import time as _time
+    if _kb_entity_cache["data"] and (_time.time() - _kb_entity_cache["timestamp"]) < 300:
+        cached = _kb_entity_cache["data"]
+    else:
+        try:
+            meetings = _get_all_kb_docs()
+            # Build entity timeline
+            entity_timeline = {}  # {entity_name: [{date, video_id, title, count, type}]}
+            for vid, m in sorted(meetings.items(), key=lambda x: x[1]["date"]):
+                if not m["entities_rollup"]:
+                    continue
+                date_str = m["date"]
+                if len(date_str) == 8:
+                    date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                for etype in ["persons", "organizations", "places", "topics"]:
+                    for e in m["entities_rollup"].get(etype, []):
+                        if e not in entity_timeline:
+                            entity_timeline[e] = {"type": etype[:-1], "appearances": []}
+                        entity_timeline[e]["appearances"].append({"date": date_str, "video_id": vid, "title": m["title"]})
+            # Sort by total appearances
+            sorted_entities = sorted(entity_timeline.items(), key=lambda x: len(x[1]["appearances"]), reverse=True)
+            cached = {"entities": [{"name": name, "type": data["type"], "total": len(data["appearances"]), "appearances": data["appearances"]} for name, data in sorted_entities[:50]]}
+            _kb_entity_cache["data"] = cached
+            _kb_entity_cache["timestamp"] = _time.time()
+        except Exception as e:
+            raise HTTPException(500, str(e))
+
+    data = await req.json() if req.headers.get("content-length", "0") != "0" else {}
+    entity_filter = data.get("entity_name", "").lower()
+    if entity_filter:
+        filtered = [e for e in cached["entities"] if entity_filter in e["name"].lower()]
+        return {"entities": filtered}
+    return cached
+
+
+@app.get("/api/knowledge/sentiment_timeline")
+async def kb_sentiment_timeline():
+    """Per-meeting sentiment polarity and subjectivity sorted by date."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+    import time as _time
+    if _kb_sentiment_cache["data"] and (_time.time() - _kb_sentiment_cache["timestamp"]) < 300:
+        return _kb_sentiment_cache["data"]
+    try:
+        meetings = _get_all_kb_docs()
+        timeline = []
+        for vid, m in sorted(meetings.items(), key=lambda x: x[1]["date"]):
+            if not m["sentiment"]:
+                continue
+            date_str = m["date"]
+            if len(date_str) == 8:
+                date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+            timeline.append({
+                "date": date_str,
+                "video_id": vid,
+                "title": m["title"],
+                "polarity": m["sentiment"]["polarity"],
+                "subjectivity": m["sentiment"]["subjectivity"]
+            })
+        result = {"timeline": timeline}
+        _kb_sentiment_cache["data"] = result
+        _kb_sentiment_cache["timestamp"] = _time.time()
+        return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/knowledge/decisions_across_meetings")
+async def kb_decisions_across():
+    """Chronological list of all decisions across meetings."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+    import time as _time
+    if _kb_decisions_cache["data"] and (_time.time() - _kb_decisions_cache["timestamp"]) < 300:
+        return _kb_decisions_cache["data"]
+    try:
+        meetings = _get_all_kb_docs()
+        all_decisions = []
+        for vid, m in sorted(meetings.items(), key=lambda x: x[1]["date"]):
+            if not m["decisions"] or "decisions" not in m["decisions"]:
+                continue
+            date_str = m["date"]
+            if len(date_str) == 8:
+                date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+            for d in m["decisions"]["decisions"]:
+                all_decisions.append({
+                    "text": d.get("text", ""),
+                    "type": d.get("type", "discussed"),
+                    "context": d.get("context", ""),
+                    "date": date_str,
+                    "video_id": vid,
+                    "meeting_title": m["title"]
+                })
+        result = {"decisions": all_decisions, "total": len(all_decisions)}
+        _kb_decisions_cache["data"] = result
+        _kb_decisions_cache["timestamp"] = _time.time()
+        return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/knowledge/topic_clusters")
+async def kb_topic_clusters(req: Request):
+    """AI-generated topic labels with semantic relevance scores per meeting."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+    try:
+        meetings = _get_all_kb_docs()
+        if len(meetings) < 2:
+            return {"clusters": [], "meetings": []}
+
+        # Gather all summaries for topic generation
+        summaries = []
+        for vid, m in meetings.items():
+            if m["summary"]:
+                summaries.append(f"- {m['title']}: {m['summary']}")
+            else:
+                text = " ".join(m["chunks"][:3])[:500]
+                summaries.append(f"- {m['title']}: {text}")
+
+        topic_prompt = f"""Based on these civic meeting summaries, identify the 8 most important recurring topics or themes.
+Return ONLY a JSON array of short topic labels (2-4 words each).
+Example: ["Budget Allocation", "Public Safety", "Zoning Changes", "School Funding"]
+
+Meetings:
+{chr(10).join(summaries[:20])}"""
+
+        topic_result = call_ai_api(topic_prompt, max_tokens=200, model="gemini-2.5-flash", temperature=0.1, response_format="json_object")
+        topics = []
+        if topic_result:
+            try:
+                parsed = json.loads(topic_result) if isinstance(topic_result, str) else topic_result
+                if isinstance(parsed, list):
+                    topics = parsed[:8]
+                elif isinstance(parsed, dict):
+                    topics = list(parsed.values())[0][:8] if parsed else []
+            except Exception:
+                topics = []
+
+        if not topics:
+            # Fallback: use top words from topic_trends
+            return {"clusters": [], "meetings": []}
+
+        # Score each meeting against each topic using semantic search
+        meetings_sorted = sorted(meetings.items(), key=lambda x: x[1]["date"])
+        meetings_list = []
+        for vid, m in meetings_sorted:
+            date_str = m["date"]
+            if len(date_str) == 8:
+                date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+            meetings_list.append({"video_id": vid, "title": m["title"], "date": date_str})
+
+        clusters = []
+        for topic in topics:
+            scores = []
+            try:
+                results = meetings_collection.query(query_texts=[topic], n_results=min(len(meetings) * 5, 100))
+                # Build per-meeting relevance from distances
+                # ChromaDB L2 distances are typically 0.5-2.0 for sentence embeddings
+                # Normalize: score = max(0, 1 - dist/2) maps [0,2] -> [1,0]
+                meeting_scores = {}
+                if results and results["distances"]:
+                    for dist, meta in zip(results["distances"][0], results["metadatas"][0]):
+                        vid = meta.get("video_id", "")
+                        if meta.get("type") != "transcript_chunk":
+                            continue
+                        score = max(0, 1.0 - dist / 2.0)
+                        if vid not in meeting_scores or score > meeting_scores[vid]:
+                            meeting_scores[vid] = score
+                for vid, m in meetings_sorted:
+                    scores.append(round(meeting_scores.get(vid, 0), 3))
+            except Exception:
+                scores = [0] * len(meetings_sorted)
+            clusters.append({"topic": topic, "scores": scores})
+
+        return {"clusters": clusters, "meetings": meetings_list}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/knowledge/compare_meetings")
+async def kb_compare_meetings(req: Request):
+    """Compare two meetings from the KB using enriched data."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+    data = await req.json()
+    vid1 = data.get("video_id_1")
+    vid2 = data.get("video_id_2")
+    if not vid1 or not vid2:
+        raise HTTPException(400, "Two video IDs required")
+    try:
+        meetings = _get_all_kb_docs()
+        m1 = meetings.get(vid1)
+        m2 = meetings.get(vid2)
+        if not m1 or not m2:
+            raise HTTPException(404, "One or both meetings not found in KB")
+
+        # Entity overlap
+        entities1 = set()
+        entities2 = set()
+        for etype in ["persons", "organizations", "places", "topics"]:
+            if m1.get("entities_rollup"):
+                entities1.update(m1["entities_rollup"].get(etype, []))
+            if m2.get("entities_rollup"):
+                entities2.update(m2["entities_rollup"].get(etype, []))
+        shared = entities1 & entities2
+        unique1 = entities1 - entities2
+        unique2 = entities2 - entities1
+
+        # Decision counts
+        d1 = len(m1.get("decisions", {}).get("decisions", [])) if m1.get("decisions") else 0
+        d2 = len(m2.get("decisions", {}).get("decisions", [])) if m2.get("decisions") else 0
+
+        # Sentiment
+        s1 = m1.get("sentiment", {})
+        s2 = m2.get("sentiment", {})
+
+        return {
+            "meeting1": {"video_id": vid1, "title": m1["title"], "date": m1["date"], "summary": m1.get("summary", ""), "decision_count": d1, "entity_count": len(entities1), "sentiment": s1},
+            "meeting2": {"video_id": vid2, "title": m2["title"], "date": m2["date"], "summary": m2.get("summary", ""), "decision_count": d2, "entity_count": len(entities2), "sentiment": s2},
+            "shared_entities": list(shared)[:20],
+            "unique_entities_1": list(unique1)[:15],
+            "unique_entities_2": list(unique2)[:15],
+            "overlap_score": round(len(shared) / max(len(entities1 | entities2), 1), 3)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/knowledge/issue_ai_summary")
+async def kb_issue_ai_summary(req: Request):
+    """AI narrative of how an issue evolved across its meetings."""
+    data = await req.json()
+    issue_id = data.get("issue_id")
+    if issue_id not in ISSUE_TIMELINES:
+        raise HTTPException(404, "Issue not found")
+
+    issue = ISSUE_TIMELINES[issue_id]
+    if not issue["meetings"]:
+        return {"narrative": "No meetings have been added to this issue yet.", "issue": issue}
+
+    # Build context from KB search
+    if CHROMADB_AVAILABLE and meetings_collection:
+        excerpts = []
+        for meeting in issue["meetings"]:
+            try:
+                results = meetings_collection.query(query_texts=[issue["name"]], n_results=3, where={"video_id": meeting["video_id"]})
+                if results and results["documents"]:
+                    excerpts.append(f"Meeting: {meeting.get('video_title', 'Unknown')} ({meeting.get('date', 'unknown date')})\n" + "\n".join(results["documents"][0][:2]))
+            except Exception:
+                pass
+
+        if excerpts:
+            narrative_prompt = f"""Analyze how the issue "{issue['name']}" has evolved across these civic meetings. Write a 3-5 paragraph narrative summarizing the lifecycle, key developments, and current status.
+
+{chr(10).join(excerpts[:8])}"""
+            narrative = call_ai_api(narrative_prompt, max_tokens=600, model="gemini-2.5-flash", temperature=0.3)
+            if narrative:
+                return {"narrative": narrative if isinstance(narrative, str) else str(narrative), "issue": issue}
+
+    return {"narrative": f"Issue '{issue['name']}' has been tracked across {len(issue['meetings'])} meeting(s).", "issue": issue}
+
+
+@app.get("/api/knowledge/participation_across")
+async def kb_participation_across():
+    """Person-type entity frequencies across all meetings."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+    import time as _time
+    if _kb_participation_cache["data"] and (_time.time() - _kb_participation_cache["timestamp"]) < 300:
+        return _kb_participation_cache["data"]
+    try:
+        meetings = _get_all_kb_docs()
+        meetings_sorted = sorted(meetings.items(), key=lambda x: x[1]["date"])
+
+        # Build person→meeting presence map
+        person_meetings = {}  # {person: [{video_id, title, date}]}
+        meetings_list = []
+        for vid, m in meetings_sorted:
+            date_str = m["date"]
+            if len(date_str) == 8:
+                date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+            meetings_list.append({"video_id": vid, "title": m["title"], "date": date_str})
+            if not m.get("entities_rollup"):
+                continue
+            for person in m["entities_rollup"].get("persons", []):
+                if person not in person_meetings:
+                    person_meetings[person] = []
+                person_meetings[person].append({"video_id": vid, "title": m["title"], "date": date_str})
+
+        # Sort by total appearances
+        sorted_people = sorted(person_meetings.items(), key=lambda x: len(x[1]), reverse=True)
+        people = [{"name": name, "total": len(appearances), "meetings": appearances} for name, appearances in sorted_people[:30]]
+
+        result = {"people": people, "meetings": meetings_list}
+        _kb_participation_cache["data"] = result
+        _kb_participation_cache["timestamp"] = _time.time()
+        return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/knowledge/delete_meeting")
+async def kb_delete_meeting(req: Request):
+    """Remove a meeting and all its chunks from the knowledge base."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+    data = await req.json()
+    video_id = data.get("video_id")
+    if not video_id:
+        raise HTTPException(400, "video_id required")
+    try:
+        # Get all document IDs for this meeting
+        collection_data = meetings_collection.get(where={"video_id": video_id})
+        if not collection_data or not collection_data["ids"]:
+            raise HTTPException(404, "Meeting not found in KB")
+        meetings_collection.delete(ids=collection_data["ids"])
+        _invalidate_all_kb_caches()
+        return {"deleted": True, "video_id": video_id, "chunks_removed": len(collection_data["ids"])}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/knowledge/topic_drilldown")
+async def kb_topic_drilldown(req: Request):
+    """Get transcript excerpts for a specific topic in a specific meeting."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+    data = await req.json()
+    topic = data.get("topic")
+    video_id = data.get("video_id")
+    if not topic or not video_id:
+        raise HTTPException(400, "topic and video_id required")
+    try:
+        results = meetings_collection.query(
+            query_texts=[topic],
+            where={"video_id": video_id},
+            n_results=5,
+        )
+        excerpts = []
+        if results and results["documents"]:
+            for doc, meta, dist in zip(results["documents"][0], results["metadatas"][0], results["distances"][0]):
+                if meta.get("type") == "transcript_chunk":
+                    # Extract just the content portion (after "Content: " prefix)
+                    content = doc
+                    if "\n\nContent: " in content:
+                        content = content.split("\n\nContent: ", 1)[1]
+                    excerpts.append({
+                        "text": content[:500],
+                        "relevance": round(1.0 - (dist / 2.0), 3),  # normalize distance to relevance
+                        "chunk_index": meta.get("chunk_index", 0),
+                    })
+        return {"topic": topic, "video_id": video_id, "excerpts": excerpts}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/knowledge/sentiment_excerpts")
+async def kb_sentiment_excerpts(req: Request):
+    """Get the most positive and negative transcript excerpts for a meeting."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+    data = await req.json()
+    video_id = data.get("video_id")
+    if not video_id:
+        raise HTTPException(400, "video_id required")
+    try:
+        collection_data = meetings_collection.get(
+            where={"$and": [{"video_id": video_id}, {"type": "transcript_chunk"}]}
+        )
+        if not collection_data or not collection_data["documents"]:
+            return {"video_id": video_id, "positive": [], "negative": []}
+
+        # Word-based sentiment scoring per chunk
+        pos_words = {"approve", "support", "agree", "thank", "excellent", "good", "great", "progress", "success", "improve", "benefit", "positive", "pleased", "wonderful", "commend"}
+        neg_words = {"oppose", "concern", "disagree", "problem", "issue", "deny", "reject", "complaint", "frustrated", "disappointed", "worried", "difficult", "fail"}
+
+        scored = []
+        for doc in collection_data["documents"]:
+            content = doc
+            if "\n\nContent: " in content:
+                content = content.split("\n\nContent: ", 1)[1]
+            words = content.lower().split()
+            pos = sum(1 for w in words if w in pos_words)
+            neg = sum(1 for w in words if w in neg_words)
+            score = pos - neg
+            scored.append({"text": content[:400], "score": score, "pos": pos, "neg": neg})
+
+        scored.sort(key=lambda x: x["score"])
+        negative = scored[:3] if scored else []
+        positive = sorted(scored[-3:], key=lambda x: -x["score"]) if scored else []
+
+        return {"video_id": video_id, "positive": positive, "negative": negative}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/knowledge/enrich_meeting")
+async def kb_enrich_meeting(req: Request):
+    """Enrich an existing meeting in the KB with AI-extracted entities, decisions, summary, sentiment."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+    data = await req.json()
+    video_id = data.get("video_id")
+    force = data.get("force", False)
+    if not video_id:
+        raise HTTPException(400, "video_id required")
+
+    async def generate():
+        import json as _json
+        def send(pct, stage):
+            return f"data: {_json.dumps({'progress': pct, 'stage': stage})}\n\n"
+        try:
+            yield send(5, "Loading meeting from KB...")
+            # Get existing chunks
+            collection_data = meetings_collection.get(where={"video_id": video_id})
+            if not collection_data or not collection_data["documents"]:
+                yield send(-1, "Meeting not found in KB")
+                return
+
+            # Get metadata from first chunk
+            meta = collection_data["metadatas"][0]
+            title = meta.get("title", "Unknown")
+            date = meta.get("date", "")
+
+            # Concatenate transcript chunks, stripping the "Meeting: ...\nContent: " prefix from each
+            transcript_chunks = []
+            for doc, m in zip(collection_data["documents"], collection_data["metadatas"]):
+                if m.get("type") == "transcript_chunk":
+                    # Strip the enrichment prefix added during indexing
+                    text = doc
+                    if "\n\nContent: " in text:
+                        text = text.split("\n\nContent: ", 1)[1]
+                    transcript_chunks.append(text)
+            transcript_text = " ".join(transcript_chunks)
+            if not transcript_text.strip() or len(transcript_text.strip()) < 50:
+                yield send(-1, f"Meeting has insufficient transcript data ({len(transcript_text)} chars). Try re-adding the meeting.")
+                return
+            _enrich_model = "gemini-2.5-flash" if GOOGLE_API_KEY else "gpt-4o"
+            _max_transcript = 50000 if GOOGLE_API_KEY else 8000
+            transcript_preview = transcript_text[:_max_transcript]
+
+            # Check what enrichment already exists (force=True re-runs all)
+            existing_types = set() if force else {m.get("type") for m in collection_data["metadatas"]}
+
+            enriched = 0
+
+            if "entities_rollup" not in existing_types:
+                yield send(25, "Extracting entities...")
+                try:
+                    entity_prompt = f"""Analyze this civic meeting transcript and extract entities as JSON.
+Return ONLY valid JSON with this structure:
+{{"persons": ["Name1", "Name2"], "organizations": ["Org1"], "places": ["Place1"], "topics": ["Topic1", "Topic2"], "money_amounts": ["$100K"]}}
+
+Transcript:
+{transcript_preview}"""
+                    entity_result = call_ai_api(entity_prompt, max_tokens=800, model=_enrich_model, temperature=0.1, response_format="json_object")
+                    if entity_result:
+                        if isinstance(entity_result, dict):
+                            entity_json = entity_result
+                            entity_text = json.dumps(entity_result)
+                        else:
+                            entity_text = str(entity_result)
+                            try:
+                                entity_json = json.loads(entity_text)
+                            except Exception:
+                                entity_json = {}
+                        meetings_collection.upsert(
+                            documents=[f"Entities for {title}: {entity_text}"],
+                            metadatas=[{"video_id": video_id, "title": title, "date": date, "type": "entities_rollup", "entities_json": json.dumps(entity_json)}],
+                            ids=[f"{video_id}_entities"]
+                        )
+                        enriched += 1
+                except Exception as e:
+                    print(f"[KB Enrich] Entity extraction failed: {e}")
+
+            if "decisions" not in existing_types:
+                yield send(45, "Extracting decisions...")
+                try:
+                    decision_prompt = f"""Analyze this civic meeting transcript thoroughly and extract ALL decisions, motions, votes, approvals, and key action items.
+
+Look for: motions made/seconded, votes taken, items approved/denied/tabled, budget allocations, policy changes, appointments, and any items that were formally discussed and resolved.
+
+Even if there are no formal votes, extract significant discussion outcomes, consensus items, and items deferred to future meetings.
+
+Return ONLY valid JSON with this structure:
+{{"decisions": [{{"text": "Description of decision or action", "type": "approved|denied|tabled|discussed", "context": "Brief context about why or what led to this"}}]}}
+
+If you find no formal decisions, still extract key discussion topics as type "discussed".
+
+Transcript:
+{transcript_preview}"""
+                    print(f"[KB Enrich] Decision prompt length: {len(decision_prompt)} chars, model: {_enrich_model}")
+                    decision_result = call_ai_api(decision_prompt, max_tokens=2000, model=_enrich_model, temperature=0.1, response_format="json_object")
+                    print(f"[KB Enrich] Decision result type: {type(decision_result)}, length: {len(str(decision_result)) if decision_result else 0}")
+                    print(f"[KB Enrich] Decision result preview: {str(decision_result)[:500] if decision_result else 'None'}")
+                    if decision_result:
+                        if isinstance(decision_result, dict):
+                            decision_json = decision_result
+                            decision_text = json.dumps(decision_result)
+                        else:
+                            decision_text = str(decision_result)
+                            try:
+                                decision_json = json.loads(decision_text)
+                            except Exception:
+                                decision_json = {"decisions": []}
+                        print(f"[KB Enrich] Extracted {len(decision_json.get('decisions', []))} decisions")
+                        meetings_collection.upsert(
+                            documents=[f"Decisions for {title}: {decision_text}"],
+                            metadatas=[{"video_id": video_id, "title": title, "date": date, "type": "decisions", "decisions_json": json.dumps(decision_json)}],
+                            ids=[f"{video_id}_decisions"]
+                        )
+                        enriched += 1
+                    else:
+                        print("[KB Enrich] Decision extraction returned None/empty")
+                except Exception as e:
+                    print(f"[KB Enrich] Decision extraction failed: {e}")
+
+            if "meeting_summary" not in existing_types:
+                yield send(65, "Generating summary...")
+                try:
+                    summary_prompt = f"""Summarize this civic meeting transcript in 3-4 sentences. Focus on key topics discussed, decisions made, and notable moments.
+
+Transcript:
+{transcript_preview}"""
+                    summary_result = call_ai_api(summary_prompt, max_tokens=300, model=_enrich_model, temperature=0.3)
+                    if summary_result:
+                        summary_text = summary_result if isinstance(summary_result, str) else str(summary_result)
+                        meetings_collection.upsert(
+                            documents=[f"Summary of {title}: {summary_text}"],
+                            metadatas=[{"video_id": video_id, "title": title, "date": date, "type": "meeting_summary", "summary_text": summary_text[:500]}],
+                            ids=[f"{video_id}_summary"]
+                        )
+                        enriched += 1
+                except Exception as e:
+                    print(f"[KB Enrich] Summary failed: {e}")
+
+            if "sentiment" not in existing_types:
+                yield send(85, "Analyzing sentiment...")
+                try:
+                    positive_words = {"approve", "approved", "support", "agree", "agreed", "thank", "thanks", "excellent", "good", "great", "progress", "success", "improve", "benefit", "positive", "pleased", "congratulations", "wonderful", "commend"}
+                    negative_words = {"oppose", "opposed", "concern", "concerned", "disagree", "problem", "issue", "deny", "denied", "reject", "rejected", "complaint", "frustrated", "disappointed", "worried", "unfortunately", "difficult", "fail", "failed"}
+                    words_lower = transcript_text.lower().split()
+                    total_w = max(len(words_lower), 1)
+                    pos_count = sum(1 for w in words_lower if w in positive_words)
+                    neg_count = sum(1 for w in words_lower if w in negative_words)
+                    sentiment_total = max(pos_count + neg_count, 1)
+                    polarity = round((pos_count - neg_count) / sentiment_total * 100, 3)
+                    subjectivity = round(sentiment_total / total_w * 100, 3)
+                    meetings_collection.upsert(
+                        documents=[f"Sentiment for {title}: polarity={polarity}, subjectivity={subjectivity}"],
+                        metadatas=[{"video_id": video_id, "title": title, "date": date, "type": "sentiment", "polarity": polarity, "subjectivity": subjectivity}],
+                        ids=[f"{video_id}_sentiment"]
+                    )
+                    enriched += 1
+                except Exception as e:
+                    print(f"[KB Enrich] Sentiment failed: {e}")
+
+            _invalidate_all_kb_caches()
+
+            yield send(100, "Done")
+            yield f"data: {_json.dumps({'done': True, 'enriched': enriched, 'video_id': video_id})}\n\n"
+
+        except Exception as e:
+            yield send(-1, f"Error: {str(e)}")
+
+    return StreamingResponse(generate(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/knowledge/ai_comparison")
+async def kb_ai_comparison(req: Request):
+    """AI-generated cross-meeting comparison with structured insights."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+    try:
+        meetings = _get_all_kb_docs()
+        if len(meetings) < 2:
+            return {"insights": [], "summary": "Need at least 2 meetings for comparison."}
+
+        # Gather summaries, entities, decisions
+        context_parts = []
+        for vid, m in sorted(meetings.items(), key=lambda x: x[1]["date"]):
+            date_str = m["date"]
+            if len(date_str) == 8:
+                date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+            summary = m.get("summary", "")
+            entities = m.get("entities_rollup", {})
+            decisions = m.get("decisions", {})
+            persons = ", ".join(entities.get("persons", [])[:5]) if entities else ""
+            topics = ", ".join(entities.get("topics", [])[:5]) if entities else ""
+            dec_count = len(decisions.get("decisions", [])) if decisions else 0
+            context_parts.append(f"Meeting: {m['title']} ({date_str})\nSummary: {summary}\nPeople: {persons}\nTopics: {topics}\nDecisions: {dec_count}")
+
+        _model = "gemini-2.5-flash" if GOOGLE_API_KEY else "gpt-4o"
+        prompt = f"""Analyze these {len(meetings)} civic meetings and generate a structured comparison.
+Return ONLY valid JSON with this structure:
+{{
+  "summary": "2-3 sentence overall summary of patterns across meetings",
+  "key_themes": [{{"theme": "Theme name", "description": "How this theme appears across meetings", "meetings_count": 3}}],
+  "trends": [{{"trend": "Trend description", "direction": "increasing|decreasing|stable", "details": "Explanation"}}],
+  "notable_changes": [{{"change": "What changed", "from_meeting": "Meeting title", "to_meeting": "Meeting title"}}],
+  "recurring_entities": [{{"name": "Entity name", "role": "Their role across meetings", "appearances": 4}}],
+  "recommendation": "One actionable insight from the data"
+}}
+
+Meetings:
+{chr(10).join(context_parts[:15])}"""
+
+        result = call_ai_api(prompt, max_tokens=1200, model=_model, temperature=0.3, response_format="json_object")
+        if result:
+            try:
+                parsed = json.loads(result) if isinstance(result, str) else result
+                return parsed
+            except Exception:
+                return {"summary": result if isinstance(result, str) else str(result), "key_themes": [], "trends": [], "notable_changes": [], "recurring_entities": []}
+        return {"summary": "AI comparison could not be generated.", "key_themes": [], "trends": []}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/knowledge/save_analysis")
+async def kb_save_analysis(req: Request):
+    """Save per-meeting AI analysis data to the KB for cross-meeting comparison."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+    data = await req.json()
+    video_id = data.get("video_id")
+    if not video_id:
+        raise HTTPException(400, "video_id required")
+
+    # Check if meeting is in KB
+    try:
+        existing = meetings_collection.get(where={"video_id": video_id})
+        if not existing or not existing["documents"]:
+            return {"saved": False, "reason": "Meeting not in KB"}
+    except Exception:
+        return {"saved": False, "reason": "KB query failed"}
+
+    meta = existing["metadatas"][0]
+    title = meta.get("title", "Unknown")
+    date = meta.get("date", "")
+    saved_count = 0
+
+    # Save entities if provided
+    entities_data = data.get("entities")
+    if entities_data:
+        entity_json = {"persons": [], "organizations": [], "places": [], "topics": []}
+        for e in entities_data:
+            etype = (e.get("type", "") or "").upper()
+            text = e.get("text", "")
+            if etype == "PERSON" or etype == "PER":
+                entity_json["persons"].append(text)
+            elif etype == "ORGANIZATION" or etype == "ORG":
+                entity_json["organizations"].append(text)
+            elif etype == "PLACE" or etype == "PLA":
+                entity_json["places"].append(text)
+            else:
+                entity_json["topics"].append(text)
+        meetings_collection.upsert(
+            documents=[f"Entities for {title}: {json.dumps(entity_json)}"],
+            metadatas=[{"video_id": video_id, "title": title, "date": date, "type": "entities_rollup", "entities_json": json.dumps(entity_json)}],
+            ids=[f"{video_id}_entities"]
+        )
+        saved_count += 1
+
+    # Save summary if provided
+    summary = data.get("summary")
+    if summary:
+        meetings_collection.upsert(
+            documents=[f"Summary of {title}: {summary}"],
+            metadatas=[{"video_id": video_id, "title": title, "date": date, "type": "meeting_summary", "summary_text": summary[:500]}],
+            ids=[f"{video_id}_summary"]
+        )
+        saved_count += 1
+
+    _invalidate_all_kb_caches()
+
+    return {"saved": True, "count": saved_count}
+
+
+# --- Framing lenses for civic discourse analysis ---
+FRAMING_LENSES = {
+    "financial": ["cost", "budget", "expense", "tax", "revenue", "funding", "fund", "fiscal", "debt", "appropriation", "expenditure", "dollar", "million", "billion", "grant", "bond", "levy", "fee", "rate", "assessment"],
+    "safety": ["safe", "safety", "danger", "dangerous", "risk", "protect", "protection", "security", "hazard", "emergency", "fire", "police", "crime", "accident", "injury"],
+    "community": ["neighbor", "neighborhood", "resident", "family", "families", "quality of life", "character", "community", "citizen", "public", "people", "children", "seniors", "youth"],
+    "environmental": ["environment", "environmental", "green", "sustainability", "sustainable", "pollution", "water", "wildlife", "tree", "trees", "climate", "energy", "waste", "recycling", "conservation"],
+    "legal": ["regulation", "code", "ordinance", "compliance", "permit", "zoning", "bylaw", "statute", "law", "legal", "enforcement", "violation", "license", "authority", "jurisdiction"],
+    "equity": ["affordable", "affordability", "access", "accessible", "inclusive", "fair", "diverse", "diversity", "equity", "equitable", "underserved", "disadvantaged", "disparity", "discrimination"],
+    "infrastructure": ["road", "roads", "traffic", "parking", "transit", "construction", "maintenance", "building", "sewer", "water main", "sidewalk", "bridge", "utility", "repair", "project"],
+    "process": ["timeline", "deadline", "delay", "schedule", "vote", "approve", "approval", "motion", "hearing", "meeting", "committee", "board", "review", "proposal", "amendment", "recommendation"],
+}
+
+_kb_framing_cache = {"data": None, "ts": 0}
+
+
+@app.post("/api/knowledge/framing_analysis")
+async def kb_framing_analysis(req: Request):
+    """Analyze how civic topics are framed across meetings using 8 discourse lenses."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+
+    data = await req.json()
+    video_ids_filter = data.get("video_ids")  # optional list of video_ids to include
+
+    now = time.time()
+    cache_key = json.dumps(sorted(video_ids_filter)) if video_ids_filter else "__all__"
+    if _kb_framing_cache.get("key") == cache_key and _kb_framing_cache["data"] and now - _kb_framing_cache["ts"] < 300:
+        return _kb_framing_cache["data"]
+
+    try:
+        all_meetings = _get_all_kb_docs()
+        if not all_meetings:
+            return {"meetings": [], "lens_definitions": FRAMING_LENSES}
+
+        # Use the processed dict format from _get_all_kb_docs()
+        meeting_texts = {}
+        meeting_meta = {}
+        for vid, mdata in all_meetings.items():
+            if video_ids_filter and vid not in video_ids_filter:
+                continue
+            if not mdata.get("chunks"):
+                continue
+            meeting_meta[vid] = {"title": mdata.get("title", "Unknown"), "date": mdata.get("date", "")}
+            texts = []
+            for chunk in mdata["chunks"]:
+                text = chunk
+                if "\n\nContent: " in text:
+                    text = text.split("\n\nContent: ", 1)[1]
+                texts.append(text)
+            meeting_texts[vid] = texts
+
+        # Analyze framing for each meeting
+        results = []
+        for vid, chunks in meeting_texts.items():
+            full_text = " ".join(chunks).lower()
+            sentences = [s.strip() for s in full_text.replace("?", ".").replace("!", ".").split(".") if len(s.strip()) > 10]
+            framings = {}
+            for lens, keywords in FRAMING_LENSES.items():
+                count = 0
+                for sent in sentences:
+                    if any(kw in sent for kw in keywords):
+                        count += 1
+                framings[lens] = count
+
+            m = meeting_meta[vid]
+            results.append({
+                "video_id": vid,
+                "title": m["title"],
+                "date": m["date"],
+                "framings": framings,
+                "total_sentences": len(sentences),
+            })
+
+        results.sort(key=lambda x: x.get("date", ""))
+        resp = {"meetings": results, "lens_definitions": {k: v[:5] for k, v in FRAMING_LENSES.items()}}
+        _kb_framing_cache["data"] = resp
+        _kb_framing_cache["ts"] = now
+        _kb_framing_cache["key"] = cache_key
+        return resp
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+_kb_wordcloud_cache = {"data": None, "ts": 0}
+
+
+@app.post("/api/knowledge/word_cloud")
+async def kb_word_cloud(req: Request):
+    """Compute word frequencies per meeting for cross-meeting word cloud visualization."""
+    if not CHROMADB_AVAILABLE or not meetings_collection:
+        raise HTTPException(503, "Knowledge Base not available")
+
+    data = await req.json()
+    video_ids_filter = data.get("video_ids")  # optional list of video_ids to include
+
+    now = time.time()
+    cache_key = json.dumps(sorted(video_ids_filter)) if video_ids_filter else "__all__"
+    if _kb_wordcloud_cache.get("key") == cache_key and _kb_wordcloud_cache["data"] and now - _kb_wordcloud_cache["ts"] < 300:
+        return _kb_wordcloud_cache["data"]
+
+    try:
+        all_meetings = _get_all_kb_docs()
+        if not all_meetings:
+            return {"words": [], "meetings": []}
+
+        # Civic stopwords (expanded)
+        stopwords = set([
+            "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with",
+            "by", "from", "is", "it", "its", "this", "that", "was", "are", "were", "be", "been",
+            "have", "has", "had", "do", "does", "did", "will", "would", "could", "should", "may",
+            "might", "can", "shall", "not", "no", "so", "if", "as", "than", "then", "just", "also",
+            "very", "too", "about", "up", "out", "all", "some", "any", "each", "every", "more",
+            "most", "other", "into", "over", "after", "before", "between", "through", "during",
+            "they", "them", "their", "he", "she", "him", "her", "we", "us", "our", "you", "your",
+            "i", "me", "my", "who", "what", "which", "when", "where", "how", "why", "there",
+            "here", "these", "those", "one", "two", "three", "four", "five", "going", "think",
+            "know", "want", "like", "said", "well", "get", "got", "make", "made", "take",
+            "come", "go", "see", "look", "way", "back", "now", "new", "good", "much", "many",
+            "being", "been", "because", "really", "right", "thing", "things", "something",
+            "meeting", "board", "committee", "council", "member", "members", "selectboard",
+            "select", "chair", "chairman", "chairwoman", "motion", "second", "vote", "yes",
+            "thank", "thanks", "please", "okay", "yeah", "mr", "ms", "mrs", "dr",
+            "town", "public", "people", "school", "time", "year", "years", "say", "saying",
+            "work", "working", "point", "need", "lot", "question", "questions", "talk", "talking",
+            "put", "let", "done", "don", "didn", "doesn", "isn", "wasn", "aren", "won", "wouldn",
+            "actually", "certainly", "tonight", "today", "tomorrow", "last", "next", "first",
+            "great", "different", "important", "specific", "able", "give", "given",
+            "hear", "heard", "feel", "believe", "understand", "mean", "means", "part",
+            "number", "kind", "bit", "still", "even", "sure", "already", "enough",
+            "around", "down", "keep", "left", "long", "move", "moved", "end", "start",
+            "sort", "little", "again", "doing", "terms", "day", "days", "going",
+            "based", "hand", "real", "place", "set", "try", "trying", "use", "used",
+            "called", "wanted", "told", "looking", "making", "getting", "coming",
+            "another", "together", "across", "every", "whether", "whole", "quite",
+            "sorry", "maybe", "thought", "ask", "asked", "asking", "same", "week",
+            "going", "said", "say", "saying", "course", "guess", "point", "appreciate",
+        ])
+
+        # Use the processed dict format from _get_all_kb_docs()
+        meeting_texts = {}
+        meeting_meta = {}
+        for vid, mdata in all_meetings.items():
+            if video_ids_filter and vid not in video_ids_filter:
+                continue
+            if not mdata.get("chunks"):
+                continue
+            meeting_meta[vid] = {"title": mdata.get("title", "Unknown"), "date": mdata.get("date", "")}
+            texts = []
+            for chunk in mdata["chunks"]:
+                text = chunk
+                if "\n\nContent: " in text:
+                    text = text.split("\n\nContent: ", 1)[1]
+                texts.append(text)
+            meeting_texts[vid] = texts
+
+        # Compute per-meeting word frequencies
+        import re as _re
+        word_meeting_counts = {}  # word -> { vid: count }
+        for vid, chunks in meeting_texts.items():
+            full_text = " ".join(chunks).lower()
+            words = _re.findall(r'\b[a-z]{3,}\b', full_text)
+            freq = {}
+            for w in words:
+                if w not in stopwords:
+                    freq[w] = freq.get(w, 0) + 1
+            for w, c in freq.items():
+                if w not in word_meeting_counts:
+                    word_meeting_counts[w] = {}
+                word_meeting_counts[w][vid] = c
+
+        # Score words: prefer words that appear across multiple meetings
+        scored = []
+        for word, per_meeting in word_meeting_counts.items():
+            total = sum(per_meeting.values())
+            num_meetings = len(per_meeting)
+            # Score = total * sqrt(num_meetings) to boost cross-meeting words
+            score = total * (num_meetings ** 0.5)
+            meetings_list = [
+                {"video_id": vid, "title": meeting_meta.get(vid, {}).get("title", ""), "count": cnt}
+                for vid, cnt in sorted(per_meeting.items(), key=lambda x: -x[1])
+            ]
+            scored.append({"word": word, "total": total, "num_meetings": num_meetings, "score": score, "meetings": meetings_list})
+
+        scored.sort(key=lambda x: -x["score"])
+        top_words = scored[:80]
+
+        meetings_info = [{"video_id": vid, "title": m["title"], "date": m["date"]} for vid, m in sorted(meeting_meta.items(), key=lambda x: x[1].get("date", ""))]
+
+        resp = {"words": top_words, "meetings": meetings_info}
+        _kb_wordcloud_cache["data"] = resp
+        _kb_wordcloud_cache["ts"] = now
+        _kb_wordcloud_cache["key"] = cache_key
+        return resp
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 
 # ============================================================================
 # NEW: MEETING COMPARISON ENDPOINTS (v5.0)
@@ -9056,6 +10469,29 @@ def _save_subscriptions():
 
 _load_subscriptions()
 ISSUE_TIMELINES = {}  # {issue_id: {name, meetings: [{video_id, date, summary}]}}
+_ISSUES_FILE = os.path.join(BASE_DIR, "cache", "issues.json")
+
+def _load_issues():
+    """Load issues from disk."""
+    global ISSUE_TIMELINES
+    try:
+        if os.path.exists(_ISSUES_FILE):
+            with open(_ISSUES_FILE, 'r') as f:
+                ISSUE_TIMELINES = json.load(f)
+            print(f"[Issues] Loaded {len(ISSUE_TIMELINES)} issues")
+    except Exception as e:
+        print(f"[Issues] Load error: {e}")
+
+def _save_issues():
+    """Persist issues to disk."""
+    try:
+        os.makedirs(os.path.dirname(_ISSUES_FILE), exist_ok=True)
+        with open(_ISSUES_FILE, 'w') as f:
+            json.dump(ISSUE_TIMELINES, f, indent=2)
+    except Exception as e:
+        print(f"[Issues] Save error: {e}")
+
+_load_issues()
 JARGON_DICTIONARY = {
     "TIF": "Tax Increment Financing - A special zone where property tax increases fund local improvements. For example, when a city designates a blighted area as a TIF district, property tax growth in that area goes toward improving streets, utilities, and buildings rather than the general city budget.",
     "CIP": "Capital Improvement Plan - A multi-year plan for major infrastructure investments like roads, buildings, and water systems. Your city council reviews and approves this plan annually to prioritize which big projects get funded over the next 5-10 years.",
@@ -9189,6 +10625,7 @@ async def create_issue(req: Request):
         "meetings": [],
         "created_at": datetime.now().isoformat()
     }
+    _save_issues()
     return {"status": "created", "issue_id": issue_id, "name": name}
 
 @app.get("/api/issues/list")
@@ -9211,6 +10648,7 @@ async def add_meeting_to_issue(req: Request):
         "decisions": data.get("decisions", [])
     }
     ISSUE_TIMELINES[issue_id]["meetings"].append(meeting)
+    _save_issues()
     return {"status": "added", "issue_id": issue_id}
 
 @app.post("/api/issues/auto_track")

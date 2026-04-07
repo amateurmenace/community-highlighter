@@ -11,13 +11,10 @@ import {
   apiExtendedAnalytics,
   apiOptimizationStats, apiClearCache,
   apiChatWithMeeting, apiChatSuggestions,
-  apiAddToKnowledgeBase, apiSearchKnowledgeBase, apiFindRelated, apiKnowledgeBaseStats,
+  apiAddToKnowledgeBase, apiSearchKnowledgeBase, apiFindRelated, apiKnowledgeBaseStats, streamAddToKnowledgeBase, apiListKBMeetings,
   apiClipPreview, apiStartLiveMonitoring, apiVideoFormats, apiClipThumbnails,
   apiStoreTranscript,
   // v6.0: New feature API calls
-  apiCreateSubscription, apiListSubscriptions, apiDeleteSubscription, apiCheckSubscriptionMatches,
-  apiCreateIssue, apiListIssues, apiAddMeetingToIssue, apiAutoTrackIssue, apiGetIssueTimeline,
-  apiCompareMeetings,
   apiExplainJargon, apiGetJargonDictionary,
   apiBuildKnowledgeGraph, apiTopicTrends, apiExportSrt, apiExportPdf,
   // v6.1: New feature API calls
@@ -25,7 +22,8 @@ import {
   apiSimplifyText, apiTranslateSummary,
   // v8.0: Streaming, WebSocket job status, share precompute
   streamSummaryAI, connectJobWebSocket, apiSharePrecompute,
-  streamChatWithMeeting
+  streamChatWithMeeting,
+  apiSaveAnalysis
 } from "./api";
 // Extracted components
 import AnimatedTagline from './components/AnimatedTagline';
@@ -33,7 +31,9 @@ import AboutPage from './components/AboutPage';
 import SummaryLoadingTerminal from './components/SummaryLoadingTerminal';
 import SectionPreviews from './components/SectionPreviews';
 import GuidedTour from './components/GuidedTour';
-import { QuestionFlowDiagram, FramingPluralityMap, DisagreementTopology, IssueLifecycle } from './components/MeetingViz';
+import { QuestionFlowDiagram, FramingPluralityMap } from './components/MeetingViz';
+import VizExportButton from './components/VizExportButton';
+// KBDashboard now loads as standalone page at ?page=kb (code-split in main.jsx)
 
 // v5.2: Use relative URLs for deployment compatibility
 const BACKEND_URL = "";
@@ -582,19 +582,27 @@ function MeetingStatsCard({ cues, fullText, sents, videoTitle }) {
 // ============================================================================
 
 const RECHARTS_COLORS = ['#1E7F63', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
-function KnowledgeBasePanel({ videoId, videoTitle, fullText, entities }) {
+function KnowledgeBasePanel({ videoId, videoTitle, fullText, entities, addToBasket, onOpenDashboard }) {
   const [kbStats, setKbStats] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [relatedMeetings, setRelatedMeetings] = useState([]);
+  const [kbMeetings, setKbMeetings] = useState([]);
+  const [showLibrary, setShowLibrary] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  const [addProgress, setAddProgress] = useState(null); // {progress, stage}
   const [isSearching, setIsSearching] = useState(false);
   const [addedToKb, setAddedToKb] = useState(false);
   const [error, setError] = useState(null);
+  const [expandedMeeting, setExpandedMeeting] = useState(null);
+  const [addByUrl, setAddByUrl] = useState('');
+  const [addByUrlProgress, setAddByUrlProgress] = useState(null);
+  const [addByUrlDone, setAddByUrlDone] = useState(false);
 
-  // Load KB stats on mount
+  // Load KB stats on mount, retry after 3s if failed
   useEffect(() => {
-    apiKnowledgeBaseStats().then(setKbStats).catch(() => setKbStats(null));
+    const loadStats = () => apiKnowledgeBaseStats().then(data => { setKbStats(data); return true; }).catch(() => false);
+    loadStats().then(ok => { if (!ok) setTimeout(loadStats, 3000); });
   }, []);
 
   // Check if current meeting is already in KB
@@ -605,26 +613,44 @@ function KnowledgeBasePanel({ videoId, videoTitle, fullText, entities }) {
       .catch(() => {});
   }, [videoId]);
 
+  const loadMeetingLibrary = async () => {
+    try {
+      const res = await apiListKBMeetings();
+      setKbMeetings(res.meetings || []);
+    } catch (e) { console.error('Failed to load meetings:', e); }
+  };
+
   const handleAddMeeting = async () => {
     if (!videoId) return;
     setIsAdding(true);
+    setAddProgress({ progress: 0, stage: 'Starting...' });
     setError(null);
-    try {
-      const res = await apiAddToKnowledgeBase({ videoId, metadata: { title: videoTitle } });
-      setAddedToKb(true);
-      setKbStats(prev => prev ? { ...prev, total_meetings: (prev.total_meetings || 0) + 1, total_documents: (prev.total_documents || 0) + (res.documents_added || 0) } : prev);
-      // Auto-find related meetings
-      const related = await apiFindRelated({ videoId, limit: 5 });
-      if (related.related) setRelatedMeetings(related.related);
-    } catch (err) {
-      const msg = err.message || 'Failed to add meeting';
-      if (msg.includes('503') || msg.includes('ChromaDB') || msg.includes('not available')) {
-        setError('Knowledge Base requires the desktop app. Cloud mode does not support cross-meeting search.');
-      } else {
-        setError(msg);
+    streamAddToKnowledgeBase(
+      { videoId, metadata: { title: videoTitle } },
+      (data) => setAddProgress({ progress: data.progress, stage: data.stage }),
+      (data) => {
+        setAddedToKb(true);
+        setIsAdding(false);
+        setAddProgress(null);
+        setKbStats(prev => prev ? { ...prev, total_meetings: (prev.total_meetings || 0) + 1, total_documents: (prev.total_documents || 0) + (data.documents_added || 0) } : prev);
+        // Refresh meeting library
+        loadMeetingLibrary();
+        // Auto-find related meetings
+        apiFindRelated({ videoId, limit: 5 }).then(res => {
+          if (res.related) setRelatedMeetings(res.related);
+        }).catch(() => {});
+      },
+      (err) => {
+        const msg = err.message || 'Failed to add meeting';
+        if (msg.includes('503') || msg.includes('ChromaDB') || msg.includes('not available')) {
+          setError('Knowledge Base is initializing. Please try again in a moment.');
+        } else {
+          setError(msg);
+        }
+        setIsAdding(false);
+        setAddProgress(null);
       }
-    }
-    setIsAdding(false);
+    );
   };
 
   const handleSearch = async () => {
@@ -652,18 +678,68 @@ function KnowledgeBasePanel({ videoId, videoTitle, fullText, entities }) {
     setIsSearching(false);
   };
 
+  const handleToggleLibrary = () => {
+    if (!showLibrary && kbMeetings.length === 0) loadMeetingLibrary();
+    setShowLibrary(!showLibrary);
+  };
+
+  // Extract video ID from a YouTube URL
+  const extractVideoId = (url) => {
+    if (!url) return null;
+    const patterns = [
+      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/)([a-zA-Z0-9_-]{11})/,
+      /^([a-zA-Z0-9_-]{11})$/,
+    ];
+    for (const p of patterns) {
+      const m = url.match(p);
+      if (m) return m[1];
+    }
+    return null;
+  };
+
+  const handleAddByUrl = () => {
+    const vid = extractVideoId(addByUrl.trim());
+    if (!vid) { setError('Invalid YouTube URL. Paste a full URL or 11-character video ID.'); return; }
+    setIsAdding(true);
+    setAddByUrlProgress({ progress: 0, stage: 'Starting...' });
+    setAddByUrlDone(false);
+    setError(null);
+    streamAddToKnowledgeBase(
+      { videoId: vid, metadata: {} },
+      (data) => setAddByUrlProgress({ progress: data.progress, stage: data.stage }),
+      (data) => {
+        setIsAdding(false);
+        setAddByUrlProgress(null);
+        setAddByUrlDone(true);
+        setAddByUrl('');
+        setKbStats(prev => prev ? { ...prev, total_meetings: (prev.total_meetings || 0) + 1, total_documents: (prev.total_documents || 0) + (data.documents_added || 0) } : prev);
+        loadMeetingLibrary();
+        setTimeout(() => setAddByUrlDone(false), 4000);
+      },
+      (err) => {
+        const msg = err.message || 'Failed to add meeting';
+        if (msg.includes('503') || msg.includes('ChromaDB') || msg.includes('not available')) {
+          setError('Knowledge Base is initializing. Please try again in a moment.');
+        } else {
+          setError(msg);
+        }
+        setIsAdding(false);
+        setAddByUrlProgress(null);
+      }
+    );
+  };
+
+  const pad = 3;
+
   return (
     <div className="viz-card" style={{ gridColumn: '1 / -1', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155' }}>
       <h3 style={{ color: '#f1f5f9' }}>Knowledge Base</h3>
       <div style={{ background: '#1e293b', borderRadius: 8, padding: '14px 16px', marginBottom: 16, borderLeft: '3px solid #22c55e' }}>
         <p style={{ color: '#e2e8f0', fontSize: 14, margin: '0 0 8px', lineHeight: 1.6 }}>
-          The Knowledge Base lets you build a searchable archive across multiple meetings. Once you add a meeting, its entire transcript is indexed so you can search across all stored meetings at once — for example, searching "budget" will find every mention across every meeting you've added.
-        </p>
-        <p style={{ color: '#94a3b8', fontSize: 13, margin: '0 0 8px', lineHeight: 1.5 }}>
-          <strong style={{ color: '#e2e8f0' }}>How it works:</strong> Click "Add This Meeting to KB" to index the current meeting's transcript. Then use the search bar to find topics, names, or phrases across all meetings. The system also automatically finds related meetings based on content similarity.
+          Build a searchable archive across multiple meetings. Index meetings to search across all transcripts at once, find patterns, and create highlight reels spanning multiple meetings.
         </p>
         <p style={{ color: '#94a3b8', fontSize: 12, margin: 0, lineHeight: 1.5, fontStyle: 'italic' }}>
-          Example: Add 10 city council meetings, then search "sidewalk repair" to find every meeting where sidewalks were discussed, with relevant excerpts and timestamps.
+          Works in both desktop and cloud mode. All indexed meetings are shared across all users.
         </p>
       </div>
 
@@ -671,7 +747,7 @@ function KnowledgeBasePanel({ videoId, videoTitle, fullText, entities }) {
       {kbStats && (
         <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
           <span style={{ padding: '4px 12px', background: '#1e293b', borderRadius: 6, fontSize: 12, color: '#94a3b8' }}>
-            {kbStats.total_meetings || 0} meetings stored
+            {kbStats.total_meetings || 0} meetings indexed
           </span>
           <span style={{ padding: '4px 12px', background: '#1e293b', borderRadius: 6, fontSize: 12, color: '#94a3b8' }}>
             {kbStats.total_documents || 0} document chunks
@@ -679,24 +755,87 @@ function KnowledgeBasePanel({ videoId, videoTitle, fullText, entities }) {
         </div>
       )}
 
-      {/* Add to KB */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
-        <button
-          onClick={handleAddMeeting}
-          disabled={isAdding || addedToKb || !videoId}
-          style={{
-            padding: '8px 16px', fontSize: 13, fontWeight: 600, borderRadius: 8, border: 'none', cursor: addedToKb ? 'default' : 'pointer',
-            background: addedToKb ? '#1e293b' : 'linear-gradient(135deg, #22c55e, #16a34a)', color: addedToKb ? '#4ade80' : 'white',
-            transition: 'all 0.2s'
-          }}
-        >
-          {isAdding ? 'Indexing transcript...' : addedToKb ? 'Meeting saved to Knowledge Base' : 'Add This Meeting to Knowledge Base'}
+      {/* Open Analytics Dashboard */}
+      {kbStats && (kbStats.total_meetings || 0) >= 1 && onOpenDashboard && (
+        <button onClick={onOpenDashboard}
+          style={{ display: 'block', width: '100%', padding: '12px 20px', fontSize: 14, fontWeight: 700, borderRadius: 10, border: 'none', cursor: 'pointer', marginBottom: 16, background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: 'white', letterSpacing: '0.02em' }}>
+          Open Analytics Dashboard — Cross-Meeting Insights
         </button>
-        {addedToKb && (
-          <button onClick={handleFindRelated} disabled={isSearching}
-            style={{ padding: '8px 16px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #475569', background: '#1e293b', color: '#e2e8f0', cursor: 'pointer' }}>
-            Find Related Meetings
+      )}
+
+      {/* Add to KB with progress */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: addProgress ? 8 : 0 }}>
+          <button
+            onClick={handleAddMeeting}
+            disabled={isAdding || addedToKb || !videoId}
+            style={{
+              padding: '8px 16px', fontSize: 13, fontWeight: 600, borderRadius: 8, border: 'none', cursor: addedToKb ? 'default' : 'pointer',
+              background: addedToKb ? '#1e293b' : 'linear-gradient(135deg, #22c55e, #16a34a)', color: addedToKb ? '#4ade80' : 'white',
+              transition: 'all 0.2s'
+            }}
+          >
+            {isAdding ? 'Indexing...' : addedToKb ? 'Meeting saved to Knowledge Base' : 'Add This Meeting to Knowledge Base'}
           </button>
+          {addedToKb && (
+            <button onClick={handleFindRelated} disabled={isSearching}
+              style={{ padding: '8px 16px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #475569', background: '#1e293b', color: '#e2e8f0', cursor: 'pointer' }}>
+              Find Related Meetings
+            </button>
+          )}
+          <button onClick={handleToggleLibrary}
+            style={{ padding: '8px 16px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #475569', background: showLibrary ? '#334155' : '#1e293b', color: '#e2e8f0', cursor: 'pointer' }}>
+            {showLibrary ? 'Hide' : 'Show'} Meeting Library
+          </button>
+        </div>
+        {/* Progress bar */}
+        {addProgress && addProgress.progress >= 0 && (
+          <div style={{ background: '#1e293b', borderRadius: 8, padding: '10px 14px', border: '1px solid #334155' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 12 }}>
+              <span style={{ color: '#94a3b8' }}>{addProgress.stage}</span>
+              <span style={{ color: '#4ade80', fontWeight: 600 }}>{addProgress.progress}%</span>
+            </div>
+            <div style={{ background: '#0f172a', borderRadius: 4, height: 8, overflow: 'hidden' }}>
+              <div style={{
+                background: 'linear-gradient(90deg, #22c55e, #4ade80)', height: '100%', borderRadius: 4,
+                width: `${addProgress.progress}%`, transition: 'width 0.3s ease'
+              }} />
+            </div>
+            <div style={{ fontSize: 11, color: '#64748b', marginTop: 6 }}>Please do not navigate away while indexing</div>
+          </div>
+        )}
+      </div>
+
+      {/* Add any meeting by URL */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6, fontWeight: 600 }}>Add any meeting by URL</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            type="text"
+            value={addByUrl}
+            onChange={e => { setAddByUrl(e.target.value); setAddByUrlDone(false); }}
+            onKeyDown={e => e.key === 'Enter' && !isAdding && handleAddByUrl()}
+            placeholder="Paste a YouTube URL to add to the Knowledge Base..."
+            style={{
+              flex: 1, padding: '10px 14px', fontSize: 13, borderRadius: 8, border: '1px solid #475569',
+              background: '#1e293b', color: '#e2e8f0', outline: 'none'
+            }}
+          />
+          <button onClick={handleAddByUrl} disabled={isAdding || !addByUrl.trim()}
+            style={{ padding: '8px 18px', fontSize: 13, fontWeight: 600, borderRadius: 8, border: 'none', background: addByUrlDone ? '#1e293b' : 'linear-gradient(135deg, #22c55e, #16a34a)', color: addByUrlDone ? '#4ade80' : 'white', cursor: isAdding ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}>
+            {isAdding && addByUrlProgress ? 'Adding...' : addByUrlDone ? 'Added' : 'Add to KB'}
+          </button>
+        </div>
+        {addByUrlProgress && addByUrlProgress.progress >= 0 && (
+          <div style={{ marginTop: 8, background: '#1e293b', borderRadius: 8, padding: '8px 12px', border: '1px solid #334155' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 11 }}>
+              <span style={{ color: '#94a3b8' }}>{addByUrlProgress.stage}</span>
+              <span style={{ color: '#4ade80', fontWeight: 600 }}>{addByUrlProgress.progress}%</span>
+            </div>
+            <div style={{ background: '#0f172a', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+              <div style={{ background: 'linear-gradient(90deg, #22c55e, #4ade80)', height: '100%', borderRadius: 4, width: `${addByUrlProgress.progress}%`, transition: 'width 0.3s ease' }} />
+            </div>
+          </div>
         )}
       </div>
 
@@ -721,7 +860,7 @@ function KnowledgeBasePanel({ videoId, videoTitle, fullText, entities }) {
 
       {error && <div style={{ color: '#ef4444', fontSize: 12, marginBottom: 8 }}>{error}</div>}
 
-      {/* Search results */}
+      {/* Search results with + Clip buttons */}
       {searchResults.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', marginBottom: 8 }}>Search Results ({searchResults.length})</div>
@@ -741,6 +880,12 @@ function KnowledgeBasePanel({ videoId, videoTitle, fullText, entities }) {
                 }} style={{ fontSize: 10, padding: '2px 8px', background: '#334155', border: 'none', borderRadius: 4, color: '#e2e8f0', cursor: 'pointer' }}>
                   Open Meeting
                 </button>
+                {addToBasket && (
+                  <button onClick={() => addToBasket({ start: 0, end: 30, label: (result.excerpt || '').slice(0, 50), videoId: result.video_id })}
+                    style={{ fontSize: 10, padding: '2px 8px', background: '#f59e0b', border: 'none', borderRadius: 4, color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
+                    + Clip
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -749,7 +894,7 @@ function KnowledgeBasePanel({ videoId, videoTitle, fullText, entities }) {
 
       {/* Related meetings */}
       {relatedMeetings.length > 0 && (
-        <div>
+        <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', marginBottom: 8 }}>Related Meetings</div>
           {relatedMeetings.map((meeting, idx) => (
             <div key={idx} style={{ padding: '10px 12px', marginBottom: 6, background: '#1e293b', borderRadius: 8, borderLeft: '3px solid #22c55e' }}>
@@ -773,19 +918,93 @@ function KnowledgeBasePanel({ videoId, videoTitle, fullText, entities }) {
         </div>
       )}
 
+      {/* Meeting Library */}
+      {showLibrary && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#f1f5f9', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            Meeting Library
+            <span style={{ fontSize: 11, fontWeight: 500, color: '#94a3b8' }}>({kbMeetings.length} meetings indexed by all users)</span>
+          </div>
+          {kbMeetings.length === 0 ? (
+            <div style={{ fontSize: 12, color: '#64748b', padding: '16px', textAlign: 'center', background: '#1e293b', borderRadius: 8 }}>
+              No meetings indexed yet. Add the current meeting to get started.
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10 }}>
+              {kbMeetings.map((meeting, idx) => (
+                <div key={idx} style={{
+                  background: '#1e293b', borderRadius: 10, overflow: 'hidden', border: '1px solid #334155',
+                  cursor: 'pointer', transition: 'border-color 0.15s',
+                }}
+                  onMouseOver={e => e.currentTarget.style.borderColor = '#4ade80'}
+                  onMouseOut={e => e.currentTarget.style.borderColor = '#334155'}
+                >
+                  {/* Thumbnail */}
+                  <div style={{ position: 'relative', paddingTop: '56.25%', background: '#0f172a' }}>
+                    <img
+                      src={`https://img.youtube.com/vi/${meeting.video_id}/mqdefault.jpg`}
+                      alt=""
+                      style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={e => e.target.style.display = 'none'}
+                    />
+                  </div>
+                  <div style={{ padding: '10px 12px' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#f1f5f9', marginBottom: 4, lineHeight: 1.3 }}>
+                      {meeting.title}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8 }}>
+                      {meeting.date ? `${meeting.date.slice(0, 4)}-${meeting.date.slice(4, 6)}-${meeting.date.slice(6, 8)}` : 'Date unknown'}
+                      {' '} &middot; {meeting.chunk_count} chunks indexed
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button onClick={(e) => { e.stopPropagation(); window.location.href = `/?v=${meeting.video_id}`; }}
+                        style={{ fontSize: 10, padding: '3px 10px', background: 'linear-gradient(135deg, #22c55e, #16a34a)', border: 'none', borderRadius: 4, color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
+                        Load Meeting
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); window.open(`/?v=${meeting.video_id}`, '_blank'); }}
+                        style={{ fontSize: 10, padding: '3px 10px', background: '#334155', border: 'none', borderRadius: 4, color: '#e2e8f0', cursor: 'pointer' }}>
+                        Open in New Tab
+                      </button>
+                      <button onClick={(e) => {
+                        e.stopPropagation();
+                        setExpandedMeeting(expandedMeeting === meeting.video_id ? null : meeting.video_id);
+                      }}
+                        style={{ fontSize: 10, padding: '3px 10px', background: '#475569', border: 'none', borderRadius: 4, color: '#e2e8f0', cursor: 'pointer' }}>
+                        {expandedMeeting === meeting.video_id ? 'Hide Preview' : 'Preview'}
+                      </button>
+                    </div>
+                    {/* Expanded: embedded video */}
+                    {expandedMeeting === meeting.video_id && (
+                      <div style={{ marginTop: 10 }}>
+                        <iframe
+                          src={`https://www.youtube.com/embed/${meeting.video_id}`}
+                          style={{ width: '100%', height: 180, border: 'none', borderRadius: 6 }}
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {!kbStats && (
         <div style={{ fontSize: 12, color: '#64748b', padding: '12px', background: '#1e293b', borderRadius: 8 }}>
-          Knowledge Base requires ChromaDB. If not available, the backend will indicate this.
+          Knowledge Base is initializing. This may take a moment on first load.
         </div>
       )}
     </div>
   );
 }
 
-// v8.3: Topic trends across meetings in knowledge base
-const TREND_COLORS = ['#4ade80', '#3b82f6', '#f59e0b', '#ef4444', '#a78bfa', '#ec4899', '#14b8a6', '#f97316'];
+// v9.3: TopicTrendsChart and EntityNetworkGraph moved to KBDashboard.jsx
+// (components removed from App.jsx — see src/components/KBDashboard.jsx)
 
-function TopicTrendsChart() {
+function _Deprecated_TopicTrendsChart() {
   const [trendsData, setTrendsData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -1149,6 +1368,7 @@ function DecisionTimeline({ sents, playerRef, videoId, addToBasket, pad, openExp
 
 // UPDATED: Entity preview with smart defaults and in-modal switching
 function MentionedEntitiesCard({ entities, isLoading }) {
+  const cardRef = useRef(null);
   const [selectedEntity, setSelectedEntity] = useState(null);
   const [viewMode, setViewMode] = useState('default'); // 'default', 'maps', 'wikipedia'
 
@@ -1275,7 +1495,8 @@ function MentionedEntitiesCard({ entities, isLoading }) {
       )}
 
       {/* Entity List */}
-      <div className="viz-card entities-card">
+      <div ref={cardRef} className="viz-card entities-card" style={{ position: 'relative' }}>
+        <VizExportButton targetRef={cardRef} filename="entities" />
         <h3>People, Places, & Things</h3>
         <p className="viz-desc">
           Click any entity to explore. Places show maps, all show Wikipedia and News.
@@ -1354,6 +1575,7 @@ function SearchResultCard({ match, query, t, openExpandedAt, addToBasket, player
 
 // NEW: Participation Tracker - Shows meeting engagement metrics
 function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, playerRef, videoId, pad, t }) {
+  const cardRef = useRef(null);
   const [engagementData, setEngagementData] = useState(null);
   const [selectedMetric, setSelectedMetric] = useState(null);
   const [matchingResults, setMatchingResults] = useState([]);
@@ -1509,7 +1731,8 @@ function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, pl
   ];
 
   return (
-    <div className="viz-card participation-tracker" style={{ background: '#0f172a', border: '1px solid #1e293b' }}>
+    <div ref={cardRef} className="viz-card participation-tracker" style={{ background: '#0f172a', border: '1px solid #1e293b', position: 'relative' }}>
+      <VizExportButton targetRef={cardRef} filename="participation-tracker" />
       <h3 style={{ color: '#f1f5f9' }}>Participation Tracker</h3>
       <p className="viz-desc" style={{ color: '#94a3b8' }}>Click metrics to see details. Click chart to jump to video.</p>
 
@@ -1599,6 +1822,7 @@ function ParticipationTracker({ sents, entities, openExpandedAt, addToBasket, pl
 }
 
 function TopicHeatMap({ fullText, sents, openExpandedAt, t, addToBasket, playerRef, videoId, pad }) {
+  const cardRef = useRef(null);
   const [topicData, setTopicData] = useState([]);
   const [selectedTopic, setSelectedTopic] = useState(null);
   const [selectedSentence, setSelectedSentence] = useState(null);
@@ -1739,7 +1963,8 @@ function TopicHeatMap({ fullText, sents, openExpandedAt, t, addToBasket, playerR
         </div>
       )}
 
-      <div className="viz-card topic-heatmap" style={{ gridColumn: '1 / -1' }}>
+      <div ref={cardRef} className="viz-card topic-heatmap" style={{ gridColumn: '1 / -1', position: 'relative' }}>
+        <VizExportButton targetRef={cardRef} filename="topic-coverage-map" />
         <h3>Topic Coverage Map</h3>
         <p className="viz-desc">
           See which topics were discussed over the course of the video. Click a row to see related sentences.
@@ -1820,6 +2045,7 @@ function TopicHeatMap({ fullText, sents, openExpandedAt, t, addToBasket, playerR
 }
 
 function DisagreementTimeline({ sents, playerRef, videoId, openExpandedAt, addToBasket, pad }) {
+  const cardRef = useRef(null);
   const [disagreements, setDisagreements] = useState([]);
   const [selectedMoment, setSelectedMoment] = useState(null);
 
@@ -1902,7 +2128,8 @@ function DisagreementTimeline({ sents, playerRef, videoId, openExpandedAt, addTo
   const labels = axisLabels(totalDuration);
 
   return (
-    <div className="viz-card disagreement-timeline-card disagreement-timeline" style={{ gridColumn: '1 / -1' }}>
+    <div ref={cardRef} className="viz-card disagreement-timeline-card disagreement-timeline" style={{ gridColumn: '1 / -1', position: 'relative' }}>
+      <VizExportButton targetRef={cardRef} filename="moments-of-disagreement" />
       <h3>Moments of Disagreement {disagreements.length > 0 && <span style={{ fontSize: 13, fontWeight: 500, color: '#ef4444', marginLeft: 8 }}>({disagreements.length} detected)</span>}</h3>
       <p className="viz-desc">
         This timeline flags potential moments of disagreement or concern. Click a marker to see the clip. Larger markers indicate stronger disagreement language.
@@ -1978,6 +2205,7 @@ function DisagreementTimeline({ sents, playerRef, videoId, openExpandedAt, addTo
 
 // NEW: Cross-Reference Network - IMPROVED with network graph
 function CrossReferenceNetwork({ fullText, entities }) {
+  const cardRef = useRef(null);
   const [hoveredNode, setHoveredNode] = useState(null);
   const [nodePositions, setNodePositions] = useState([]);
   const [draggingNode, setDraggingNode] = useState(null);
@@ -1992,13 +2220,13 @@ function CrossReferenceNetwork({ fullText, entities }) {
 
     // Also extract top non-entity keywords (2+ word phrases that appear 5+ times)
     const wordFreq = {};
-    const stopwords = new Set(['the','a','an','and','or','but','in','on','at','to','for','of','is','it','that','this','was','are','be','has','have','had','will','with','from','they','we','been','not','also','can','would','there','their','than','its','into','more','other','some','very','just','about','over','such','only','these','those','may','should','could','each','which','do','if','out','up','so','no','our','what','when','how','all','were','her','she','him','his','my','your','any','two','new','now','way','who','did','get','own','say','too','use','one','said','many','then','them','like','well','back','been','much','most','take','made','after','still','where','most','know','need']);
+    const stopwords = new Set(['the','a','an','and','or','but','in','on','at','to','for','of','is','it','that','this','was','are','be','has','have','had','will','with','from','they','we','been','not','also','can','would','there','their','than','its','into','more','other','some','very','just','about','over','such','only','these','those','may','should','could','each','which','do','if','out','up','so','no','our','what','when','how','all','were','her','she','him','his','my','your','any','two','new','now','way','who','did','get','own','say','too','use','one','said','many','then','them','like','well','back','been','much','most','take','made','after','still','where','know','need','going','think','want','really','actually','yeah','okay','right','sure','thing','things','something','people','time','meeting','question','point','year','years','look','come','make','work','talk','move','part','kind','stuff','sort','maybe','might','keep','give','tell','feel','seem','thought','went','getting','guess','little','pretty','quite','first','last','good','great','thank','thanks','please','here','before','through','being','another','because','being','every','same','different','long','next','even','again','does','done','doing','during','around','help','came','goes','since','until','while','both','between','under','down','without','those','myself','means','already','enough','called','number','three','four','five','line','order','place','city','town','state','item','motion','vote','board','council','chair','member','members','public','comment','comments','agenda','minutes','committee','second','minute','tonight','today','tonight']);
     sents.forEach(s => {
-      const words = s.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/).filter(w => w.length > 3 && !stopwords.has(w));
+      const words = s.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/).filter(w => w.length > 4 && !stopwords.has(w));
       words.forEach(w => { wordFreq[w] = (wordFreq[w] || 0) + 1; });
     });
     const topWords = Object.entries(wordFreq)
-      .filter(([w, c]) => c >= 5 && !topEntities.some(e => e.text.toLowerCase().includes(w)))
+      .filter(([w, c]) => c >= 7 && !topEntities.some(e => e.text.toLowerCase().includes(w)))
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
       .map(([text, count]) => ({ text, count, type: 'KEYWORD' }));
@@ -2086,7 +2314,8 @@ function CrossReferenceNetwork({ fullText, entities }) {
   ) : new Set();
 
   return (
-    <div className="viz-card" style={{ gridColumn: '1 / -1' }}>
+    <div ref={cardRef} className="viz-card" style={{ position: 'relative' }}>
+      <VizExportButton targetRef={cardRef} filename="cross-reference-network" />
       <h3>Cross-Reference Network</h3>
       <p className="viz-desc">Entities and keywords that appear in the same sentences are connected. Drag nodes to rearrange. Hover to explore connections. Thicker lines = more co-occurrences.</p>
       <div style={{ display: 'flex', gap: 16, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -2168,6 +2397,7 @@ function CrossReferenceNetwork({ fullText, entities }) {
 }
 
 function ConversationDynamics({ sents, playerRef, videoId }) {
+  const cardRef = useRef(null);
   const [dynamics, setDynamics] = useState([]);
   const [hoveredSegment, setHoveredSegment] = useState(null);
 
@@ -2239,7 +2469,8 @@ function ConversationDynamics({ sents, playerRef, videoId }) {
   };
 
   return (
-    <div className="viz-card conversation-dynamics" style={{ gridColumn: '1 / -1' }}>
+    <div ref={cardRef} className="viz-card conversation-dynamics" style={{ gridColumn: '1 / -1', position: 'relative' }}>
+      <VizExportButton targetRef={cardRef} filename="conversation-dynamics" />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h3>Conversation Dynamics</h3>
@@ -2292,180 +2523,11 @@ function ConversationDynamics({ sents, playerRef, videoId }) {
 // v6.0: NEW FEATURE COMPONENTS
 // ============================================================================
 
-// Topic Subscriptions Panel
-function TopicSubscriptionsPanel({ transcript, videoId, videoTitle }) {
-  const [subscriptions, setSubscriptions] = useState([]);
-  const [newTopic, setNewTopic] = useState('');
-  const [email, setEmail] = useState('');
-  const [frequency, setFrequency] = useState('instant');
-  const [loading, setLoading] = useState(false);
-  const [matches, setMatches] = useState([]);
-  const [showAddForm, setShowAddForm] = useState(false);
-
-  useEffect(() => { loadSubscriptions(); }, []);
-
-  useEffect(() => {
-    if (transcript && subscriptions.length > 0) checkMatches();
-  }, [transcript, subscriptions]);
-
-  const loadSubscriptions = async () => {
-    try {
-      const result = await apiListSubscriptions();
-      setSubscriptions(result.subscriptions || []);
-    } catch (e) { console.error('Failed to load subscriptions:', e); }
-  };
-
-  const checkMatches = async () => {
-    if (!transcript) return;
-    try {
-      const result = await apiCheckSubscriptionMatches({ transcript, video_id: videoId, video_title: videoTitle });
-      const newMatches = result.matches || [];
-      setMatches(newMatches);
-
-      // Browser notification for new matches
-      if (newMatches.length > 0 && 'Notification' in window) {
-        if (Notification.permission === 'default') {
-          Notification.requestPermission();
-        }
-        if (Notification.permission === 'granted') {
-          const topics = newMatches.map(m => m.topic).join(', ');
-          const counts = newMatches.map(m => `${m.topic} (${m.mention_count || 1}x)`).join(', ');
-          new Notification('Topic Alert: ' + topics, {
-            body: `Found in: ${videoTitle || 'this meeting'}. Mentions: ${counts}`,
-            icon: '/logo.png',
-            tag: 'subscription-match-' + videoId,
-          });
-        }
-      }
-    } catch (e) { console.error('Failed to check matches:', e); }
-  };
-
-  const handleSubscribe = async () => {
-    if (!newTopic.trim()) return;
-    setLoading(true);
-    try {
-      await apiCreateSubscription({ topic: newTopic, email, frequency });
-      setNewTopic('');
-      setShowAddForm(false);
-      loadSubscriptions();
-    } catch (e) { alert('Failed to create subscription'); }
-    finally { setLoading(false); }
-  };
-
-  const handleUnsubscribe = async (topic) => {
-    try {
-      await apiDeleteSubscription({ topic });
-      loadSubscriptions();
-    } catch (e) { alert('Failed to unsubscribe'); }
-  };
-
-  return (
-    <div className="viz-card subscriptions-card">
-      <h3>🔔 Topic Subscriptions</h3>
-      <p className="viz-desc">Get alerts when topics you care about are discussed in meetings.</p>
-
-      {matches.length > 0 && (
-        <div style={{ background: 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)', border: '2px solid #22c55e', borderRadius: '12px', padding: '16px', marginBottom: '16px' }}>
-          <div style={{ fontWeight: '700', color: '#15803d', marginBottom: '8px' }}>
-            🎯 {matches.length} topic{matches.length > 1 ? 's' : ''} mentioned in this meeting!
-          </div>
-          {matches.map((match, idx) => (
-            <div key={idx} style={{ background: 'white', padding: '10px', borderRadius: '8px', marginTop: '8px', fontSize: '14px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <strong>{match.topic}</strong>
-                <span style={{ fontSize: '11px', color: '#15803d', background: '#dcfce7', padding: '2px 8px', borderRadius: '10px' }}>
-                  {match.mention_count || 1} mention{(match.mention_count || 1) !== 1 ? 's' : ''}
-                </span>
-              </div>
-              <div style={{ color: '#64748b', marginTop: '4px', fontSize: '13px' }}>{match.context}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Quick Topic Suggestions */}
-      <div style={{ marginBottom: '16px' }}>
-        <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', marginBottom: '8px' }}>Popular Civic Topics:</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-          {['Budget', 'Zoning', 'Public Safety', 'Schools', 'Infrastructure', 'Housing', 'Parks', 'Traffic'].map((topic) => (
-            <button
-              key={topic}
-              onClick={() => {
-                setNewTopic(topic);
-                setShowAddForm(true);
-              }}
-              style={{
-                padding: '4px 10px',
-                fontSize: '11px',
-                background: subscriptions.some(s => s.topic.toLowerCase() === topic.toLowerCase()) ? '#dcfce7' : '#f1f5f9',
-                border: subscriptions.some(s => s.topic.toLowerCase() === topic.toLowerCase()) ? '1px solid #22c55e' : '1px solid #e2e8f0',
-                borderRadius: '12px',
-                cursor: 'pointer',
-                color: subscriptions.some(s => s.topic.toLowerCase() === topic.toLowerCase()) ? '#15803d' : '#64748b',
-              }}
-            >
-              {subscriptions.some(s => s.topic.toLowerCase() === topic.toLowerCase()) ? '✔ ' : '+ '}{topic}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ marginBottom: '16px' }}>
-        <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>Your Subscriptions ({subscriptions.length})</div>
-        {subscriptions.length === 0 ? (
-          <div style={{ color: '#64748b', fontStyle: 'italic', fontSize: '13px', padding: '12px', background: '#f8fafc', borderRadius: '8px', textAlign: 'center' }}>
-            No subscriptions yet. Click a topic above or add your own below.
-          </div>
-        ) : (
-          <div style={{ maxHeight: '150px', overflow: 'auto' }}>
-            {subscriptions.map((sub, idx) => (
-              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: '#f8fafc', borderRadius: '8px', marginBottom: '8px', border: '1px solid #e2e8f0' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '14px' }}>🔔</span>
-                  <div>
-                    <span style={{ fontWeight: '600', fontSize: '13px' }}>{sub.topic}</span>
-                    <div style={{ fontSize: '11px', color: '#64748b' }}>
-                      {sub.frequency === 'instant' ? '⚡ Instant' : sub.frequency === 'daily' ? '📅 Daily' : '📆 Weekly'}
-                    </div>
-                  </div>
-                </div>
-                <button onClick={() => handleUnsubscribe(sub.topic)} style={{ background: '#fee2e2', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '12px', padding: '4px 8px', borderRadius: '4px' }}>Remove</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {showAddForm ? (
-        <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '2px solid #1E7F63' }}>
-          <div style={{ fontWeight: 600, marginBottom: '12px', color: '#1E7F63' }}>Add New Subscription</div>
-          <input type="text" value={newTopic} onChange={(e) => setNewTopic(e.target.value)} placeholder="Enter topic (e.g., bike lanes, school budget)"
-            aria-label="Topic to subscribe to"
-            style={{ width: '100%', padding: '10px 12px', border: '2px solid #e2e8f0', borderRadius: '8px', marginBottom: '10px', fontSize: '14px' }} />
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email for alerts (optional)"
-            aria-label="Email for alerts"
-            style={{ width: '100%', padding: '10px 12px', border: '2px solid #e2e8f0', borderRadius: '8px', marginBottom: '10px', fontSize: '14px' }} />
-          <select value={frequency} onChange={(e) => setFrequency(e.target.value)} style={{ width: '100%', padding: '10px 12px', border: '2px solid #e2e8f0', borderRadius: '8px', marginBottom: '10px', fontSize: '14px' }}>
-            <option value="instant">⚡ Instant alerts</option>
-            <option value="daily">📅 Daily digest</option>
-            <option value="weekly">📆 Weekly summary</option>
-          </select>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button className="btn btn-primary" onClick={handleSubscribe} disabled={loading || !newTopic.trim()}>{loading ? 'Subscribing...' : '✔ Subscribe'}</button>
-            <button className="btn btn-ghost" onClick={() => setShowAddForm(false)}>Cancel</button>
-          </div>
-        </div>
-      ) : (
-        <button className="btn btn-accent" onClick={() => setShowAddForm(true)} style={{ width: '100%' }}>+ Add Custom Topic</button>
-      )}
-    </div>
-  );
-}
-
 // Relevant Documents Panel - AI-powered document finder
-function RelevantDocumentsPanel({ videoTitle, transcript, entities }) {
+function RelevantDocumentsPanel({ videoTitle, transcript, entities, videoDescription }) {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [deepLoading, setDeepLoading] = useState(false);
   const [error, setError] = useState(null);
   const [organization, setOrganization] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
@@ -2497,8 +2559,9 @@ function RelevantDocumentsPanel({ videoTitle, transcript, entities }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           video_title: videoTitle,
-          transcript: transcript?.substring(0, 5000), // Send first 5000 chars
-          entities: entities?.slice(0, 20) || []
+          transcript: transcript?.substring(0, 5000),
+          entities: entities?.slice(0, 20) || [],
+          description: videoDescription || ''
         })
       });
       
@@ -2530,6 +2593,34 @@ function RelevantDocumentsPanel({ videoTitle, transcript, entities }) {
     }
   }, [videoTitle]);
 
+  const deepSearch = async () => {
+    setDeepLoading(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/find-relevant-documents/deep', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          video_title: videoTitle,
+          transcript: transcript?.substring(0, 8000),
+          entities: entities?.slice(0, 20) || [],
+          description: videoDescription || ''
+        })
+      });
+      const data = await response.json();
+      if (data.documents?.length > 0) {
+        // Merge with existing, deduplicate by URL
+        const existingUrls = new Set(documents.map(d => d.url));
+        const newDocs = data.documents.filter(d => !existingUrls.has(d.url));
+        setDocuments(prev => [...prev, ...newDocs]);
+      }
+    } catch (err) {
+      console.error('Deep search error:', err);
+    } finally {
+      setDeepLoading(false);
+    }
+  };
+
   const getDocConfig = (type) => docTypeConfig[type] || docTypeConfig.other;
 
   return (
@@ -2552,6 +2643,16 @@ function RelevantDocumentsPanel({ videoTitle, transcript, entities }) {
           <>🔍 Find Related Documents</>
         )}
       </button>
+      {hasSearched && (
+        <button
+          onClick={deepSearch}
+          disabled={deepLoading}
+          className="btn btn-secondary"
+          style={{ width: '100%', marginBottom: '16px', fontSize: 12 }}
+        >
+          {deepLoading ? 'Running AI deep search...' : 'AI Deep Search — find more documents'}
+        </button>
+      )}
 
       {/* Organization detected */}
       {organization && (
@@ -3385,1359 +3486,7 @@ function JargonTranslatorPanel() {
   );
 }
 
-// Cross-Meeting Analysis Panel (Combined Knowledge Graph + Comparison)
-function CrossMeetingAnalysisPanel({ currentVideoId, currentTitle, currentTranscript, currentEntities, currentSummary }) {
-  // Core state
-  const [meetings, setMeetings] = useState([]);
-  const [activeTab, setActiveTab] = useState('finder');
-  const [loading, setLoading] = useState(false);
-  
-  // Finder state
-  const [searchCity, setSearchCity] = useState('');
-  const [finderResults, setFinderResults] = useState([]);
-  const [finderLoading, setFinderLoading] = useState(false);
-  const [recentCities, setRecentCities] = useState([]);
-  
-  // Issue tracking state
-  const [issueSearch, setIssueSearch] = useState('');
-  const [issueResults, setIssueResults] = useState([]);
-  const [selectedIssue, setSelectedIssue] = useState(null);
-  const [trackedIssues, setTrackedIssues] = useState([]);
-  
-  // Video viewer state
-  const [activeVideoTab, setActiveVideoTab] = useState(null);
-  
-  // Export state
-  const [selectedClips, setSelectedClips] = useState([]);
-  const [exportLoading, setExportLoading] = useState(false);
-
-  // Initialize with current meeting
-  useEffect(() => {
-    if (currentVideoId && currentTitle) {
-      const exists = meetings.find(m => m.videoId === currentVideoId);
-      if (!exists) {
-        setMeetings([{
-          videoId: currentVideoId,
-          title: currentTitle,
-          transcript: currentTranscript,
-          entities: currentEntities || [],
-          date: new Date().toISOString(),
-          isCurrent: true,
-          segments: [] // Will be populated when needed
-        }]);
-        setActiveVideoTab(currentVideoId);
-      }
-    }
-  }, [currentVideoId, currentTitle]);
-
-  // Helper: Extract video ID from URL
-  const extractVideoId = (url) => {
-    const patterns = [/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/, /^([a-zA-Z0-9_-]{11})$/];
-    for (const pattern of patterns) {
-      const match = url.match(pattern);
-      if (match) return match[1];
-    }
-    return null;
-  };
-
-  // Helper: Format timestamp
-  const formatTime = (seconds) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
-  };
-
-  // Search for civic meetings
-  const searchCivicMeetings = async () => {
-    if (!searchCity.trim()) return;
-    setFinderLoading(true);
-    
-    try {
-      const civicTerms = ['city council', 'town meeting', 'board meeting', 'selectboard', 'planning board'];
-      const searchTerm = `${searchCity} ${civicTerms[Math.floor(Math.random() * civicTerms.length)]}`;
-      
-      const response = await fetch(`/api/youtube-search?q=${encodeURIComponent(searchTerm)}&type=video&maxResults=12&order=date`);
-      const data = await response.json();
-      
-      if (data.error) {
-        alert(data.error);
-        setFinderResults([]);
-        return;
-      }
-      
-      setFinderResults(data.items || []);
-      
-      if (!recentCities.includes(searchCity)) {
-        setRecentCities(prev => [searchCity, ...prev.slice(0, 4)]);
-      }
-    } catch (err) {
-      console.error('Finder error:', err);
-    } finally {
-      setFinderLoading(false);
-    }
-  };
-
-  // Add meeting from finder or URL
-  const addMeeting = async (videoId, title, publishedAt) => {
-    if (meetings.find(m => m.videoId === videoId)) {
-      alert('This meeting is already in your collection');
-      return;
-    }
-    
-    setLoading(true);
-    
-    try {
-      // Fetch transcript
-      const transcriptRes = await fetch('/api/transcript', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoId })
-      });
-      
-      if (!transcriptRes.ok) throw new Error('Failed to fetch transcript');
-      
-      const transcriptText = await transcriptRes.text();
-      let fullText = transcriptText;
-      let segments = [];
-      
-      // Parse VTT to get segments with timestamps
-      if (transcriptText.includes('WEBVTT') || transcriptText.includes('-->')) {
-        const lines = transcriptText.split('\n');
-        let currentSegment = null;
-        
-        for (const line of lines) {
-          if (line.includes('-->')) {
-            const times = line.match(/(\d{2}:\d{2}:\d{2}\.\d{3})/g);
-            if (times && times.length >= 2) {
-              const parseTime = (t) => {
-                const parts = t.split(':');
-                return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
-              };
-              currentSegment = { start: parseTime(times[0]), end: parseTime(times[1]), text: '' };
-            }
-          } else if (line.trim() && currentSegment && !line.match(/^\d+$/) && !line.includes('WEBVTT')) {
-            currentSegment.text = line.trim();
-            segments.push({ ...currentSegment });
-          }
-        }
-        
-        fullText = segments.map(s => s.text).join(' ').replace(/\s+/g, ' ').trim();
-      }
-      
-      // Extract keywords locally
-      const words = fullText.toLowerCase().split(/\s+/);
-      const wordFreq = {};
-      const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'is', 'are', 'was', 'were', 'be', 'have', 'has', 'had', 'this', 'that', 'it', 'we', 'they', 'what', 'which', 'who', 'when', 'where', 'why', 'how', 'all', 'some', 'no', 'not', 'only', 'so', 'very', 'just', 'also', 'now', 'going', 'think', 'know', 'want', 'get', 'like', 'make', 'say', 'see', 'go', 'well', 'back', 'much', 'even', 'still', 'way', 'really', 'thing', 'actually', 'something', 'need', 'year', 'time', 'lot', 'okay', 'yeah', 'thank', 'please', 'right']);
-      
-      words.forEach(word => {
-        const clean = word.replace(/[^a-z]/g, '');
-        if (clean.length > 3 && !stopWords.has(clean)) {
-          wordFreq[clean] = (wordFreq[clean] || 0) + 1;
-        }
-      });
-      
-      const entities = Object.entries(wordFreq)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 40)
-        .map(([text, count]) => ({ text: text.charAt(0).toUpperCase() + text.slice(1), count, type: 'KEYWORD' }));
-      
-      const newMeeting = {
-        videoId,
-        title: title || `Meeting ${videoId}`,
-        transcript: fullText,
-        entities,
-        segments,
-        date: publishedAt || new Date().toISOString(),
-        isCurrent: false
-      };
-      
-      setMeetings(prev => [...prev, newMeeting]);
-      setActiveVideoTab(videoId);
-      setActiveTab('timeline');
-      
-    } catch (err) {
-      console.error('Add meeting error:', err);
-      alert('Failed to add meeting: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Search for issues across all meetings
-  const searchIssues = () => {
-    if (!issueSearch.trim()) return;
-    
-    const searchLower = issueSearch.toLowerCase();
-    const results = [];
-    
-    meetings.forEach(meeting => {
-      // Search in segments for timestamp-based results
-      if (meeting.segments && meeting.segments.length > 0) {
-        meeting.segments.forEach(seg => {
-          if (seg.text.toLowerCase().includes(searchLower)) {
-            results.push({
-              meetingId: meeting.videoId,
-              meetingTitle: meeting.title,
-              meetingDate: meeting.date,
-              text: seg.text,
-              start: seg.start,
-              end: seg.end,
-              context: getContext(meeting.segments, seg)
-            });
-          }
-        });
-      } else if (meeting.transcript) {
-        // Fallback to transcript search
-        const sentences = meeting.transcript.split(/[.!?]+/);
-        sentences.forEach((sent, idx) => {
-          if (sent.toLowerCase().includes(searchLower)) {
-            results.push({
-              meetingId: meeting.videoId,
-              meetingTitle: meeting.title,
-              meetingDate: meeting.date,
-              text: sent.trim(),
-              start: null,
-              context: sentences.slice(Math.max(0, idx - 1), idx + 2).join('. ')
-            });
-          }
-        });
-      }
-    });
-    
-    // Sort by date
-    results.sort((a, b) => new Date(a.meetingDate) - new Date(b.meetingDate));
-    setIssueResults(results);
-    
-    // Add to tracked issues if not already there
-    if (!trackedIssues.includes(issueSearch)) {
-      setTrackedIssues(prev => [issueSearch, ...prev.slice(0, 9)]);
-    }
-  };
-
-  // Get surrounding context for a segment
-  const getContext = (segments, currentSeg) => {
-    const idx = segments.indexOf(currentSeg);
-    const start = Math.max(0, idx - 2);
-    const end = Math.min(segments.length, idx + 3);
-    return segments.slice(start, end).map(s => s.text).join(' ');
-  };
-
-  // Remove meeting
-  const removeMeeting = (videoId) => {
-    if (meetings.find(m => m.videoId === videoId)?.isCurrent) {
-      alert('Cannot remove the current meeting');
-      return;
-    }
-    setMeetings(prev => prev.filter(m => m.videoId !== videoId));
-    if (activeVideoTab === videoId) {
-      setActiveVideoTab(meetings[0]?.videoId || null);
-    }
-  };
-
-  // Add clip to export selection
-  const addClipToExport = (clip) => {
-    const exists = selectedClips.find(c => c.meetingId === clip.meetingId && c.start === clip.start);
-    if (!exists) {
-      setSelectedClips(prev => [...prev, clip]);
-    }
-  };
-
-  // Export clips
-  const [exportJobId, setExportJobId] = useState(null);
-  const [exportProgress, setExportProgress] = useState(null);
-  const [exportResult, setExportResult] = useState(null);
-
-  const exportClips = async (format) => {
-    if (selectedClips.length === 0) {
-      alert('Select some clips first');
-      return;
-    }
-    
-    setExportLoading(true);
-    setExportProgress(null);
-    setExportResult(null);
-    
-    try {
-      // Group clips by video ID with all needed info
-      const clipsByVideo = {};
-      selectedClips.forEach(clip => {
-        if (!clipsByVideo[clip.meetingId]) {
-          clipsByVideo[clip.meetingId] = [];
-        }
-        clipsByVideo[clip.meetingId].push({
-          start: clip.start,
-          end: clip.end,
-          highlight: clip.text.substring(0, 150),
-          meetingTitle: clip.meetingTitle
-        });
-      });
-      
-      // Start the export job
-      const response = await fetch('/api/render_multi_video_clips', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clipsByVideo,
-          format: format === 'montage' ? 'montage' : 'zip',
-          captions: true
-        })
-      });
-      
-      const data = await response.json();
-      
-      if (data.error) {
-        alert(data.error + (data.message ? '\n\n' + data.message : ''));
-        setExportLoading(false);
-        return;
-      }
-      
-      if (!data.jobId) {
-        alert('Failed to start export job');
-        setExportLoading(false);
-        return;
-      }
-      
-      setExportJobId(data.jobId);
-      
-      // Poll for job status
-      const pollInterval = setInterval(async () => {
-        try {
-          const statusRes = await fetch(`/api/job_status?jobId=${data.jobId}`);
-          const status = await statusRes.json();
-          
-          setExportProgress(status);
-          
-          if (status.status === 'done') {
-            clearInterval(pollInterval);
-            setExportLoading(false);
-            setExportResult({
-              success: true,
-              downloadUrl: status.output,
-              message: status.message,
-              clipCount: status.clipCount
-            });
-          } else if (status.status === 'error') {
-            clearInterval(pollInterval);
-            setExportLoading(false);
-            setExportResult({
-              success: false,
-              message: status.message || 'Export failed'
-            });
-          }
-        } catch (err) {
-          console.error('Poll error:', err);
-        }
-      }, 1500);
-      
-      // Timeout after 10 minutes
-      setTimeout(() => {
-        clearInterval(pollInterval);
-        if (exportLoading) {
-          setExportLoading(false);
-          setExportResult({
-            success: false,
-            message: 'Export timed out. The clips may be too large.'
-          });
-        }
-      }, 600000);
-      
-    } catch (err) {
-      console.error('Export error:', err);
-      alert('Failed to start export: ' + err.message);
-      setExportLoading(false);
-    }
-  };
-
-  // Timeline data sorted by date
-  const sortedMeetings = [...meetings].sort((a, b) => new Date(a.date) - new Date(b.date));
-  
-  // Calculate timeline positions
-  const getTimelinePosition = (date) => {
-    if (sortedMeetings.length <= 1) return 50;
-    const dates = sortedMeetings.map(m => new Date(m.date).getTime());
-    const min = Math.min(...dates);
-    const max = Math.max(...dates);
-    const range = max - min || 1;
-    return 10 + ((new Date(date).getTime() - min) / range) * 80;
-  };
-
-  return (
-    <div className="viz-card" style={{ gridColumn: '1 / -1' }}>
-      <h3>🔍 Issue Tracker & Meeting Comparison</h3>
-      <p className="viz-desc">Find civic meetings, track issues across time, and create cross-meeting highlight reels.</p>
-
-      {/* Tab Navigation */}
-      <div style={{ 
-        display: 'flex', 
-        gap: '2px', 
-        marginBottom: '20px', 
-        background: '#f1f5f9', 
-        padding: '4px', 
-        borderRadius: '12px',
-        flexWrap: 'wrap'
-      }}>
-        {[
-          { id: 'finder', label: '🔎 Find Meetings', icon: '🔎' },
-          { id: 'timeline', label: `📅 Collection (${meetings.length})`, icon: '📅' },
-          { id: 'issues', label: '🎯 Track Issues', icon: '🎯' },
-          { id: 'videos', label: '🎬 Video Players', icon: '🎬' },
-          { id: 'export', label: `📤 Export (${selectedClips.length})`, icon: '📤' }
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              flex: 1,
-              minWidth: '120px',
-              padding: '12px 16px',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: '13px',
-              background: activeTab === tab.id ? '#1E7F63' : 'transparent',
-              color: activeTab === tab.id ? 'white' : '#64748b',
-              transition: 'all 0.2s',
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* TAB 1: Meeting Finder */}
-      {activeTab === 'finder' && (
-        <div>
-          <div style={{ 
-            background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)', 
-            padding: '20px', 
-            borderRadius: '16px',
-            marginBottom: '20px',
-            border: '2px solid #22c55e'
-          }}>
-            <div style={{ fontSize: '16px', fontWeight: 700, color: '#166534', marginBottom: '12px' }}>
-              Find Civic Meetings on YouTube
-            </div>
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
-              <input
-                type="text"
-                value={searchCity}
-                onChange={(e) => setSearchCity(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && searchCivicMeetings()}
-                placeholder="Enter city, town, or YouTube channel (e.g., New York City Council, Brookline MA, @NYCCouncil)..."
-                style={{
-                  flex: 1,
-                  padding: '14px 18px',
-                  border: '2px solid #22c55e',
-                  borderRadius: '10px',
-                  fontSize: '15px',
-                  background: 'white',
-                }}
-              />
-              <button
-                className="btn btn-primary"
-                onClick={searchCivicMeetings}
-                disabled={finderLoading || !searchCity.trim()}
-                style={{ minWidth: '140px', fontSize: '15px' }}
-              >
-                {finderLoading ? '🔄 Searching...' : '🔍 Search'}
-              </button>
-            </div>
-            
-            {recentCities.length > 0 && (
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '12px', color: '#15803d', alignSelf: 'center' }}>Recent:</span>
-                {recentCities.map((city, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => setSearchCity(city)}
-                    style={{
-                      padding: '4px 12px',
-                      background: 'white',
-                      border: '1px solid #22c55e',
-                      borderRadius: '20px',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      color: '#166534',
-                    }}
-                  >
-                    {city}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Finder Results */}
-          {finderResults.length > 0 && (
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: '12px', color: '#374151' }}>
-                Found {finderResults.length} meetings - click to add:
-              </div>
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', 
-                gap: '12px',
-                maxHeight: '500px',
-                overflow: 'auto',
-                padding: '4px'
-              }}>
-                {finderResults.map((video, idx) => {
-                  const videoId = video.id?.videoId;
-                  const isAdded = meetings.find(m => m.videoId === videoId);
-                  return (
-                    <div
-                      key={idx}
-                      style={{
-                        padding: '14px',
-                        background: isAdded ? '#dcfce7' : '#f8fafc',
-                        borderRadius: '12px',
-                        border: isAdded ? '2px solid #22c55e' : '2px solid #e2e8f0',
-                        display: 'flex',
-                        gap: '12px',
-                      }}
-                    >
-                      {video.snippet?.thumbnails?.default?.url && (
-                        <img
-                          src={video.snippet.thumbnails.medium?.url || video.snippet.thumbnails.default.url}
-                          alt=""
-                          style={{ width: '120px', height: '90px', borderRadius: '8px', objectFit: 'cover' }}
-                        />
-                      )}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ 
-                          fontWeight: 600, 
-                          fontSize: '14px', 
-                          lineHeight: 1.3, 
-                          marginBottom: '6px',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                        }}>
-                          {video.snippet?.title}
-                        </div>
-                        <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>
-                          {video.snippet?.channelTitle} • {new Date(video.snippet?.publishedAt).toLocaleDateString()}
-                        </div>
-                        {isAdded ? (
-                          <div style={{ 
-                            padding: '6px 12px', 
-                            background: '#166534', 
-                            color: 'white',
-                            borderRadius: '6px',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            display: 'inline-block'
-                          }}>
-                            ✔ In Collection
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => addMeeting(videoId, video.snippet?.title, video.snippet?.publishedAt)}
-                            disabled={loading}
-                            style={{
-                              padding: '8px 16px',
-                              background: '#1E7F63',
-                              color: 'white',
-                              border: 'none',
-                              borderRadius: '6px',
-                              cursor: 'pointer',
-                              fontSize: '12px',
-                              fontWeight: 600,
-                            }}
-                          >
-                            {loading ? '⏳ Adding...' : '➕ Add to Collection'}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {finderResults.length === 0 && !finderLoading && (
-            <div style={{ textAlign: 'center', padding: '40px', background: '#f8fafc', borderRadius: '16px' }}>
-              <div style={{ color: '#64748b', fontSize: '15px' }}>
-                Search for a city to find their public meeting recordings
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TAB 2: Meeting Collection Timeline */}
-      {activeTab === 'timeline' && (
-        <div>
-          {meetings.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px', background: '#f8fafc', borderRadius: '16px' }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>📅</div>
-              <div style={{ color: '#64748b' }}>No meetings in your collection yet. Use the "Find Meetings" tab to add some!</div>
-            </div>
-          ) : (
-            <>
-              {/* Visual Timeline */}
-              <div style={{ 
-                background: 'linear-gradient(180deg, #f8fafc 0%, #f0fdf4 100%)',
-                borderRadius: '16px',
-                padding: '24px',
-                marginBottom: '20px',
-                border: '2px solid #e2e8f0',
-                position: 'relative',
-                minHeight: '180px'
-              }}>
-                <div style={{ fontWeight: 700, color: '#166534', marginBottom: '20px' }}>
-                  📆 Meeting Timeline ({meetings.length} meetings)
-                </div>
-                
-                {/* Timeline track */}
-                <div style={{ 
-                  position: 'relative', 
-                  height: '100px',
-                  marginBottom: '20px'
-                }}>
-                  {/* Horizontal line */}
-                  <div style={{
-                    position: 'absolute',
-                    top: '50%',
-                    left: '5%',
-                    right: '5%',
-                    height: '4px',
-                    background: 'linear-gradient(90deg, #22c55e, #1E7F63)',
-                    borderRadius: '2px',
-                    transform: 'translateY(-50%)'
-                  }} />
-                  
-                  {/* Meeting points */}
-                  {sortedMeetings.map((meeting, idx) => {
-                    const position = getTimelinePosition(meeting.date);
-                    const hasIssue = trackedIssues.some(issue => 
-                      meeting.transcript?.toLowerCase().includes(issue.toLowerCase())
-                    );
-                    return (
-                      <div
-                        key={meeting.videoId}
-                        onClick={() => {
-                          setActiveVideoTab(meeting.videoId);
-                          setActiveTab('videos');
-                        }}
-                        style={{
-                          position: 'absolute',
-                          left: `${position}%`,
-                          top: '50%',
-                          transform: 'translate(-50%, -50%)',
-                          cursor: 'pointer',
-                          zIndex: 10,
-                        }}
-                      >
-                        <div style={{
-                          width: meeting.isCurrent ? '28px' : '22px',
-                          height: meeting.isCurrent ? '28px' : '22px',
-                          borderRadius: '50%',
-                          background: meeting.isCurrent ? '#1E7F63' : hasIssue ? '#f59e0b' : '#22c55e',
-                          border: `3px solid white`,
-                          boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}>
-                          {meeting.isCurrent && <span style={{ color: 'white', fontSize: '10px' }}>â˜…</span>}
-                        </div>
-                        {/* Date label */}
-                        <div style={{
-                          position: 'absolute',
-                          top: idx % 2 === 0 ? '-35px' : '35px',
-                          left: '50%',
-                          transform: 'translateX(-50%)',
-                          whiteSpace: 'nowrap',
-                          fontSize: '10px',
-                          fontWeight: 600,
-                          color: '#64748b',
-                          background: 'white',
-                          padding: '2px 6px',
-                          borderRadius: '4px',
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                        }}>
-                          {new Date(meeting.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                        </div>
-                        {/* Title on hover */}
-                        <div style={{
-                          position: 'absolute',
-                          top: idx % 2 === 0 ? '35px' : '-55px',
-                          left: '50%',
-                          transform: 'translateX(-50%)',
-                          maxWidth: '150px',
-                          fontSize: '11px',
-                          color: '#374151',
-                          textAlign: 'center',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}>
-                          {meeting.title.substring(0, 30)}...
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                
-                {/* Legend */}
-                <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', fontSize: '11px', color: '#64748b' }}>
-                  <span>🟢 Meeting</span>
-                  <span>⭐ Current</span>
-                  <span>🟡 Has tracked issue</span>
-                </div>
-              </div>
-
-              {/* Meeting List */}
-              <div style={{ display: 'grid', gap: '10px' }}>
-                {sortedMeetings.map((meeting) => (
-                  <div
-                    key={meeting.videoId}
-                    style={{
-                      padding: '16px',
-                      background: meeting.isCurrent ? 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)' : '#f8fafc',
-                      borderRadius: '12px',
-                      border: meeting.isCurrent ? '2px solid #22c55e' : '2px solid #e2e8f0',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                        {meeting.isCurrent && (
-                          <span style={{ 
-                            background: '#166534', 
-                            color: 'white', 
-                            padding: '2px 8px', 
-                            borderRadius: '10px', 
-                            fontSize: '10px', 
-                            fontWeight: 700 
-                          }}>CURRENT</span>
-                        )}
-                        <span style={{ fontWeight: 600, color: '#374151' }}>{meeting.title}</span>
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#64748b' }}>
-                        {new Date(meeting.date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
-                        {' • '}{meeting.entities?.length || 0} keywords detected
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
-                        onClick={() => { setActiveVideoTab(meeting.videoId); setActiveTab('videos'); }}
-                        style={{
-                          padding: '8px 12px',
-                          background: '#1E7F63',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          fontSize: '12px',
-                        }}
-                      >
-                        🎬 Watch
-                      </button>
-                      {!meeting.isCurrent && (
-                        <button
-                          onClick={() => removeMeeting(meeting.videoId)}
-                          style={{
-                            padding: '8px 12px',
-                            background: '#fee2e2',
-                            color: '#dc2626',
-                            border: 'none',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                          }}
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* TAB 3: Issue Tracking */}
-      {activeTab === 'issues' && (
-        <div>
-          <div style={{ 
-            background: '#fef3c7', 
-            padding: '20px', 
-            borderRadius: '16px',
-            marginBottom: '20px',
-            border: '2px solid #f59e0b'
-          }}>
-            <div style={{ fontSize: '16px', fontWeight: 700, color: '#92400e', marginBottom: '12px' }}>
-              🎯 Track an Issue Across Meetings
-            </div>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <input
-                type="text"
-                value={issueSearch}
-                onChange={(e) => setIssueSearch(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && searchIssues()}
-                placeholder="Enter a keyword or phrase to track (e.g., 'budget', 'zoning', 'park')..."
-                style={{
-                  flex: 1,
-                  padding: '14px 18px',
-                  border: '2px solid #f59e0b',
-                  borderRadius: '10px',
-                  fontSize: '15px',
-                }}
-              />
-              <button
-                className="btn"
-                onClick={searchIssues}
-                disabled={!issueSearch.trim() || meetings.length === 0}
-                style={{ 
-                  minWidth: '140px', 
-                  background: '#f59e0b', 
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '10px',
-                  fontWeight: 600,
-                  cursor: meetings.length === 0 ? 'not-allowed' : 'pointer'
-                }}
-              >
-                🔍 Find Mentions
-              </button>
-            </div>
-            <div style={{ fontSize: '12px', color: '#92400e', marginTop: '8px' }}>
-              Searching across {meetings.length} meeting{meetings.length !== 1 ? 's' : ''}
-            </div>
-          </div>
-
-          {/* Tracked Issues */}
-          {trackedIssues.length > 0 && (
-            <div style={{ marginBottom: '20px' }}>
-              <div style={{ fontWeight: 600, marginBottom: '8px', color: '#374151' }}>Tracked Issues:</div>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {trackedIssues.map((issue, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => { setIssueSearch(issue); searchIssues(); }}
-                    style={{
-                      padding: '6px 14px',
-                      background: issueSearch === issue ? '#fef3c7' : '#f8fafc',
-                      border: issueSearch === issue ? '2px solid #f59e0b' : '2px solid #e2e8f0',
-                      borderRadius: '20px',
-                      cursor: 'pointer',
-                      fontSize: '13px',
-                      color: '#374151',
-                    }}
-                  >
-                    🎯 {issue}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Issue Results */}
-          {issueResults.length > 0 && (
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: '12px', color: '#374151' }}>
-                Found {issueResults.length} mentions of "{issueSearch}":
-              </div>
-              <div style={{ maxHeight: '500px', overflow: 'auto' }}>
-                {issueResults.map((result, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      padding: '16px',
-                      background: '#f8fafc',
-                      borderRadius: '12px',
-                      marginBottom: '10px',
-                      border: '2px solid #e2e8f0',
-                      borderLeft: '4px solid #f59e0b',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: '14px', color: '#374151' }}>
-                          {result.meetingTitle}
-                        </div>
-                        <div style={{ fontSize: '12px', color: '#64748b' }}>
-                          {new Date(result.meetingDate).toLocaleDateString()}
-                          {result.start !== null && ` • ${formatTime(result.start)}`}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        {result.start !== null && (
-                          <button
-                            onClick={() => {
-                              setActiveVideoTab(result.meetingId);
-                              setActiveTab('videos');
-                              // TODO: Seek to timestamp
-                            }}
-                            style={{
-                              padding: '6px 10px',
-                              background: '#1E7F63',
-                              color: 'white',
-                              border: 'none',
-                              borderRadius: '6px',
-                              cursor: 'pointer',
-                              fontSize: '11px',
-                            }}
-                          >
-                            ▶ Jump to
-                          </button>
-                        )}
-                        <button
-                          onClick={() => addClipToExport({
-                            meetingId: result.meetingId,
-                            meetingTitle: result.meetingTitle,
-                            text: result.text,
-                            start: result.start || 0,
-                            end: (result.end || result.start || 0) + 30
-                          })}
-                          style={{
-                            padding: '6px 10px',
-                            background: '#f59e0b',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                            fontSize: '11px',
-                          }}
-                        >
-                          + Export
-                        </button>
-                      </div>
-                    </div>
-                    <div style={{ 
-                      fontSize: '14px', 
-                      color: '#374151',
-                      background: 'white',
-                      padding: '12px',
-                      borderRadius: '8px',
-                      lineHeight: 1.5,
-                    }}>
-                      {result.text.split(new RegExp(`(${issueSearch})`, 'gi')).map((part, i) => 
-                        part.toLowerCase() === issueSearch.toLowerCase() ? 
-                          <mark key={i} style={{ background: '#fef3c7', padding: '0 2px' }}>{part}</mark> : 
-                          part
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {issueResults.length === 0 && issueSearch && (
-            <div style={{ textAlign: 'center', padding: '40px', background: '#f8fafc', borderRadius: '16px' }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>🔍</div>
-              <div style={{ color: '#64748b' }}>No mentions found for "{issueSearch}"</div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TAB 4: Video Players */}
-      {activeTab === 'videos' && (
-        <div>
-          {meetings.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px', background: '#f8fafc', borderRadius: '16px' }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>🎬</div>
-              <div style={{ color: '#64748b' }}>No meetings to display. Add some from the "Find Meetings" tab!</div>
-            </div>
-          ) : (
-            <>
-              {/* Video tabs */}
-              <div style={{ 
-                display: 'flex', 
-                gap: '4px', 
-                marginBottom: '16px', 
-                flexWrap: 'wrap',
-                background: '#f1f5f9',
-                padding: '4px',
-                borderRadius: '10px'
-              }}>
-                {meetings.map((meeting) => (
-                  <button
-                    key={meeting.videoId}
-                    onClick={() => setActiveVideoTab(meeting.videoId)}
-                    style={{
-                      padding: '10px 16px',
-                      border: 'none',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      fontWeight: 600,
-                      fontSize: '12px',
-                      background: activeVideoTab === meeting.videoId ? '#1E7F63' : 'transparent',
-                      color: activeVideoTab === meeting.videoId ? 'white' : '#64748b',
-                      maxWidth: '200px',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {meeting.isCurrent && '⭐ '}{meeting.title.substring(0, 25)}...
-                  </button>
-                ))}
-              </div>
-
-              {/* Active video player */}
-              {activeVideoTab && (
-                <div>
-                  <div style={{ 
-                    position: 'relative',
-                    paddingBottom: '56.25%',
-                    height: 0,
-                    borderRadius: '12px',
-                    overflow: 'hidden',
-                    background: '#000',
-                    marginBottom: '16px'
-                  }}>
-                    <iframe
-                      src={`https://www.youtube.com/embed/${activeVideoTab}?enablejsapi=1`}
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        width: '100%',
-                        height: '100%',
-                        border: 'none',
-                      }}
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                    />
-                  </div>
-                  
-                  {/* Current video info */}
-                  {(() => {
-                    const currentMeeting = meetings.find(m => m.videoId === activeVideoTab);
-                    if (!currentMeeting) return null;
-                    return (
-                      <div style={{ 
-                        background: '#f8fafc', 
-                        padding: '16px', 
-                        borderRadius: '12px',
-                        border: '2px solid #e2e8f0'
-                      }}>
-                        <div style={{ fontWeight: 700, marginBottom: '8px', color: '#374151' }}>
-                          {currentMeeting.title}
-                        </div>
-                        <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px' }}>
-                          {new Date(currentMeeting.date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                        </div>
-                        {currentMeeting.entities && currentMeeting.entities.length > 0 && (
-                          <div>
-                            <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: '#64748b' }}>
-                              Top Keywords:
-                            </div>
-                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                              {currentMeeting.entities.slice(0, 15).map((entity, idx) => (
-                                <span 
-                                  key={idx}
-                                  onClick={() => { setIssueSearch(entity.text); setActiveTab('issues'); searchIssues(); }}
-                                  style={{
-                                    padding: '4px 10px',
-                                    background: '#dcfce7',
-                                    borderRadius: '12px',
-                                    fontSize: '11px',
-                                    color: '#166534',
-                                    cursor: 'pointer',
-                                  }}
-                                >
-                                  {entity.text}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* TAB 5: Export Clips */}
-      {activeTab === 'export' && (
-        <div>
-          <div style={{ 
-            background: 'linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)',
-            padding: '20px',
-            borderRadius: '16px',
-            marginBottom: '20px',
-            border: '2px solid #3b82f6'
-          }}>
-            <div style={{ fontSize: '16px', fontWeight: 700, color: '#1e40af', marginBottom: '12px' }}>
-              📤 Export Selected Clips
-            </div>
-            <div style={{ fontSize: '14px', color: '#1e40af', marginBottom: '16px' }}>
-              You have {selectedClips.length} clip{selectedClips.length !== 1 ? 's' : ''} ready to export
-            </div>
-            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-              <button
-                onClick={() => exportClips('zip')}
-                disabled={selectedClips.length === 0 || exportLoading}
-                style={{
-                  padding: '12px 24px',
-                  background: selectedClips.length > 0 ? '#3b82f6' : '#94a3b8',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '10px',
-                  cursor: selectedClips.length > 0 ? 'pointer' : 'not-allowed',
-                  fontWeight: 600,
-                  fontSize: '14px',
-                }}
-              >
-                📁 Download as ZIP
-              </button>
-              <button
-                onClick={() => exportClips('montage')}
-                disabled={selectedClips.length === 0 || exportLoading}
-                style={{
-                  padding: '12px 24px',
-                  background: selectedClips.length > 0 ? '#8b5cf6' : '#94a3b8',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '10px',
-                  cursor: selectedClips.length > 0 ? 'pointer' : 'not-allowed',
-                  fontWeight: 600,
-                  fontSize: '14px',
-                }}
-              >
-                🎬 Create Montage
-              </button>
-              {selectedClips.length > 0 && (
-                <button
-                  onClick={() => setSelectedClips([])}
-                  style={{
-                    padding: '12px 24px',
-                    background: '#fee2e2',
-                    color: '#dc2626',
-                    border: 'none',
-                    borderRadius: '10px',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    fontSize: '14px',
-                  }}
-                >
-                  🗑️ Clear All
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Export Progress */}
-          {exportLoading && exportProgress && (
-            <div style={{ 
-              background: '#f0fdf4', 
-              padding: '20px', 
-              borderRadius: '12px', 
-              marginBottom: '20px',
-              border: '2px solid #22c55e'
-            }}>
-              <div style={{ fontWeight: 600, color: '#166534', marginBottom: '12px' }}>
-                🔄 Exporting...
-              </div>
-              <div style={{ 
-                background: '#e2e8f0', 
-                borderRadius: '10px', 
-                height: '12px', 
-                overflow: 'hidden',
-                marginBottom: '8px'
-              }}>
-                <div style={{ 
-                  background: 'linear-gradient(90deg, #22c55e, #16a34a)', 
-                  height: '100%', 
-                  width: `${exportProgress.percent || 0}%`,
-                  transition: 'width 0.3s ease'
-                }} />
-              </div>
-              <div style={{ fontSize: '13px', color: '#64748b' }}>
-                {exportProgress.message || 'Processing...'}
-              </div>
-            </div>
-          )}
-
-          {/* Export Result - Success */}
-          {exportResult && exportResult.success && (
-            <div style={{ 
-              background: 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)', 
-              padding: '20px', 
-              borderRadius: '12px', 
-              marginBottom: '20px',
-              border: '2px solid #22c55e'
-            }}>
-              <div style={{ fontWeight: 700, color: '#166534', marginBottom: '8px', fontSize: '16px' }}>
-                âœ… Export Complete!
-              </div>
-              <div style={{ fontSize: '14px', color: '#15803d', marginBottom: '16px' }}>
-                {exportResult.message}
-              </div>
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                <a
-                  href={exportResult.downloadUrl}
-                  download
-                  style={{
-                    padding: '12px 24px',
-                    background: '#166534',
-                    color: 'white',
-                    borderRadius: '10px',
-                    textDecoration: 'none',
-                    fontWeight: 600,
-                    fontSize: '14px',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                  }}
-                >
-                  â¬‡️ Download File
-                </a>
-                <button
-                  onClick={() => { setExportResult(null); setSelectedClips([]); }}
-                  style={{
-                    padding: '12px 24px',
-                    background: 'white',
-                    color: '#166534',
-                    border: '2px solid #22c55e',
-                    borderRadius: '10px',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    fontSize: '14px',
-                  }}
-                >
-                  ✔ Done - Clear Clips
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Export Result - Error */}
-          {exportResult && !exportResult.success && (
-            <div style={{ 
-              background: '#fef2f2', 
-              padding: '20px', 
-              borderRadius: '12px', 
-              marginBottom: '20px',
-              border: '2px solid #fecaca'
-            }}>
-              <div style={{ fontWeight: 700, color: '#dc2626', marginBottom: '8px' }}>
-                âŒ Export Failed
-              </div>
-              <div style={{ fontSize: '14px', color: '#b91c1c', marginBottom: '12px' }}>
-                {exportResult.message}
-              </div>
-              <button
-                onClick={() => setExportResult(null)}
-                style={{
-                  padding: '8px 16px',
-                  background: '#dc2626',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  fontSize: '13px',
-                }}
-              >
-                Try Again
-              </button>
-            </div>
-          )}
-
-          {/* Selected clips list */}
-          {selectedClips.length > 0 ? (
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: '12px', color: '#374151' }}>
-                Selected Clips ({selectedClips.length}):
-              </div>
-              <div style={{ maxHeight: '400px', overflow: 'auto' }}>
-                {selectedClips.map((clip, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      padding: '14px',
-                      background: '#f8fafc',
-                      borderRadius: '10px',
-                      marginBottom: '8px',
-                      border: '2px solid #e2e8f0',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px' }}>
-                        {clip.meetingTitle}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>
-                        {formatTime(clip.start)} - {formatTime(clip.end)} ({Math.round(clip.end - clip.start)}s)
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#374151' }}>
-                        "{clip.text.substring(0, 80)}..."
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setSelectedClips(prev => prev.filter((_, i) => i !== idx))}
-                      disabled={exportLoading}
-                      style={{
-                        padding: '6px 10px',
-                        background: exportLoading ? '#e2e8f0' : '#fee2e2',
-                        color: exportLoading ? '#94a3b8' : '#dc2626',
-                        border: 'none',
-                        borderRadius: '6px',
-                        cursor: exportLoading ? 'not-allowed' : 'pointer',
-                        fontSize: '12px',
-                        marginLeft: '12px',
-                      }}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
-              
-              {/* Estimated info */}
-              <div style={{ 
-                marginTop: '12px', 
-                padding: '12px', 
-                background: '#f1f5f9', 
-                borderRadius: '8px',
-                fontSize: '12px',
-                color: '#64748b'
-              }}>
-                <strong>Estimated:</strong> {selectedClips.length} clips, ~{Math.round(selectedClips.reduce((sum, c) => sum + (c.end - c.start), 0))} seconds total
-                {selectedClips.length > 0 && (
-                  <span> from {new Set(selectedClips.map(c => c.meetingId)).size} video{new Set(selectedClips.map(c => c.meetingId)).size > 1 ? 's' : ''}</span>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '40px', background: '#f8fafc', borderRadius: '16px' }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>📤</div>
-              <div style={{ color: '#64748b', marginBottom: '8px' }}>No clips selected for export</div>
-              <div style={{ fontSize: '13px', color: '#94a3b8' }}>
-                Use the "Track Issues" tab to find mentions and add them to your export list
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-// ============================================================================
-// END v6.0 NEW FEATURE COMPONENTS
-// ============================================================================
+// CrossMeetingAnalysisPanel removed in v9.2 — functionality moved to Knowledge Base
 
 // NEW: Meeting Efficiency Dashboard
 function MeetingEfficiencyDashboard({ fullText, cues }) {
@@ -5880,7 +4629,7 @@ function KnowledgeBase({ currentVideoId, onSelectMeeting }) {
   };
 
   return (
-    <div className="knowledge-base">
+    <div className="knowledge-base legacy-kb-panel">
       <div className="kb-header">
         <h2>📚 Community Knowledge Base</h2>
         {kbStats && (
@@ -7021,6 +5770,7 @@ export default function App() {
   const [showAssistant, setShowAssistant] = useState(false);
   const [forceAssistantOpen, setForceAssistantOpen] = useState(0); // Counter to force open
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
+  // KBDashboard now at standalone ?page=kb route (see main.jsx)
   const [showLiveMode, setShowLiveMode] = useState(false);
 
   const [expanded, setExpanded] = useState({ open: false, focusIdx: null });
@@ -7038,6 +5788,7 @@ export default function App() {
   const [downloadJob, setDownloadJob] = useState(null); // { jobId, percent, message, status }
   const [showCelebration, setShowCelebration] = useState(null); // {file: url} when render completes
   const [videoTitle, setVideoTitle] = useState("");
+  const [videoDescription, setVideoDescription] = useState("");
   const [showTranscriptUpload, setShowTranscriptUpload] = useState(false); // Show upload prompt when no captions
   const [showAboutPage, setShowAboutPage] = useState(false); // About Community Highlighter page
 
@@ -7450,6 +6201,8 @@ export default function App() {
       setShowAboutPage(true);
       window.history.replaceState({}, '', window.location.pathname);
     }
+    // KB Dashboard is now a standalone page route — no redirect needed here
+    // (handled by main.jsx before App even loads)
     const urlVid = params.get('v');
     const urlClips = params.get('clips');
     if (urlVid && urlClips) {
@@ -7647,6 +6400,7 @@ export default function App() {
     // Process metadata
     if (metaResult.status === 'fulfilled' && metaResult.value?.title) {
       setVideoTitle(metaResult.value.title);
+      setVideoDescription(metaResult.value.description || '');
     }
 
     // Process word frequency
@@ -7716,7 +6470,12 @@ export default function App() {
 
     // Process entity extraction
     if (analyticsResult.status === 'fulfilled') {
-      setEntities(analyticsResult.value?.topEntities || []);
+      const extractedEntities = analyticsResult.value?.topEntities || [];
+      setEntities(extractedEntities);
+      // Auto-save analysis data to KB for cross-meeting comparison
+      if (extractedEntities.length > 0 && vid) {
+        apiSaveAnalysis({ video_id: vid, entities: extractedEntities }).catch(() => {});
+      }
     } else {
       console.error("Analytics API error:", analyticsResult.reason);
       setEntities([]);
@@ -9077,6 +7836,22 @@ export default function App() {
           </section>
         )}
 
+        {/* Knowledge Base access on homepage */}
+        {!videoId && (
+          <section className="card section animate-fadeIn" style={{ marginTop: 16, background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <h3 style={{ fontSize: 18, fontWeight: 800, color: '#f1f5f9', margin: '0 0 4px' }}>Knowledge Base</h3>
+                <p style={{ fontSize: 13, color: '#94a3b8', margin: 0 }}>Search across indexed meetings, track issues over time, and view cross-meeting analytics.</p>
+              </div>
+              <button onClick={() => window.open(`${window.location.origin}/?page=kb`, '_blank')}
+                style={{ padding: '12px 24px', fontSize: 14, fontWeight: 700, borderRadius: 10, border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: 'white', whiteSpace: 'nowrap' }}>
+                Open Analytics Dashboard
+              </button>
+            </div>
+          </section>
+        )}
+
         {/* Why Desktop App — cloud mode only, below Civic Meeting Finder */}
         {!videoId && isCloudMode && (
           <section id="why-desktop" className="card section animate-fadeIn" style={{
@@ -9200,8 +7975,9 @@ export default function App() {
               { label: 'Highlight', sub: 'Search & discover key moments', ref: sectionHighlightRef, iconChar: '\u2315' },
               { label: 'Edit', sub: 'Build & export highlight reels', ref: sectionEditRef, iconChar: '\u25B6' },
               { label: 'Analyze', sub: 'Entities, topics & trends', ref: sectionAnalyzeRef, iconChar: '\u2261' },
+              { label: 'Knowledge', sub: 'Cross-meeting analytics', iconChar: '\u2637', action: () => window.open('/?page=kb', '_blank') },
             ].map((s, i) => (
-              <button key={s.label} onClick={() => s.ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              <button key={s.label} onClick={() => s.action ? s.action() : s.ref?.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
                 className="section-nav-btn"
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10,
@@ -11689,9 +10465,10 @@ export default function App() {
                 pad={pad}
               />
 
-              {/* Interactive Timeline removed — redundant with Topic Heatmap + Moments of Disagreement */}
+              {/* Question Flow — before Moments of Disagreement */}
+              <QuestionFlowDiagram sents={sents} onTimestampClick={jumpToTimestamp} addToBasket={addToBasket} pad={pad} />
 
-              {/* 5. Moments of Disagreement - FULL WIDTH */}
+              {/* Moments of Disagreement - FULL WIDTH */}
               <DisagreementTimeline
                 sents={sents}
                 playerRef={playerRef}
@@ -11701,47 +10478,32 @@ export default function App() {
                 pad={pad}
               />
 
-              {/* 6. Conversation Dynamics - FULL WIDTH */}
+              {/* Conversation Dynamics - FULL WIDTH */}
               <ConversationDynamics
                 sents={sents}
                 playerRef={playerRef}
                 videoId={videoId}
               />
 
-              {/* 7. Cross-Reference Network - FULL WIDTH */}
-              <CrossReferenceNetwork
-                fullText={fullText}
-                entities={entities}
-              />
-
-              {/* 8. NEW: Question Flow Diagram */}
-              <QuestionFlowDiagram sents={sents} onTimestampClick={jumpToTimestamp} addToBasket={addToBasket} pad={pad} />
-
-              {/* 9. NEW: Framing Plurality Map */}
+              {/* Framing Plurality Map */}
               <FramingPluralityMap sents={sents} entities={entities} onTimestampClick={jumpToTimestamp} />
 
-              {/* 10. NEW: Disagreement Topology */}
-              <DisagreementTopology sents={sents} onTimestampClick={jumpToTimestamp} addToBasket={addToBasket} pad={pad} />
-
-              {/* 11. NEW: Issue Lifecycle */}
-              <IssueLifecycle sents={sents} />
-
-              {/* 12. Topic Subscriptions + Relevant Documents - SIDE BY SIDE */}
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', 
+              {/* Cross-Reference Network + Relevant Documents - SIDE BY SIDE */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
                 gap: '20px',
                 gridColumn: '1 / -1'
               }}>
-                <TopicSubscriptionsPanel
-                  transcript={fullText}
-                  videoId={videoId}
-                  videoTitle={videoTitle}
+                <CrossReferenceNetwork
+                  fullText={fullText}
+                  entities={entities}
                 />
                 <RelevantDocumentsPanel
                   videoTitle={videoTitle}
                   transcript={fullText}
                   entities={entities}
+                  videoDescription={videoDescription}
                 />
               </div>
 
@@ -11751,18 +10513,10 @@ export default function App() {
                 videoTitle={videoTitle}
                 fullText={fullText}
                 entities={entities}
+                addToBasket={addToBasket}
+                onOpenDashboard={() => window.open(`${window.location.origin}/?page=kb`, '_blank')}
               />
-              <TopicTrendsChart />
-              <EntityNetworkGraph />
 
-              {/* Issue Tracker & Meeting Comparison */}
-              <CrossMeetingAnalysisPanel
-                currentVideoId={videoId}
-                currentTitle={videoTitle}
-                currentTranscript={fullText}
-                currentEntities={entities}
-                currentSummary={summary.para}
-              />
 
             </div>
           </section>
@@ -11796,6 +10550,8 @@ export default function App() {
           />
         </section>
       )}
+
+      {/* KB Analytics Dashboard now at standalone ?page=kb route */}
 
       {/* v5.10: Desktop download banner - shows above footer in cloud mode */}
       <DesktopAppBanner />

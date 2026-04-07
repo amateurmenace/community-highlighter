@@ -422,6 +422,200 @@ export async function apiKnowledgeBaseStats() {
   return res.json();
 }
 
+// v9.2: Streaming add meeting to knowledge base with progress
+export async function streamAddToKnowledgeBase(data, onProgress, onDone, onError) {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/knowledge/add_meeting_stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const parsed = JSON.parse(line.slice(6));
+            if (parsed.done) { onDone && onDone(parsed); }
+            else if (parsed.progress !== undefined) { onProgress && onProgress(parsed); }
+          } catch (e) { /* ignore parse errors */ }
+        }
+      }
+    }
+  } catch (err) {
+    onError && onError(err);
+  }
+}
+
+// v9.2: List all meetings in knowledge base
+export async function apiListKBMeetings() {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/meetings`);
+  if (!res.ok) throw new Error('Failed to list KB meetings');
+  return res.json();
+}
+
+// ============================================================================
+// KB ANALYTICS DASHBOARD API (v9.3)
+// ============================================================================
+
+export async function apiKBDashboardStats() {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/dashboard_stats`);
+  if (!res.ok) throw new Error('Failed to load dashboard stats');
+  return res.json();
+}
+
+export async function apiEntityTracking(data = {}) {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/entity_tracking`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error('Failed to load entity tracking');
+  return res.json();
+}
+
+export async function apiSentimentTimeline() {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/sentiment_timeline`);
+  if (!res.ok) throw new Error('Failed to load sentiment timeline');
+  return res.json();
+}
+
+export async function apiDecisionsAcross() {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/decisions_across_meetings`);
+  if (!res.ok) throw new Error('Failed to load decisions');
+  return res.json();
+}
+
+export async function apiTopicClusters() {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/topic_clusters`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
+  });
+  if (!res.ok) throw new Error('Failed to load topic clusters');
+  return res.json();
+}
+
+export async function apiKBCompareMeetings(data) {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/compare_meetings`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error('Failed to compare meetings');
+  return res.json();
+}
+
+export async function apiIssueAISummary(data) {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/issue_ai_summary`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error('Failed to generate issue summary');
+  return res.json();
+}
+
+export async function apiParticipationAcross() {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/participation_across`);
+  if (!res.ok) throw new Error('Failed to load participation data');
+  return res.json();
+}
+
+export async function apiDeleteKBMeeting(videoId) {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/delete_meeting`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ video_id: videoId })
+  });
+  if (!res.ok) throw new Error('Failed to delete meeting');
+  return res.json();
+}
+
+export async function apiAIComparison() {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/ai_comparison`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
+  });
+  if (!res.ok) throw new Error('Failed to generate AI comparison');
+  return res.json();
+}
+
+export async function apiTopicDrilldown(data) {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/topic_drilldown`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error('Failed to get topic drilldown');
+  return res.json();
+}
+
+export async function apiSentimentExcerpts(data) {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/sentiment_excerpts`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error('Failed to get sentiment excerpts');
+  return res.json();
+}
+
+export async function apiKBFramingAnalysis(data = {}) {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/framing_analysis`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error('Failed to get framing analysis');
+  return res.json();
+}
+
+export async function apiKBWordCloud(data = {}) {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/word_cloud`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error('Failed to get word cloud data');
+  return res.json();
+}
+
+export async function apiRenderMultiVideoClips(data) {
+  const res = await fetch(`${BACKEND_URL}/api/render_multi_video_clips`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error('Failed to start multi-video render');
+  return res.json();
+}
+
+export async function apiSaveAnalysis(data) {
+  const res = await fetch(`${BACKEND_URL}/api/knowledge/save_analysis`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error('Failed to save analysis');
+  return res.json();
+}
+
+export async function streamEnrichMeeting(videoId, onProgress, onDone, onError) {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/knowledge/enrich_meeting`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ video_id: videoId, force: true })
+    });
+    if (!res.ok) throw new Error('Enrich request failed');
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.done) { if (onDone) onDone(data); }
+          else if (data.progress < 0) { if (onError) onError(new Error(data.stage)); }
+          else { if (onProgress) onProgress(data); }
+        } catch {}
+      }
+    }
+  } catch (err) {
+    if (onError) onError(err);
+  }
+}
+
 // ============================================================================
 // NEW: CLIP PREVIEW API
 // ============================================================================

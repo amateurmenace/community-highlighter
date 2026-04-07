@@ -4,7 +4,7 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 
 ## Architecture
 
-- **Frontend**: React 19 + Vite + vite-plugin-pwa + recharts, built to `dist/`. Code-split into 4 chunks: ReelPlayer (6.7KB), App editor (343KB), recharts (384KB), React runtime (185KB). `src/App.jsx` (~11,500 lines) with inline sub-components. Extracted components in `src/components/`: AnimatedTagline, AboutPage, SummaryLoadingTerminal, SectionPreviews, GuidedTour, MeetingViz (QuestionFlowDiagram, FramingPluralityMap, DisagreementTopology, IssueLifecycle). ReelPlayer extracted to `src/ReelPlayer.jsx` for code-splitting.
+- **Frontend**: React 19 + Vite + vite-plugin-pwa + recharts, built to `dist/`. Code-split into 7 chunks: ReelPlayer (6.7KB), KBDashboard (75KB), KBMontage (9.5KB), api (13KB shared), App editor (306KB), recharts (384KB), React runtime (185KB), html2canvas (201KB, lazy-loaded). `src/App.jsx` (~10,350 lines) with inline sub-components. Extracted components in `src/components/`: AnimatedTagline, AboutPage, SummaryLoadingTerminal, SectionPreviews, GuidedTour, MeetingViz (QuestionFlowDiagram, FramingPluralityMap), VizExportButton. KB components in `src/components/kb/`: KBMontage. ReelPlayer extracted to `src/ReelPlayer.jsx` for code-splitting. KBDashboard is now a standalone page at `?page=kb` (code-split in main.jsx).
 - **Backend**: FastAPI (`backend/app.py`, ~340KB monolith), served by Uvicorn on port 8000. 85+ API endpoints (includes SSE streaming, WebSocket job status)
 - **Desktop packaging**: PyInstaller bundles into macOS `.app` (signed+notarized) and Windows `.exe`
 - **Cloud deployment**: Render (https://community-highlighter.onrender.com/) + Google Cloud Run — full video editor with Share Reel Link + Desktop Handoff (.chreel); cloud rendering enabled for short reels (max 5 clips / 2 min); full video download requires desktop app
@@ -21,7 +21,7 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 | `backend/app.py` | FastAPI application (all API endpoints) |
 | `src/App.jsx` | React frontend (large monolithic component) |
 | `src/ReelPlayer.jsx` | Code-split cinematic reel player (`?mode=play`) |
-| `src/main.jsx` | Entry point — routes between ReelPlayer and App via lazy loading |
+| `src/main.jsx` | Entry point — routes between ReelPlayer, KBDashboard, and App via lazy loading |
 | `src/api.js` | API client (all fetch calls to backend) |
 
 ## User Workflow
@@ -80,7 +80,8 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
    - **Job Status** — progress bar during render
 3. **Bottom Panel** — AI Summary, Key Highlights
 4. **Meeting Analyzer Section** — separated by "Meeting Analyzer" section divider:
-   - ALL data visualizations always visible: Entities, Participation, Topics, Timeline, Disagreements, Dynamics, Cross-References, **Question Flow**, **Framing Plurality Map**, **Disagreement Topology**, **Issue Lifecycle**, Knowledge Base, Subscriptions, Issue Tracker
+   - ALL data visualizations always visible: Entities, Participation, Topics, Timeline, Disagreements, Dynamics, Cross-References, **Question Flow**, **Framing Plurality Map**, Knowledge Base
+   - **All viz components** have an **Export** button (top-right) that downloads the visualization as a PNG image via html2canvas (lazy-loaded)
    - **No emojis** in any viz component headings or labels — replaced with text-only or CSS indicators
    - New viz uses **recharts** library for bar charts and interactive data display
    - Three named section dividers separate the page: "Meeting Highlighter", "Highlight Video Editor", "Meeting Analyzer" (no emojis)
@@ -90,20 +91,13 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
    - Effects: Captions, Color Filter, Transitions, Background Music
    - Branding: Intro/Outro Title/Subtitle/CTA, Chapter Titles, Watermark, Speaker Labels
    - Full Video Download with resolution picker (desktop only)
-9. **Meeting Analytics** — pushed below the fold (entities, decisions, topics, participation, question flow, framing plurality, disagreement topology, issue lifecycle, knowledge base)
+9. **Meeting Analytics** — pushed below the fold (entities, decisions, topics, participation, question flow, framing plurality, knowledge base)
 10. **Share Reel Link** — available on both desktop and cloud, copies URL with `mode=play` for cinematic Reel Player
 11. **About Page** — full Philosophy + Technology page, accessible via `?page=about` permanent link, About button in header and footer
 
 ## Onboarding & First-Visit Experience
 
-- **Guided Tour** (replaced OnboardingWizard + HowToGuide): SVG spotlight overlay with floating tooltip bubbles. 4 steps:
-  1. Welcome — "Paste any YouTube meeting URL above to get started"
-  2. Search & Highlight — targets `#preview-highlight` card
-  3. Edit & Export Reels — targets `#preview-edit` card
-  4. Deep Analysis — targets `#preview-analyze` card
-  - Keyboard nav: Arrow keys, Enter to advance, Escape to close
-  - Spotlight cutout animates between targets with `cubic-bezier` transitions
-  - Recalculates position on scroll/resize
+- **Welcome Screen** (v9.2, replaced multi-step GuidedTour): Single centered welcome modal with title "Welcome to Community Highlighter" and description guiding users to paste a YouTube URL or search for a community meeting. "Get Started" button dismisses. Escape to close. No spotlight, no multi-step navigation.
 - **Section Preview Cards** (`SectionPreviews` component): 3-column grid on landing page (above URL input) showing skeleton mockups:
   - Search & Highlight: dark word cloud skeleton with shimmer blocks + search bar
   - Edit & Export: dark timeline editor with colored clip blocks
@@ -123,7 +117,9 @@ Both desktop and cloud users get the same full video editor. Cloud users can bui
 5. **Civic Meeting Finder** — integrated inline (no longer a separate section), with search, filters, channel import
 6. **Tip Text** — styled card with border, visible text: "Tip: This app works best with YouTube videos that have captions..." + "Learn more about how Community Highlighter works" link to About page
 7. **.chreel Import Zone** — dark drag-and-drop (desktop only)
-8. **Batch Processing** — collapsible
+8. **Knowledge Base** — dark card with "Open Analytics Dashboard" button (opens `?page=kb` in new tab)
+9. **Why Desktop App** — green gradient card (cloud mode only)
+10. **Batch Processing** — collapsible
 
 ## Reel Player Mode
 
@@ -234,7 +230,7 @@ When a shared reel link is opened with `?mode=play`, `main.jsx` detects this and
 ### Frontend Performance
 - **Parallel API calls**: `loadAll` fires metadata + wordfreq + executive summary + entity extraction simultaneously via `Promise.allSettled`
 - Word frequency: 150+ stopwords including civic meeting title words (council, board, committee, etc.)
-- **Code splitting** (v8.3): `main.jsx` routes between lazy-loaded ReelPlayer and App. Vite `manualChunks` splits recharts into its own chunk. Build produces 4 JS chunks: ReelPlayer (4.5KB), index/React (185KB), App (330KB), recharts (384KB)
+- **Code splitting** (v8.3, expanded v9.4): `main.jsx` routes between lazy-loaded ReelPlayer, KBDashboard, and App. Vite `manualChunks` splits recharts into its own chunk. Build produces 7 JS chunks: ReelPlayer (6.7KB), KBDashboard (48KB), KBMontage (9.5KB), api (13KB shared), index/React (185KB), App (306KB), recharts (384KB). KB viewers at `?page=kb` never load the 306KB App chunk.
 - **Mobile responsive** (v8.3): Breakpoints at 768px and 500px for word cloud (scaled fonts), timeline (vertical card layout), settings drawer (full-width), section nav (horizontal scroll), toolbar (wrapped buttons), viz cards (compact padding)
 
 ### Quote-to-Timestamp Matching
@@ -273,37 +269,127 @@ When a shared reel link is opened with `?mode=play`, `main.jsx` detects this and
 
 All viz components work WITHOUT speaker attribution. They analyze text patterns, topic keywords, and structural indicators. Extracted to `src/components/MeetingViz.jsx`. All viz components link back to the video via clickable timestamps and "+ Clip" buttons.
 
-- **Question Flow Diagram** (`QuestionFlowDiagram`): Detects questions (sentences with `?`), classifies response quality (substantive/procedural/deflection/unanswered) and type (budget/timeline/accountability/rationale/information). Recharts stacked bar chart + visual timeline strip of colored dots. **Show Questions** toggle reveals a scrollable list of actual question text with clickable timestamps and + Clip buttons.
+- **Question Flow** (`QuestionFlowDiagram`, v9.2 redesign): Detects questions (sentences with `?`), classifies response quality (substantive/procedural/deflection/unanswered) and type (budget/timeline/accountability/rationale/information). **Grouped by type**: questions organized into collapsible sections per type (budget, timeline, accountability, rationale, information, general), each showing 2-question preview with expand. **Repeated Patterns** section groups similar questions by Jaccard word similarity (>35% threshold), shows "Asked Nx" badges with shared topic words. Summary stats: total questions, substantive count, deflected/unanswered count, pattern count. Timeline strip with colored dots. Each question card has: clickable timestamp pill, quality badge, + Clip button.
 - **Framing Plurality Map** (`FramingPluralityMap`): For top 6 topics, shows how each framing lens was used (financial, safety, community, environmental, legal, equity, infrastructure, process). Radial burst SVG (380x370) with background rings. **Clickable** — click any topic to expand detail table showing actual quote snippets with clickable timestamps for each framing lens. Includes "How to Read" primer explaining spokes, dot sizes, complexity interpretation.
-- **Disagreement Topology** (`DisagreementTopology`): Interactive SVG node-link diagram (750x420). Nodes show support (green) vs oppose (red) positions. **Hover** highlights connected edges, dims unrelated nodes, shows full text in floating tooltip with **Jump** and **+ Clip** buttons. Includes "How to Read" primer. Nodes 24px radius with 50-char text preview.
-- **Issue Lifecycle** (`IssueLifecycle`): Swimlane chart tracking topic progression (introduced → discussed → tabled → voted).
 - **Participation Tracker**: Dark-themed card with 4 metric boxes (public comments, questions, motions, duration), recharts BarChart activity timeline (click to jump), proportional stacked bar for discussion breakdown.
 - **Cross-Reference Network**: Client-side co-occurrence graph (entities + top keywords). Up to 25 draggable nodes, 40 edges. Color by type (person/place/org/keyword). Hover highlights connections. Drag nodes to rearrange. **v9.1**: Larger nodes (14-38px radius), readable labels below nodes (11px), bigger SVG canvas (700x620)
-- **Moments of Disagreement** (`DisagreementTimeline`): Three-tier keyword scoring (strong +3, moderate +2, modifier +1) with 30s clustering, capped at 50 markers. **v9.1**: Expanded from 18 to 50+ keywords — now catches "frustrated", "divided", "split vote", "pushback", "skeptical", "alarming", "vote no", "dissent", etc.
+- **Moments of Disagreement** (`DisagreementTimeline`): Three-tier keyword scoring (strong +3, moderate +2, modifier +1) with 30s clustering, capped at 50 markers. **v9.1**: Expanded from 18 to 50+ keywords. **v9.2**: Fixed CSS conflicts between 3 competing `.timeline-track` rules — scoped `!important` overrides, suppressed `::before` blueprint overlay, dedicated `disagreementPulse` animation keyframes.
 - **Entities** (`MentionedEntitiesCard`): 16px entity names with type badge (PER/PLA/ORG colored indicators), 14px count badges.
 
 ### Removed (v9.0)
 - **Interactive Timeline** — removed as redundant with Topic Heatmap + Moments of Disagreement
 - **Topic Distribution** (pie chart) — removed as redundant with Topic Heatmap
 
+### Removed (v9.2)
+- **Issue Lifecycle** (`IssueLifecycle`) — removed (was not producing useful data for most meetings)
+- **Issue Tracker & Meeting Comparison** (`CrossMeetingAnalysisPanel`) — removed (~1350 lines), functionality consolidated into Knowledge Base
+- **Disagreement Topology** (`DisagreementTopology`) — removed from render (component still in MeetingViz.jsx but not rendered)
+- **Topic Subscriptions** (`TopicSubscriptionsPanel`) — removed (~170 lines)
+
+## Viz Export (v9.2)
+
+- **VizExportButton** component (`src/components/VizExportButton.jsx`): Renders "Export" button in top-right of each viz card
+- Uses `html2canvas` (dynamically imported, code-split into own chunk ~201KB) to capture at 2x scale as PNG
+- Added to all active viz components: DisagreementTimeline, CrossReferenceNetwork, ConversationDynamics, TopicHeatMap, ParticipationTracker, MentionedEntitiesCard, QuestionFlowDiagram, FramingPluralityMap
+
 ## Knowledge Base UI
 
-- **KnowledgeBasePanel** component in Meeting Analyzer section
-- Dark-themed panel (#0f172a background) with detailed explanation, example usage, and clear button labels
-- "Add This Meeting to Knowledge Base" button (was "Add to KB") → calls `/api/knowledge/add_meeting`
-- Cross-meeting search input → calls `/api/knowledge/search`
+- **KnowledgeBasePanel** component in Meeting Analyzer section — works in both desktop AND cloud mode (v9.2)
+- Dark-themed panel (#0f172a background) with description, stats, and action buttons
+- **SSE Progress Bar** (v9.2): When adding a meeting, streams progress events (fetching transcript → metadata → chunking → AI enrichment) with animated green progress bar and stage messages
+- "Add This Meeting to Knowledge Base" button → calls `/api/knowledge/add_meeting_stream` (SSE streaming)
+- **Auto-enrichment** (v9.4): Adding a meeting automatically extracts entities, decisions, summary, and sentiment — no separate enrich step needed
+- **Add by URL** (v9.3): Paste any YouTube URL directly in the KnowledgeBasePanel to add meetings without loading them first
+- Cross-meeting search input → calls `/api/knowledge/search`. Search results include **"+ Clip"** button to add results to the clip timeline (v9.2)
 - "Find Related Meetings" button → calls `/api/knowledge/find_related`
-- Stats display (meetings count, document chunks)
-- Search results with relevance scores, excerpts, and "Open Meeting" links
-- Related meetings with similarity scores
-- Backend: ChromaDB with `all-MiniLM-L6-v2` embeddings, 500-char semantic chunks
-- All 4 KB API functions already existed in `api.js`; this wires them into the UI
-- **TopicTrendsChart** (v8.3): recharts LineChart showing top 8 topic frequencies across meetings over time. Requires 2+ meetings in KB. Uses `POST /api/knowledge/topic_trends` (5-min in-memory cache). Color-coded lines per topic, dark theme matching KBPanel.
-- **EntityNetworkGraph** (v8.3): SVG radial layout showing meetings (green inner ring) connected to shared entities (blue outer ring). Uses existing `/api/graph/build`. Max 30 entity nodes + all meeting nodes. Hover reveals labels, shared entities highlighted with thicker edges.
+- **Meeting Library** (v9.2): Expandable grid showing all indexed meetings with thumbnails, titles, dates, chunk counts
+- **Homepage access** (v9.3): Knowledge Base card on landing page (above "Why Desktop" section) with "Open Analytics Dashboard" button — opens KB in new tab
+- Backend: ChromaDB with `all-MiniLM-L6-v2` embeddings, 100-word semantic chunks (standardized v9.4)
+- **Cloud mode support** (v9.2): Dockerfile creates `/data/knowledge_base` directory; ChromaDB + sentence-transformers already in requirements.txt
+- **Persistent storage** (v9.4): Render persistent disk at `/data/knowledge_base` (1GB), `KB_PERSIST_DIR` env var for ChromaDB path
+
+## KB Analytics Dashboard (v9.5)
+
+Standalone code-split page at `?page=kb` URL. Component: `src/components/KBDashboard.jsx` (lazy-loaded in `main.jsx`, separate ~75KB chunk). Single scrollable page with sidebar navigation — all analytics sections visible at once, no tab switching. Dark theme throughout (body background overridden to `#0a0f1a`).
+
+### Layout
+- **Header** (sticky): "Knowledge Base Analytics" title, Back to App button, "?" help button to re-show onboarding tutorial
+- **Sidebar** (200px, sticky): Section links with IntersectionObserver-based active tracking, meeting count badge, "Quick Add" URL input at bottom
+- **Content area**: All sections rendered sequentially with `SectionHeader` components (title + green gradient underline, 20px/16px fonts) and scroll-to anchors
+- **Empty state**: Centered onboarding with URL input when no meetings exist
+- **Onboarding** (v9.5): 4-step tutorial overlay on first visit (Welcome, How It Works, Features, Tips). Tracked via `localStorage('kb_onboarding_complete')`. "?" button in header re-shows.
+
+### Top-Level Controls (v9.5)
+- **Add Meeting Panel**: Prominent full-width card at top with large URL input (14px), green "Add Meeting" button, "Add multiple meetings at once" bulk toggle
+  - **Bulk Add**: Textarea for up to 20 URLs, sequential processing with 2s delay between meetings to avoid rate limits, per-meeting + overall progress bars
+  - **Progress**: 12px-tall progress bar with stage text (14px) and percentage during add
+  - **Success state**: Persistent green card showing meeting title, chunks indexed, enrichment status, contextual tips based on meeting count, quick-jump buttons to sections
+- **Meeting Selector** (v9.5): Checkbox grid of all meetings with thumbnails and dates. Users can select/deselect individual meetings for analysis. "Select All" / "Clear" / "Generate Dashboard" buttons. Enables filtering analytics to specific meetings (e.g., only one municipality's meetings)
+
+### Sections (top to bottom)
+1. **Overview**: Stats row (Meetings/Enriched/Decisions/Entities, 36px stat values), AI Comparison hero button (requires 2+ meetings), meeting timeline SVG (180px, clickable nodes with inline video preview), recently added meetings grid, top entity tags
+2. **Meetings Library**: Card grid with thumbnails, video preview toggle, "Open in App", "Re-analyze" (force re-enrichment), "Remove" with confirmation
+3. **Topic Analysis** (v9.5 redesign): Topic lifecycle summary card (NEW/RISING/FADING badges), Topic Relevance Heatmap (SVG, 44px cells, sparklines per topic, click cell for drill-down excerpts), **Bump Chart** (custom SVG, 450px, shows topic rank changes across meetings with colored lines, hover highlighting, rank labels)
+4. **Entity Tracking**: Bar chart (top 15, 500px), filterable entity detail list with type badges (person/org/place), expand to see appearance history
+5. **Cross-Meeting Word Cloud** (v9.5 new): Custom SVG word layout sized by cross-meeting frequency. Words color-coded by primary meeting. Hover shows per-meeting frequency tooltip. Click expands detail panel with frequency bar chart + transcript excerpts via KB search. Backend: `POST /api/knowledge/word_cloud` with 150+ civic stopwords, cross-meeting scoring (`total * sqrt(num_meetings)`)
+6. **Decision Tracker** (v9.5 redesign): Decision Outcomes Summary (stat cards + proportional color bar), Visual Decision Timeline (vertical timeline grouped by meeting, colored type badges, 14px text, context quotes)
+7. **Framing Analysis** (v9.5 new, replaces Sentiment): 8-lens civic discourse analysis (financial, safety, community, environmental, legal, equity, infrastructure, process). Cross-meeting framing heatmap (SVG, 44px cells), Framing shift indicators ("Financial framing is increasing"), Per-meeting radial burst SVG (click meeting in heatmap to see), Framing evolution line chart (recharts). Backend: `POST /api/knowledge/framing_analysis` with keyword-based lens detection
+8. **People & Participation** (v9.5 redesign): Unified Participation Matrix (SVG grid with sized circles proportional to mention count, not binary present/absent), summary stats ("Most mentioned", "Most active"), click person row for expanded appearance timeline with dates and counts
+9. **Meeting Comparison**: Two-meeting dropdown selectors, side-by-side stats (entities, decisions), overlap score, shared/unique entity lists
+10. **Discourse Analysis**: Search for any entity/topic to see chronological excerpts across meetings in a vertical timeline. KB search returns multiple chunks per meeting with keyword scoring bonus (v9.5 fix)
+11. **Meeting Montage Maker**: Cross-meeting highlight reel editor (lazy-loaded `KBMontage` component, ~9.5KB chunk)
+
+### Meeting Montage Maker (v9.4)
+- Component: `src/components/kb/KBMontage.jsx` — build cross-meeting highlight reels
+- **Left panel** (360px): Browse KB meetings, search transcripts per meeting via `apiSearchKnowledgeBase`, click results to add clips with inline start/end/label form
+- **Right panel**: YouTube iframe preview player, horizontal drag-to-reorder timeline with colored meeting badges, per-clip preview/remove, total duration
+- **Clip model**: `{ id, videoId, start, end, label, meetingTitle, meetingDate }` — clips carry videoId for multi-video support
+- **Export**: Groups clips by videoId, calls existing `POST /api/render_multi_video_clips` endpoint (backend already supports multi-video rendering)
+- Cloud mode: preview playback works (YouTube iframes), export shows desktop-required message
+
+### AI Enrichment Pipeline (v9.4)
+- Runs automatically during `add_meeting_stream` — no separate enrich step
+- **Re-analyze** button on meeting cards forces re-enrichment with `force: true` parameter
+- 4 stages: Entity extraction → Decision extraction → Summary generation → Sentiment analysis
+- Uses Gemini 2.5 Flash (50K chars of transcript) with GPT-4o fallback
+- **Decision extraction** (v9.4): Improved prompt extracts motions, votes, approvals, tabled items, and discussion outcomes. Handles dict returns from Gemini JSON mode correctly
+- **Dict parsing fix** (v9.4): All AI JSON results handle both string and dict return types — fixes silent parse failures when Gemini returns dicts
+- **Meeting date extraction from title** (v9.5): `extract_date_from_title()` parses dates from civic meeting titles (e.g., "Select Board Meeting January 15, 2025" → `20250115`) before falling back to YouTube `upload_date`. Supports full/abbreviated month names, MM/DD/YYYY, YYYY-MM-DD, ordinals
+
+### Backend Improvements (v9.4, v9.5)
+- **Chunking standardized**: Both `add_meeting` and `add_meeting_stream` use 100-word chunks with consistent `"Meeting: ...\nContent: ..."` prefix
+- **Centralized doc cache**: `_kb_docs_cache` at `_get_all_kb_docs()` level with 5-min TTL — all 8+ analytics endpoints share one cached scan
+- **`_invalidate_all_kb_caches()`**: Single function replaces 4 scattered cache invalidation blocks (called from add/delete/enrich/save endpoints). Includes `_kb_framing_cache` and `_kb_wordcloud_cache` (v9.5)
+- **Topic scoring fix**: ChromaDB L2 distances normalized with `max(0, 1 - dist/2)` instead of `max(0, 1 - dist)` — scores now range 0.3-0.7 instead of all zeros
+- **Transcript prefix stripping**: `enrich_meeting` strips chunk prefixes before concatenating transcript for AI analysis
+- **ChromaDB persistent storage**: Path configurable via `KB_PERSIST_DIR` env var, defaults to `backend/knowledge_base/chroma_db`
+- **KB search keyword scoring** (v9.5): `/api/knowledge/search` now combines ChromaDB semantic similarity with keyword match bonus. Returns multiple results per meeting (no dedup by default). Boosts results containing the literal search terms
+- **CSS theme fix** (v9.5): Legacy KB panel styles in `index.css` scoped under `.legacy-kb-panel` class to prevent light-theme bleed into dark KBDashboard
+
+### KB API Endpoints (v9.5)
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/knowledge/dashboard_stats` | GET | Aggregated stats for dashboard |
+| `/api/knowledge/entity_tracking` | POST | Per-meeting entity frequencies |
+| `/api/knowledge/decisions_across_meetings` | GET | All decisions chronologically |
+| `/api/knowledge/topic_clusters` | POST | AI topic labels with relevance scores |
+| `/api/knowledge/topic_drilldown` | POST | Transcript excerpts for topic+meeting (v9.4) |
+| `/api/knowledge/compare_meetings` | POST | Two-meeting comparison |
+| `/api/knowledge/issue_ai_summary` | POST | AI narrative for issue lifecycle |
+| `/api/knowledge/participation_across` | GET | Person frequencies across meetings |
+| `/api/knowledge/enrich_meeting` | POST | SSE streaming AI enrichment (supports `force: true`) |
+| `/api/knowledge/delete_meeting` | POST | Remove meeting from KB |
+| `/api/knowledge/ai_comparison` | POST | AI cross-meeting analysis |
+| `/api/knowledge/save_analysis` | POST | Save per-meeting analysis to KB |
+| `/api/knowledge/framing_analysis` | POST | 8-lens civic discourse framing per meeting (v9.5). Accepts `video_ids` filter |
+| `/api/knowledge/word_cloud` | POST | Word frequencies per meeting with cross-meeting scoring (v9.5). Accepts `video_ids` filter |
+| `/api/knowledge/search` | POST | Semantic + keyword search across meetings. Returns multiple results per meeting (v9.5 fix) |
 
 ## Relevant Documents — CivicClerk Integration
 
-- `/api/find-relevant-documents` now searches CivicClerk portals in addition to DuckDuckGo + YouTube
+- `/api/find-relevant-documents` searches CivicClerk portals + DuckDuckGo + YouTube
+- **Description URL parsing** (v9.3): Extracts URLs from YouTube video description, auto-classifies CivicClerk links as "agenda" type
+- **AI Deep Search** (v9.3): `POST /api/find-relevant-documents/deep` generates 8 AI-targeted search queries for more comprehensive results
 - Portal mapping: municipality name → CivicClerk URL (currently: Brookline → `brooklinema.portal.civicclerk.com`)
 - Tries CivicClerk API search first, then always adds the portal as a direct link
 - Extensible: add more municipalities to `civicclerk_portals` dict in `backend/app.py`
@@ -370,8 +456,11 @@ Extracted from `src/App.jsx` into `src/components/`:
 - `AboutPage.jsx` — full philosophy/technology page
 - `SummaryLoadingTerminal.jsx` — terminal typing animation
 - `SectionPreviews.jsx` — landing page preview cards
-- `GuidedTour.jsx` — onboarding spotlight walkthrough
-- `MeetingViz.jsx` — QuestionFlowDiagram, FramingPluralityMap, DisagreementTopology, IssueLifecycle
+- `GuidedTour.jsx` — single-slide welcome screen (simplified from multi-step tour in v9.2)
+- `MeetingViz.jsx` — QuestionFlowDiagram, FramingPluralityMap
+- `VizExportButton.jsx` — (v9.2) reusable export-to-PNG button for all viz cards
+- `KBDashboard.jsx` — (v9.4) standalone Knowledge Base analytics page at `?page=kb`, code-split in `main.jsx`. Single scrollable page with sidebar nav, all sections visible. Contains inline tab components (OverviewTab, TopicsTab, EntitiesTab, DiscourseTab, etc.)
+- `kb/KBMontage.jsx` — (v9.4) Meeting Montage Maker for cross-meeting highlight reels, lazy-loaded within KBDashboard
 
 ## Accessibility (v9.0, enhanced v9.1)
 
@@ -430,7 +519,12 @@ Extracted from `src/App.jsx` into `src/components/`:
 - `POST /api/dev/toggle-cloud` — Toggle CLOUD_MODE at runtime (dev only)
 
 ### Knowledge Base
-- `POST /api/knowledge/add_meeting`, `search`, `find_related` — ChromaDB-backed cross-meeting search
+- `POST /api/knowledge/add_meeting` — Add meeting to KB (non-streaming)
+- `POST /api/knowledge/add_meeting_stream` — (v9.2) SSE streaming add with progress events
+- `POST /api/knowledge/search` — Search across all meetings
+- `POST /api/knowledge/find_related` — Find related meetings by content similarity
+- `GET /api/knowledge/stats` — KB statistics (meeting count, document count)
+- `GET /api/knowledge/meetings` — (v9.2) List all indexed meetings with metadata
 - `POST /api/knowledge/topic_trends` — Topic frequency time-series across all KB meetings (5-min cache)
 
 ### Export (v8.3)
@@ -537,6 +631,7 @@ gh workflow run build-windows.yml -f version=v8.1.0
 | `DESKTOP_MODE` | Auto | Set by app_launcher.py |
 | `FFMPEG_PATH` | Auto | Auto-detected from Homebrew (macOS) or PATH (Windows) |
 | `CACHE_MAX_AGE_HOURS` | No | Cache cleanup threshold in hours (default: 24) |
+| `KB_PERSIST_DIR` | No | ChromaDB persistent storage path (default: `backend/knowledge_base/chroma_db`). Set to `/data/knowledge_base/chroma_db` on Render/Cloud Run for persistent volume |
 
 `.env` file locations (checked in order):
 1. `backend/.env`
@@ -557,7 +652,7 @@ gh workflow run build-windows.yml -f version=v8.1.0
 - PyInstaller specs must EXCLUDE `backend/venv/`, `.venv/`, `dist/`, `build/`, `cache/` — bundling these causes notarization failure (unsigned nested binaries) and massive app size
 - macOS code signing: `find` for `.so`/`.dylib` must use `sort -u` and `[ -f "$f" ]` guards to avoid duplicate/symlink errors
 - `backend/app.py` is a ~340KB monolith — changes require care
-- `src/App.jsx` is ~11500 lines — 6 components extracted to `src/components/` in v9.0, further extraction possible
+- `src/App.jsx` is ~10500 lines — 7 components extracted to `src/components/` (v9.0-9.2), CrossMeetingAnalysisPanel removed in v9.2 (~1350 lines)
 - PyInstaller bundles torch/scipy/sklearn (huge) — could exclude unused ML deps to shrink app further
 - yt-dlp download timeout (10 min) can fail on long videos
 - YouTube API key is optional — transcript fetching and civic meeting search fall back to yt-dlp without it
@@ -566,13 +661,13 @@ gh workflow run build-windows.yml -f version=v8.1.0
 - `build_mac_app_signed.sh` requires `export PATH="/opt/homebrew/bin:$PATH"` for node/npm — added to script header
 - AI translation truncates long transcripts — frontend offers Google Translate fallback. For >5K chars, copies full transcript to clipboard and opens Google Translate in new tab (avoids URL length limits). Button labeled "Google Translate (Free, Full Text)"
 - ReelPlayer is code-split into its own chunk via `main.jsx` lazy routing — `?mode=play` viewers never load the editor bundle
-- `src/main.jsx` is the entry point now, not `src/App.jsx` — it routes between lazy-loaded ReelPlayer and App
+- `src/main.jsx` is the entry point now, not `src/App.jsx` — it routes between lazy-loaded ReelPlayer, KBDashboard (`?page=kb`), and App
 - PDF export uses fpdf2 with Helvetica (latin-1 encoding) — non-Latin characters get replaced. Future: bundle a Unicode font
 - Topic trends endpoint queries all ChromaDB documents in memory — may be slow for 100+ meetings. Has 5-min TTL cache
 - Timeline drag-and-drop uses HTML5 DnD which doesn't work on mobile touch — mobile users use move-up/move-down buttons instead
 
 ## Version
 
-Current: 9.1.0 (default AI: Gemini 2.5 Flash)
+Current: 9.5.0 (default AI: Gemini 2.5 Flash)
 Bundle ID: `com.communityhighlighter.app`
 Developer: Stephen Walter (6M536MV7GT)
