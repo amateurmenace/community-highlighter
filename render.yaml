@@ -13,9 +13,10 @@ services:
     buildCommand: |
       pip install -r requirements.txt
       python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords'); nltk.download('punkt_tab')"
+      python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
       npm install
       npm run build
-    startCommand: python app.py
+    startCommand: python backend/app.py
     envVars:
       - key: CLOUD_MODE
         value: "true"

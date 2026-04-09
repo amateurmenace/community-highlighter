@@ -511,10 +511,15 @@ embedding_model = None
 
 if CHROMADB_AVAILABLE:
     try:
+        print(f"[KB] Initializing ChromaDB at: {chroma_db_path}")
         chroma_client = chromadb.PersistentClient(path=chroma_db_path)
         chroma_client.list_collections()
+        print("[KB] ChromaDB client ready")
+
+        print("[KB] Loading SentenceTransformer model...")
         embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-        
+        print("[KB] Embedding model loaded")
+
         try:
             meetings_collection = chroma_client.get_collection(
                 name="community_meetings",
@@ -522,7 +527,7 @@ if CHROMADB_AVAILABLE:
                     model_name="all-MiniLM-L6-v2"
                 ),
             )
-            print("[OK] ChromaDB collection loaded")
+            print(f"[OK] ChromaDB collection loaded ({meetings_collection.count()} docs)")
         except:
             meetings_collection = chroma_client.create_collection(
                 name="community_meetings",
@@ -532,12 +537,14 @@ if CHROMADB_AVAILABLE:
             )
             print("[OK] ChromaDB collection created")
     except Exception as e:
+        import traceback
         print(f"[!] ChromaDB init failed: {e}")
+        traceback.print_exc()
         CHROMADB_AVAILABLE = False
         chroma_client = None
         meetings_collection = None
 else:
-    print("[!] Knowledge Base disabled")
+    print("[!] Knowledge Base disabled - chromadb or sentence-transformers not importable")
 
 #  NEW: WEBSOCKET CONNECTIONS FOR LIVE MODE
 # ============================================================================
