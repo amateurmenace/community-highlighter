@@ -42,11 +42,25 @@ import numpy as np
 try:
     import chromadb
     from chromadb.utils import embedding_functions
-    from sentence_transformers import SentenceTransformer
     CHROMADB_AVAILABLE = True
-except ImportError:
+    print("[KB] chromadb imported OK")
+    try:
+        from sentence_transformers import SentenceTransformer
+        print("[KB] sentence_transformers imported OK")
+    except ImportError as e:
+        print(f"[!] sentence_transformers import failed: {e}")
+        # Try installing at runtime as fallback
+        import subprocess, sys
+        print("[KB] Attempting runtime install of sentence-transformers...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "sentence-transformers==2.2.2", "--quiet"])
+        from sentence_transformers import SentenceTransformer
+        print("[KB] sentence_transformers installed and imported OK")
+except ImportError as e:
     CHROMADB_AVAILABLE = False
-    print("[!] ChromaDB/SentenceTransformers not available - Knowledge Base disabled")
+    print(f"[!] ChromaDB/SentenceTransformers not available - Knowledge Base disabled: {e}")
+except Exception as e:
+    CHROMADB_AVAILABLE = False
+    print(f"[!] KB import error: {e}")
 
 # Live Chat Support - disabled in v5.2
 LIVE_CHAT_AVAILABLE = False
@@ -512,29 +526,29 @@ embedding_model = None
 if CHROMADB_AVAILABLE:
     try:
         print(f"[KB] Initializing ChromaDB at: {chroma_db_path}")
-        chroma_client = chromadb.PersistentClient(path=chroma_db_path)
-        chroma_client.list_collections()
-        print("[KB] ChromaDB client ready")
+        os.makedirs(chroma_db_path, exist_ok=True)
 
-        print("[KB] Loading SentenceTransformer model...")
+        # Try persistent client first, fall back to ephemeral if path issues
+        try:
+            chroma_client = chromadb.PersistentClient(path=chroma_db_path)
+            print("[KB] ChromaDB persistent client ready")
+        except Exception as e_persist:
+            print(f"[KB] Persistent client failed ({e_persist}), trying ephemeral...")
+            chroma_client = chromadb.EphemeralClient()
+            print("[KB] ChromaDB ephemeral client ready (data will not persist across restarts)")
+
+        chroma_client.list_collections()
+
+        print("[KB] Loading SentenceTransformer model (may download on first run)...")
         embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
         print("[KB] Embedding model loaded")
 
+        ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
         try:
-            meetings_collection = chroma_client.get_collection(
-                name="community_meetings",
-                embedding_function=embedding_functions.SentenceTransformerEmbeddingFunction(
-                    model_name="all-MiniLM-L6-v2"
-                ),
-            )
+            meetings_collection = chroma_client.get_collection(name="community_meetings", embedding_function=ef)
             print(f"[OK] ChromaDB collection loaded ({meetings_collection.count()} docs)")
         except:
-            meetings_collection = chroma_client.create_collection(
-                name="community_meetings",
-                embedding_function=embedding_functions.SentenceTransformerEmbeddingFunction(
-                    model_name="all-MiniLM-L6-v2"
-                ),
-            )
+            meetings_collection = chroma_client.create_collection(name="community_meetings", embedding_function=ef)
             print("[OK] ChromaDB collection created")
     except Exception as e:
         import traceback
