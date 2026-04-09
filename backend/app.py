@@ -1506,6 +1506,31 @@ async def root():
     }
 
 
+@app.get("/api/kb-debug")
+async def kb_debug():
+    """Debug endpoint to diagnose KB initialization issues"""
+    info = {"chromadb_available": CHROMADB_AVAILABLE}
+    try:
+        import chromadb as _cb
+        info["chromadb_version"] = _cb.__version__
+        info["chromadb_import"] = "ok"
+    except Exception as e:
+        info["chromadb_import"] = str(e)
+    try:
+        from sentence_transformers import SentenceTransformer as _ST
+        info["sentence_transformers_import"] = "ok"
+    except Exception as e:
+        info["sentence_transformers_import"] = str(e)
+    info["kb_persist_dir"] = os.environ.get("KB_PERSIST_DIR", "not set")
+    info["chroma_db_path"] = chroma_db_path
+    info["chroma_db_path_exists"] = os.path.exists(chroma_db_path)
+    info["chroma_db_path_writable"] = os.access(chroma_db_path, os.W_OK) if os.path.exists(chroma_db_path) else False
+    info["chroma_client"] = str(type(chroma_client)) if chroma_client else None
+    info["meetings_collection"] = str(type(meetings_collection)) if meetings_collection else None
+    info["embedding_model"] = str(type(embedding_model)) if embedding_model else None
+    return info
+
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint for deployment monitoring"""
