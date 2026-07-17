@@ -6,10 +6,10 @@ AI-powered desktop + web app for analyzing civic meeting recordings. Extracts tr
 
 - **Frontend**: React 19 + Vite + vite-plugin-pwa + recharts, built to `dist/`. Code-split into 7 chunks: ReelPlayer (6.7KB), KBDashboard (75KB), KBMontage (9.5KB), api (13KB shared), App editor (306KB), recharts (384KB), React runtime (185KB), html2canvas (201KB, lazy-loaded). `src/App.jsx` (~10,350 lines) with inline sub-components. Extracted components in `src/components/`: AnimatedTagline, AboutPage, SummaryLoadingTerminal, SectionPreviews, GuidedTour, MeetingViz (QuestionFlowDiagram, FramingPluralityMap), VizExportButton. KB components in `src/components/kb/`: KBMontage. ReelPlayer extracted to `src/ReelPlayer.jsx` for code-splitting. KBDashboard is now a standalone page at `?page=kb` (code-split in main.jsx).
 - **Backend**: FastAPI (`backend/app.py`, ~340KB monolith), served by Uvicorn on port 8000. 85+ API endpoints (includes SSE streaming, WebSocket job status)
-- **Desktop packaging**: PyInstaller bundles into macOS `.app` (signed+notarized) and Windows `.exe`
+- **Desktop packaging**: The desktop app now ships as one of ten tools in the **control-z Suite** (https://github.com/amateurmenace/control-z — free/open-source finishing tools for DaVinci Resolve, "undo the paywall"; macOS/Apple Silicon, Windows build in progress). All in-app "Download Desktop App" links point to `https://github.com/amateurmenace/control-z/releases`. This repo's own PyInstaller specs (macOS `.app` signed+notarized, Windows `.exe`) still build the standalone bundle.
 - **Cloud deployment**: Render (https://community-highlighter.onrender.com/) + Google Cloud Run — full video editor with Share Reel Link + Desktop Handoff (.chreel); cloud rendering enabled for short reels (max 5 clips / 2 min); full video download requires desktop app
-- **GitHub**: https://github.com/amateurmenace/community-highlighter
-- **Latest release**: https://github.com/amateurmenace/community-highlighter/releases/latest
+- **GitHub (web app)**: https://github.com/amateurmenace/community-highlighter
+- **Desktop download**: https://github.com/amateurmenace/control-z/releases — the control-z Suite releases *list* (includes Community Highlighter). Do NOT use `/releases/latest`: on control-z it resolves to a standalone Resolve *plugin* release (e.g. "Speak"), not the suite.
 
 ## Key Entry Points
 

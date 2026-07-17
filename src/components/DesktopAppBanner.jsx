@@ -38,7 +38,7 @@ export function useCloudMode() {
 export function DesktopAppBanner({ onDismiss }) {
   const [isCloudMode, setIsCloudMode] = useState(false);
   const [dismissed, setDismissed] = useState(false);
-  const downloadUrl = 'https://github.com/amateurmenace/community-highlighter/releases/latest';
+  const downloadUrl = 'https://github.com/amateurmenace/control-z/releases';
   
   useEffect(() => {
     // Check if running in cloud mode
@@ -130,7 +130,7 @@ export function DesktopAppBanner({ onDismiss }) {
  * Inline prompt for clip sections when feature is unavailable
  */
 export function DesktopAppInlinePrompt({ feature = 'this feature' }) {
-  const downloadUrl = 'https://github.com/amateurmenace/community-highlighter/releases/latest';
+  const downloadUrl = 'https://github.com/amateurmenace/control-z/releases';
   
   return (
     <div style={{
@@ -171,7 +171,7 @@ export function DesktopAppInlinePrompt({ feature = 'this feature' }) {
  * Locked button component for cloud mode
  */
 export function LockedButton({ children, onClick, style = {} }) {
-  const downloadUrl = 'https://github.com/amateurmenace/community-highlighter/releases/latest';
+  const downloadUrl = 'https://github.com/amateurmenace/control-z/releases';
   
   return (
     <button

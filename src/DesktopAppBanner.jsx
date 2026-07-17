@@ -51,7 +51,7 @@ export function useCloudMode() {
 export function DesktopAppBanner({ onDismiss }) {
   const [isCloudMode, setIsCloudMode] = useState(false);
   const [dismissed, setDismissed] = useState(false);
-  const downloadUrl = 'https://github.com/amateurmenace/community-highlighter/releases/latest';
+  const downloadUrl = 'https://github.com/amateurmenace/control-z/releases';
   
   useEffect(() => {
     // Check if running in cloud mode
@@ -104,7 +104,7 @@ export function DesktopAppBanner({ onDismiss }) {
         textAlign: 'center',
       }}>
         <div style={{ fontSize: '13px', color: '#666', lineHeight: '1.5' }}>
-          YouTube blocks video downloads from cloud-hosted servers like ours. The desktop app downloads directly from your computer — no restrictions, full quality, and your videos stay private.
+          YouTube blocks video downloads from cloud-hosted servers like ours. Community Highlighter ships inside control-z Suite — a free desktop app that downloads directly from your computer, so there are no restrictions, full quality, and your videos stay private.
         </div>
         <button 
           onClick={handleDownload}
@@ -119,7 +119,7 @@ export function DesktopAppBanner({ onDismiss }) {
             fontSize: '14px',
           }}
         >
-          Download Desktop App
+          Download control-z Suite
         </button>
         <button 
           onClick={handleDismiss}
@@ -143,7 +143,7 @@ export function DesktopAppBanner({ onDismiss }) {
  * Inline prompt for clip sections when feature is unavailable
  */
 export function DesktopAppInlinePrompt({ feature = 'this feature' }) {
-  const downloadUrl = 'https://github.com/amateurmenace/community-highlighter/releases/latest';
+  const downloadUrl = 'https://github.com/amateurmenace/control-z/releases';
   
   return (
     <div style={{
@@ -159,7 +159,7 @@ export function DesktopAppInlinePrompt({ feature = 'this feature' }) {
         Desktop App Required for {feature}
       </div>
       <div style={{ color: '#4a4a4a', fontSize: '13px', marginBottom: '8px', lineHeight: '1.5' }}>
-        YouTube actively blocks video downloads from cloud server IP addresses. The desktop app runs on your computer, so downloads work without restrictions and your videos stay private on your machine.
+        YouTube actively blocks video downloads from cloud server IP addresses. control-z Suite (which now includes Community Highlighter) runs on your computer, so downloads work without restrictions and your videos stay private on your machine.
       </div>
       <div style={{ color: '#6b7280', fontSize: '12px', marginBottom: '12px', lineHeight: '1.4' }}>
         You can still use the web app to analyze transcripts, search meetings, build clip timelines, and share interactive reel links.
@@ -187,7 +187,7 @@ export function DesktopAppInlinePrompt({ feature = 'this feature' }) {
  * Locked button component for cloud mode
  */
 export function LockedButton({ children, onClick, style = {} }) {
-  const downloadUrl = 'https://github.com/amateurmenace/community-highlighter/releases/latest';
+  const downloadUrl = 'https://github.com/amateurmenace/control-z/releases';
   
   return (
     <button

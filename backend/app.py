@@ -1651,17 +1651,19 @@ async def system_status():
         },
         "desktop_app": {
             "required_for": ["video_clips", "highlight_reels"] if CLOUD_MODE else [],
-            "download_url": "https://github.com/amateurmenace/community-highlighter/releases",
+            "name": "control-z Suite",
+            "note": "Community Highlighter ships as one of the tools in the free, open-source control-z Suite.",
+            "download_url": "https://github.com/amateurmenace/control-z/releases",
             "platforms": {
                 "mac": {
-                    "name": "macOS",
-                    "filename": "CommunityHighlighter-mac.zip",
-                    "requirements": "macOS 10.15 or later"
+                    "name": "macOS (Apple Silicon)",
+                    "filename": "control-z-suite-macos-arm64.dmg",
+                    "requirements": "macOS 12 or later, Apple Silicon"
                 },
                 "windows": {
-                    "name": "Windows",
-                    "filename": "CommunityHighlighter-windows.zip",
-                    "requirements": "Windows 10 or later"
+                    "name": "Windows (coming soon)",
+                    "filename": "",
+                    "requirements": "Windows build in progress"
                 }
             }
         }

@@ -7456,7 +7456,7 @@ export default function App() {
       {/* Cloud CTA banner — top of page */}
       {isCloudMode && !videoId && (
         <div className="cloud-cta-banner">
-          For the best experience, including downloading video straight from YouTube, get the free Desktop app.
+          For the best experience, including downloading video straight from YouTube, get the free control-z Suite desktop app — Community Highlighter is one of its tools.
           <a href="#why-desktop" onClick={(e) => { e.preventDefault(); document.getElementById('why-desktop')?.scrollIntoView({ behavior: 'smooth' }); }}>
             Learn more below
           </a>
@@ -7866,11 +7866,11 @@ export default function App() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px' }}>
               <div style={{ flex: 1, minWidth: '280px' }}>
                 <h3 style={{ margin: '0 0 10px 0', fontSize: '20px', fontWeight: 700 }}>
-                  What are the advantages of the desktop version?
+                  Get the desktop app — now part of control-z
                 </h3>
                 <p style={{ margin: '0 0 12px 0', fontSize: '14px', color: 'rgba(255,255,255,0.85)', maxWidth: '560px', lineHeight: '1.5' }}>
                   YouTube blocks video downloads from cloud server IP addresses (like the ones hosting this web app).
-                  The desktop app runs on <strong style={{ color: '#86efac' }}>your computer</strong>, so downloads work without restrictions and your videos stay private.
+                  Community Highlighter now ships inside <strong style={{ color: '#86efac' }}>control-z</strong> — a free, open-source desktop suite that runs on <strong style={{ color: '#86efac' }}>your computer</strong>, so downloads work without restrictions and your videos stay private.
                 </p>
                 <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: 'rgba(255,255,255,0.75)', maxWidth: '560px', lineHeight: '1.5' }}>
                   However, we've still got some tricks up our sleeves, including the ability to share edited reels without downloading anything, and some others we'd rather not share{' '}
@@ -7893,15 +7893,16 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                <a href="https://github.com/amateurmenace/community-highlighter/releases/latest" target="_blank" rel="noopener noreferrer"
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-start' }}>
+                <a href="https://github.com/amateurmenace/control-z/releases" target="_blank" rel="noopener noreferrer"
                   style={{ padding: '12px 24px', background: 'white', color: '#1e7f63', borderRadius: '10px', textDecoration: 'none', fontWeight: 700, fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}>
-                  Download for macOS
+                  Download control-z Suite
                 </a>
-                <a href="https://github.com/amateurmenace/community-highlighter/releases/latest" target="_blank" rel="noopener noreferrer"
-                  style={{ padding: '12px 24px', background: 'rgba(255,255,255,0.15)', color: 'white', borderRadius: '10px', textDecoration: 'none', fontWeight: 600, fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px', border: '1.5px solid rgba(255,255,255,0.3)', whiteSpace: 'nowrap' }}>
-                  Download for Windows
-                </a>
+                <button onClick={() => setShowAboutPage(true)}
+                  style={{ padding: '12px 24px', background: 'rgba(255,255,255,0.15)', color: 'white', borderRadius: '10px', border: '1.5px solid rgba(255,255,255,0.3)', fontWeight: 600, fontSize: '14px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  How to install &amp; use
+                </button>
+                <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>macOS · Apple Silicon · Windows coming soon</span>
               </div>
             </div>
           </section>
@@ -8658,14 +8659,14 @@ export default function App() {
                       {/* Desktop App CTA (cloud only) */}
                       {isCloudMode && (
                         <div style={{ marginBottom: '12px' }}>
-                          <a href="https://github.com/amateurmenace/community-highlighter/releases/latest" target="_blank" rel="noopener noreferrer"
+                          <a href="https://github.com/amateurmenace/control-z/releases" target="_blank" rel="noopener noreferrer"
                             style={{ display: 'inline-block', padding: '8px 16px', background: '#0f172a', color: '#fff', borderRadius: 8, fontSize: '12px', fontWeight: 600, textDecoration: 'none', transition: 'background 0.15s' }}
                             onMouseEnter={e => e.target.style.background = '#1e293b'}
                             onMouseLeave={e => e.target.style.background = '#0f172a'}
                           >
-                            Download Desktop App
+                            Download control-z Suite
                           </a>
-                          <span style={{ fontSize: '10px', color: '#94a3b8', marginLeft: 8 }}>Required to download and render video files</span>
+                          <span style={{ fontSize: '10px', color: '#94a3b8', marginLeft: 8 }}>control-z Suite (macOS) — required to download and render video files</span>
                         </div>
                       )}
 
@@ -8773,13 +8774,13 @@ export default function App() {
               {/* Social media vertical video CTA */}
               <div style={{ textAlign: 'center', marginTop: 6, marginBottom: 8 }}>
                 {isCloudMode ? (
-                  <a href="https://github.com/amateurmenace/community-highlighter/releases/latest" target="_blank" rel="noopener noreferrer"
+                  <a href="https://github.com/amateurmenace/control-z/releases" target="_blank" rel="noopener noreferrer"
                     style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, color: '#94a3b8', background: '#1a2332', border: '1px solid #334155', borderRadius: 8, textDecoration: 'none', transition: 'all 0.2s' }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = '#4ade80'; e.currentTarget.style.color = '#e2e8f0'; }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = '#334155'; e.currentTarget.style.color = '#94a3b8'; }}
                   >
                     <span style={{ fontSize: 16 }}>📱</span>
-                    Download the desktop app to save and auto reformat to vertical video for social media
+                    Get control-z Suite (desktop) to save and auto-reformat to vertical video for social media
                   </a>
                 ) : (
                   <button onClick={() => buildReel('social')} disabled={loading.reel || loading.summary}
@@ -8886,8 +8887,8 @@ export default function App() {
                         a.download = `${(videoTitle || videoId).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40)}.chreel`;
                         a.click();
                         URL.revokeObjectURL(url);
-                        addToast('💻 Reel plan downloaded — open in the desktop app to render as video');
-                      }} title="Download reel plan file to render in the desktop app">
+                        addToast('💻 Reel plan downloaded — open it in control-z Suite (desktop) to render as video');
+                      }} title="Download a .chreel reel plan to render in control-z Suite (desktop)">
                         <span>💻</span>
                         <span>Render in Desktop App</span>
                       </button>
@@ -9829,9 +9830,9 @@ export default function App() {
                       ) : (
                         <button
                           className="btn animate-hover"
-                          onClick={() => window.open('https://github.com/amateurmenace/community-highlighter/releases/latest', '_blank')}
+                          onClick={() => window.open('https://github.com/amateurmenace/control-z/releases', '_blank')}
                           style={{ background: '#e2e8f0', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-                          title="Too many clips for cloud — download desktop app for unlimited export"
+                          title="Too many clips for cloud — get control-z Suite (desktop) for unlimited export"
                         >
                           {t.exportClips} (6+ clips: Desktop only)
                         </button>
@@ -10245,20 +10246,20 @@ export default function App() {
 
                 <button
                   className="btn-full-width btn-muted-primary"
-                  onClick={() => isCloudMode ? window.open('https://github.com/amateurmenace/community-highlighter/releases/latest', '_blank') : buildReel('combined')}
+                  onClick={() => isCloudMode ? window.open('https://github.com/amateurmenace/control-z/releases', '_blank') : buildReel('combined')}
                   disabled={loading.reel}
                   style={isCloudMode ? { opacity: 0.6, cursor: 'pointer' } : {}}
-                  title={isCloudMode ? 'Download desktop app for video export' : ''}
+                  title={isCloudMode ? 'Get control-z Suite (desktop) for video export' : ''}
                 >
                   {isCloudMode ? '🔒 ' : ''}{t.buildReel}
                 </button>
 
                 <button
                   className="btn-full-width btn-muted-social"
-                  onClick={() => isCloudMode ? window.open('https://github.com/amateurmenace/community-highlighter/releases/latest', '_blank') : buildReel('social')}
+                  onClick={() => isCloudMode ? window.open('https://github.com/amateurmenace/control-z/releases', '_blank') : buildReel('social')}
                   disabled={loading.reel}
                   style={isCloudMode ? { opacity: 0.6, cursor: 'pointer' } : {}}
-                  title={isCloudMode ? 'Download desktop app for video export' : ''}
+                  title={isCloudMode ? 'Get control-z Suite (desktop) for video export' : ''}
                 >
                   {isCloudMode ? '🔒 ' : ''}Social Media Reel (Vertical)
                 </button>
@@ -10294,7 +10295,7 @@ export default function App() {
                     e.preventDefault();
                     e.stopPropagation();
                     if (isCloudMode) {
-                      window.open('https://github.com/amateurmenace/community-highlighter/releases/latest', '_blank');
+                      window.open('https://github.com/amateurmenace/control-z/releases', '_blank');
                       return;
                     }
                     if (!videoId) {
@@ -10324,7 +10325,7 @@ export default function App() {
                     }
                   }}
                   style={isCloudMode ? { opacity: 0.6, cursor: 'pointer' } : {}}
-                  title={isCloudMode ? 'Download desktop app for video export' : ''}
+                  title={isCloudMode ? 'Get control-z Suite (desktop) for video export' : ''}
                 >
                   {isCloudMode ? '🔒 ' : ''}{t.downloadVideo}
                 </button>

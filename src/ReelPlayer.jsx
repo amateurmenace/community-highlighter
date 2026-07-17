@@ -130,8 +130,8 @@ export default function ReelPlayer({ videoId, clips, showLabels = true, onOpenEd
           <div className="reel-end-actions">
             <button className="reel-end-replay-btn" onClick={handleReplay}>Replay</button>
             <button className="reel-end-editor-btn" onClick={() => { window.location.href = editorUrl; }}>Open in Editor</button>
-            <a className="reel-end-desktop-btn" href="https://github.com/amateurmenace/community-highlighter/releases/latest" target="_blank" rel="noopener noreferrer">
-              Download Desktop App
+            <a className="reel-end-desktop-btn" href="https://github.com/amateurmenace/control-z/releases" target="_blank" rel="noopener noreferrer">
+              Download control-z Suite
             </a>
           </div>
 
@@ -173,7 +173,7 @@ export default function ReelPlayer({ videoId, clips, showLabels = true, onOpenEd
           </div>
 
           <p style={{ marginTop: 14, fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>
-            Render as a real MP4 video with captions, transitions, and effects using the desktop app
+            Render as a real MP4 video with captions, transitions, and effects using control-z Suite (the free desktop app)
           </p>
         </div>
         <div className="reel-player-branding">Powered by Community Highlighter</div>
